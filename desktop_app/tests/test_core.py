@@ -39,10 +39,12 @@ class ProtocolTests(unittest.TestCase):
         body = b"HAP1 CMD 1 HELLO"
         with self.assertRaisesRegex(ValueError, "版本"):
             decode(body + f"*{binascii.crc_hqx(body, 0xFFFF):04X}\n".encode())
-        self.assertEqual(encode("CMD", 1, "HELLO"), b"HAP2 CMD 1 HELLO*B3CE\n")
+        with self.assertRaisesRegex(ValueError, "版本"):
+            decode(b"HAP2 CMD 1 HELLO*B3CE\n")
+        self.assertEqual(encode("CMD", 1, "HELLO"), b"HAP3 CMD 1 HELLO*F6AD\n")
 
     def test_duplicate_field_is_rejected_even_with_correct_crc(self):
-        body = b"HAP2 CMD 1 MODE value=LOCAL value=REMOTE"
+        body = b"HAP3 CMD 1 MODE value=LOCAL value=REMOTE"
         with self.assertRaises(ValueError):
             decode(body + f"*{binascii.crc_hqx(body, 0xFFFF):04X}\n".encode())
 

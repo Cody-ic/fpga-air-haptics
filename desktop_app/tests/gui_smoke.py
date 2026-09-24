@@ -19,7 +19,6 @@ import tkinter as tk
 from desktop_app.app import App
 from desktop_app.controller import Session
 from desktop_app.transport import DemoTransport
-from desktop_app.editor import MAX_EDITOR_POINTS
 from desktop_app.model import ARRAY_PRESETS, Config, SHAPES, encode_points, trajectory_point
 
 
@@ -31,7 +30,7 @@ def main():
     root.geometry("1380x920+25+25")
     errors = []
     steps = []
-    deadline = time.monotonic() + 40
+    deadline = time.monotonic() + 60
     custom = None
     running_position = None
     running_sample = None
@@ -53,7 +52,8 @@ def main():
     def fail(error):
         errors.append(str(error))
         traceback.print_exc()
-        app.close()
+        with patch("desktop_app.app.messagebox.askyesnocancel", return_value=False):
+            app.close()
 
     root.report_callback_exception = lambda kind, value, tb: fail("".join(traceback.format_exception(kind, value, tb)))
 
@@ -88,47 +88,122 @@ def main():
         single = Config(shape="CUSTOM", path_xy_um="13237:-17123")
         app.set_config(single)
         check(app.get_config() == single, "One-node custom figure survives UI roundtrip")
-        app.set_config(replace(single, path_xy_um=encode_points([(i*200-6400, i*137-4384) for i in range(MAX_EDITOR_POINTS)])))
-        x, y = app.editor.to_screen((22000, -21000))
-        app.editor.press(SimpleNamespace(x=x, y=y))
-        app.editor.release(None)
-        check(len(app.editor.points) == MAX_EDITOR_POINTS, "Editor prevents a 65th control point")
-        try:
-            app.set_config(replace(single, path_xy_um=encode_points([(i, -i) for i in range(MAX_EDITOR_POINTS+1)])))
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("Imported paths must respect the editor point limit")
         app.set_config(Config())
         app.tabs.select(app.editor_tab)
         root.update_idletasks()
-        app.editor.draw()
-        expected = []
-        for point in ((-18123, -13789), (21671, -14235), (17333, 22879), (-19613, 19487)):
-            x, y = map(round, app.editor.to_screen(point))
-            expected.append(app.editor.from_screen(x, y))
-            app.editor.canvas.event_generate("<Button-1>", x=x, y=y)
-            app.editor.canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
-        check(app.editor.points == expected, "Clicks preserve arbitrary coordinates without snapping")
-        check(any(x % 1000 or y % 1000 for x, y in expected), "Non-grid coordinates survive")
-        check(app.vars["shape"].get() == SHAPES["CUSTOM"], "Drawing selects custom figure")
-        x, y = app.editor.locations[0]
-        app.editor.press(SimpleNamespace(x=x, y=y))
-        target_x, target_y = app.editor.to_screen((-19723, -16451))
-        app.editor.motion(SimpleNamespace(x=target_x, y=target_y))
-        app.editor.release(None)
-        check(app.editor.points[0] == (-19723, -16451), "Drag moves freely")
-        app.editor.undo()
-        check(app.editor.points == expected, "Undo restores coordinate drag")
-        x, y = app.editor.locations[-1]
-        app.editor.remove(SimpleNamespace(x=x, y=y))
-        check(len(app.editor.points) == 3, "Right-click deletes point")
-        app.editor.undo()
-        app.editor.selected = 0
-        app.editor.x_entry.set("-18.321")
-        app.editor.y_entry.set("-13.579")
-        app.editor.move_coordinates()
-        check(app.editor.points[0] == (-18321, -13579), "Exact coordinate editing")
+        editor = app.editor
+
+        def event(point):
+            x, y = editor.to_screen(point)
+            return SimpleNamespace(x=x, y=y, state=0)
+
+        def tool(name):
+            editor.tool.set(name)
+            editor.choose_tool()
+
+        def click(point):
+            editor.press(event(point))
+            editor.release(event(point))
+
+        tool('rectangle')
+        editor.press(event((-18.123, -13.789)))
+        editor.motion(event((17.321, 15.987)))
+        editor.release(event((17.321, 15.987)))
+        check(len(editor.sketch.edges) == 4, 'Drag rectangle creates four editable edges')
+        np.testing.assert_allclose(editor.sketch.nodes[0], [-18.123, -13.789])
+        editor.finish()
+        editor.select_contour(event((0, -13.789)))
+        check(len(editor.selected) == 4, 'Double-click selects the entire rectangle')
+        check(tuple(editor.dimension_picker['values']) == ('宽度', '高度'), 'Whole contour only offers span dimensions')
+        check('水平' in editor.dimension_hint.get(), 'Width clearly describes the horizontal span')
+        editor.size_kind.set('宽度')
+        editor.size_value.set('32.125')
+        editor.dimension()
+        editor.size_kind.set('高度')
+        editor.size_value.set('25')
+        editor.dimension()
+        check(editor.canvas.find_withtag('dimension'), 'Assigned dimensions appear on drawing')
+        before_move = np.array(editor.sketch.nodes[:4])
+        first_curve = editor.sketch.curve(editor.sketch.edge(1))
+        midpoint = first_curve.point(.5)
+        tool('move')
+        editor.press(event(midpoint))
+        editor.motion(event(midpoint+np.array([1, 1])))
+        editor.release(event(midpoint+np.array([1, 1])))
+        np.testing.assert_allclose(np.array(editor.sketch.nodes[:4])-before_move, np.ones((4, 2)), atol=.002)
+        editor.undo()
+        editor.finish()
+        editor.selected = [1]
+        editor.refresh()
+        editor.size_kind.set('长度')
+        editor.size_value.set('32.125')
+        editor.dimension()
+        check(editor.sketch.constraints[-1]['value'] == 32.125, 'Dimension becomes persistent geometry relation')
+        original = editor.signature()
+        editor.add_relation('vertical')
+        check(editor.signature() == original, 'Conflicting relation is rejected without changing draft')
+        tool('circle')
+        click((24, 4))
+        click((29, 4))
+        check(len(editor.sketch.groups) == 2, 'Independent circle does not replace rectangle')
+        check(editor.size_kind.get() == '直径' and '两倍半径' in editor.dimension_hint.get(), 'Circle diameter is explicit')
+        editor.size_value.set('10')
+        editor.dimension()
+        tool('polyline')
+        for point in ((-20, -22), (20, -22)):
+            click(point)
+        editor.finish()
+        line = editor.sketch.edges[-1]['id']
+        editor.selected = [line]
+        editor.press(event((0, -22)))
+        editor.motion(event((0, -16)))
+        editor.release(event((0, -16)))
+        check(editor.sketch.edge(line)['bend'] > .2, 'Drag straight edge into circular arc')
+        curved = editor.signature()
+        editor.undo()
+        check(abs(editor.sketch.edge(line)['bend']) < 1e-9, 'Undo bend')
+        editor.redo()
+        check(editor.signature() == curved, 'Redo restores bend')
+        tool('bezier')
+        for point in ((-20, 22), (-12, 28), (12, 8), (20, 22)):
+            click(point)
+        bezier = editor.sketch.edges[-1]
+        check(bezier['controls'] is not None, 'Control-point curve is created')
+        handle = bezier['controls'][0]
+        editor.selected = [bezier['id']]
+        editor.press(event(editor.sketch.nodes[handle]))
+        editor.motion(event((-10, 26)))
+        editor.release(event((-10, 26)))
+        np.testing.assert_allclose(editor.sketch.nodes[handle], [-10, 26])
+        editor.scale_value.set('1.1')
+        editor.scale_all()
+        check(any(c['kind'] == 'length' and abs(c['value']-32.125*1.1) < 1e-8 for c in editor.sketch.constraints), 'Scaling updates assigned dimensions')
+        check(any(c['kind'] == 'diameter' and abs(c['value']-11) < 1e-8 for c in editor.sketch.constraints), 'Scaling updates circle diameter')
+        original = editor.signature()
+        editor.order_list.selection_set(1)
+        editor.reorder(-1)
+        check(editor.sketch.order[0] == 1, 'User can place second contour first')
+        editor.order_auto.set(True)
+        editor.auto_order()
+        check(not editor.sketch.order, 'Skip ordering restores automatic order')
+        tool('erase')
+        circle = next(e for e in editor.sketch.edges if e['radius'] is not None)
+        center = editor.sketch.nodes[circle['a']]
+        click((center[0]+circle['radius'], center[1]))
+        check(all(e['id'] != circle['id'] for e in editor.sketch.edges), 'Eraser deletes selected circle')
+        editor.undo()
+        check(any(e['id'] == circle['id'] for e in editor.sketch.edges), 'Undo restores erased geometry and order')
+        app.preview_sketch()
+        root.update_idletasks()
+        check(app.preset_preview.canvas.find_withtag('hand_reference'), 'Sketch preview uses hand illustration')
+        check(len(app.preset_preview.canvas.find_withtag('preview_path')) >= 4, 'Preview keeps disconnected contours separate')
+        capture('demo-sketch-preview.png')
+        app.tabs.select(app.editor_tab)
+        editor.finish()
+        editor.fit()
+        editor.selected = editor.sketch.groups[0][:]
+        editor.refresh()
+        capture('demo-sketch-dimensions.png')
         custom = app.get_config()
         app.editor.zoom(.8)
         root.geometry("1200x820+25+25")
@@ -144,11 +219,56 @@ def main():
         filename = runtime / "smoke-config.json"
         with patch("desktop_app.app.filedialog.asksaveasfilename", return_value=str(filename)):
             app.save_custom()
-        app.editor.clear()
-        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(filename)):
+        with patch('desktop_app.sketch_editor.messagebox.askyesno', return_value=True):
+            app.editor.clear()
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(filename)), \
+                patch("desktop_app.app.messagebox.askyesnocancel", return_value=False):
             app.load_config()
         check(app.get_config() == custom, "File roundtrip")
         check(not app.debug_mode.get(), "Loading a figure stays in user mode")
+        check(app.current_file == filename and not app.draft_dirty(), "Import tracks current saved file")
+        # Invalid input and cancelled replacement preserve both draft and file identity.
+        invalid = runtime / "invalid.json"
+        invalid.write_text('{"schema":"wrong"}', encoding="utf-8")
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(invalid)), \
+                patch("desktop_app.app.messagebox.showerror") as error:
+            app.load_config()
+            check(error.called, "Invalid import is explained")
+        check(app.get_config() == custom and app.current_file == filename, "Invalid import preserves current document")
+        app.vars["cx_um"].set("1")
+        draft = app.get_config()
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(filename)), \
+                patch("desktop_app.app.messagebox.askyesnocancel", return_value=None):
+            app.load_config()
+            app.close()
+        check(app.get_config() == draft and not app.closing, "Cancel import or close retains edits")
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(filename)), \
+                patch("desktop_app.app.messagebox.askyesnocancel", return_value=True), \
+                patch("desktop_app.app.filedialog.asksaveasfilename", return_value=""):
+            app.load_config()
+        check(app.get_config() == draft, "Cancel saving also cancels replacement")
+        original = filename.read_bytes()
+        with patch("desktop_app.app.filedialog.asksaveasfilename", return_value=str(filename)), \
+                patch("desktop_app.app.os.replace", side_effect=OSError("disk unavailable")), \
+                patch("desktop_app.app.messagebox.showerror"):
+            check(not app.save_config(), "Failed save is reported")
+        check(filename.read_bytes() == original and app.draft_dirty(), "Failed save preserves original bytes and dirty state")
+        backup = runtime / "edited-copy.json"
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(filename)), \
+                patch("desktop_app.app.messagebox.askyesnocancel", return_value=True), \
+                patch("desktop_app.app.filedialog.asksaveasfilename", return_value=str(backup)):
+            app.load_config()
+        check(json.loads(backup.read_text(encoding="utf-8"))["config"] == draft.wire(), "Save before import retains previous edits")
+        check(app.get_config() == custom and not app.draft_dirty(), "Successful import becomes clean")
+        app.vars["cx_um"].set("1")
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(backup)), \
+                patch("desktop_app.app.messagebox.askyesnocancel", return_value=True), \
+                patch("desktop_app.app.filedialog.asksaveasfilename", return_value=str(backup)):
+            app.vars["cx_um"].set("2")
+            app.load_config()
+        check(app.get_config().cx_um == 2000, "Import rereads a file saved from the replacement prompt")
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(filename)):
+            app.load_config()
         capture("demo-editor.png")
         app.demo_array_choice.set("8 × 8 · 64 路")
         app.select_hardware()
@@ -205,7 +325,15 @@ def main():
     def visible_moving():
         check(app.playback.position_mm != running_position, "Marker visibly moves as feedback arrives")
         check(app.playback.position_mm == app.state.focus_mm[:2], "No locally invented position")
+        check(app.playback.canvas.find_withtag("hand_reference"), "Hand illustration is visible")
+        x, y = app.playback.screen(app.state.focus_mm[:2])
+        marker = app.playback.canvas.coords(app.playback.marker)
+        np.testing.assert_allclose([(marker[0]+marker[2])/2, (marker[1]+marker[3])/2], [x, y])
         capture("demo-playback.png")
+        app.playback.update_state(replace(app.state, scan_on=False, output=False), True, '切换线段')
+        check(app.playback.position_mm is None, 'Blank travel never shows an active tactile marker')
+        check('切换' in app.playback.message.get(), 'Blank travel is explained')
+        app.playback.update_state(app.state, True, '正在播放')
         app.playback.pause_button.invoke()
 
     def visible_paused():
@@ -227,7 +355,7 @@ def main():
         payload = app.actual_plot.last_payload
         check(payload[1].count == 64, "Render installed phase dimensions")
         check(payload[0] == custom, "Render design path separately")
-        np.testing.assert_allclose(trajectory_point(custom, 0)[:2], np.array(custom.points_um()[0])/1000)
+        np.testing.assert_allclose(trajectory_point(custom, 0)[:2], np.array(custom.strokes_um()[0][0])/1000)
         snapshot_path = runtime / "smoke-phases.csv"
         with patch("desktop_app.app.filedialog.asksaveasfilename", return_value=str(snapshot_path)):
             app.export_snapshot()
@@ -243,6 +371,14 @@ def main():
 
     def local():
         check(app.playback.position_mm is None, "Stop removes active marker")
+        saved_state = app.state
+        with patch("desktop_app.app.filedialog.askopenfilename", return_value=str(runtime / "smoke-config.json")), \
+                patch("desktop_app.app.messagebox.askyesnocancel", return_value=False), \
+                patch.object(app.session, 'command', wraps=app.session.command) as commands:
+            app.load_config()
+            check(not commands.called, 'Import never sends a command')
+        check(app.state.config == saved_state.config and not app.busy, "Import leaves device contents unchanged")
+        check(str(app.start_button["state"]) == "disabled", "Imported document requires upload even with matching device contents")
         for code in SHAPES:
             if code == "CUSTOM":
                 continue
@@ -287,7 +423,7 @@ def main():
 
     def mute():
         check(len(app.state.phases) == 16, "4x4 actual readback")
-        check(app.state.config.points_um() == custom.points_um(), "4x4 preserves every point coordinate")
+        check(app.state.config.strokes_um() == custom.strokes_um(), "4x4 preserves every contour coordinate")
         app.debug_mode.set(False)
         app.toggle_debug()
         root.geometry("1100x780+25+25")
@@ -307,7 +443,8 @@ def main():
         check(app.playback.position_mm is None, "Lost feedback removes live marker")
         check(str(app.start_button["state"]) == "disabled", "Lost feedback disables playback")
         check(any("超时" in record["text"] for record in app.log_records), "Timeout reported")
-        app.close()
+        with patch("desktop_app.app.messagebox.askyesnocancel", return_value=False):
+            app.close()
 
     steps.extend([
         (lambda: True, start),
@@ -315,7 +452,7 @@ def main():
         (lambda: app.await_revision is not None, release_feedback),
         (lambda: app.state and app.state.revision == 1 and not app.busy, play),
         (lambda: app.state.output and not app.busy, visible_running),
-        (lambda: app.state.sample > running_sample + 2, visible_moving),
+        (lambda: app.state.sample > running_sample + 2 and app.state.output, visible_moving),
         (lambda: app.state.state == "PAUSED" and not app.busy, visible_paused),
         (lambda: app.state.sample > paused_sample, resume),
         (lambda: app.state.output and not app.busy, show_debug),

@@ -108,7 +108,7 @@ class Session(threading.Thread):
                 if int(frame.fields.get("hb_ms", 0)) < 2000:
                     raise RuntimeError("设备心跳超时要求过短")
                 self.limits = {key: int(frame.fields.get(key, 0)) for key in
-                               ("max_rows", "max_cols", "max_channels", "max_nodes")}
+                               ("max_rows", "max_cols", "max_channels", "max_nodes", "max_scan_points", "max_strokes")}
                 if any(value <= 0 for value in self.limits.values()):
                     raise RuntimeError("设备未报告阵列及路径容量")
                 self.capabilities = capabilities
@@ -195,6 +195,10 @@ class Session(threading.Thread):
                                 if config.path_xy_um != "NONE" and ("CUSTOM_XY" not in self.capabilities
                                         or len(config.points_um()) > self.limits["max_nodes"]):
                                     raise ValueError("设备不支持此自定义路径")
+                                if config.scan_paths != 'NONE' and ('SCAN_PATHS' not in self.capabilities
+                                        or len(config.strokes_um()) > self.limits['max_strokes']
+                                        or sum(map(len, config.strokes_um())) > self.limits['max_scan_points']):
+                                    raise ValueError("设备不支持此草图或路径超出容量")
                                 fields = dict(fields, **self.array.wire())
                             self._write(transport, verb, fields)
                         except ValueError as error:

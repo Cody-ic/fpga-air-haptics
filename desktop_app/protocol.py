@@ -6,10 +6,10 @@ import re
 
 from .model import ArraySpec, Config, MODES, STATES
 
-MAX_LINE = 4096
-VERSION = 2
-MAGIC = "HAP2"
-TOKEN = re.compile(r"^[A-Za-z0-9_,.?:+\-]+$")
+MAX_LINE = 8192
+VERSION = 3
+MAGIC = "HAP3"
+TOKEN = re.compile(r"^[A-Za-z0-9_,.?:+|\-]+$")
 
 
 @dataclass(frozen=True)
@@ -110,6 +110,8 @@ class Snapshot:
     phases: tuple
     simulated: bool
     reason: str
+    scan_on: bool
+    stroke_index: int
 
     @classmethod
     def parse(cls, fields):
@@ -120,7 +122,14 @@ class Snapshot:
         if fields["output"] not in ("0", "1") or fields["simulated"] not in ("0", "1"):
             raise ValueError("输出标志非法")
         output = fields["output"] == "1"
-        if output and (fields["state"] != "RUNNING" or config.level == 0):
+        if fields.get('scan_on') not in ('0', '1'):
+            raise ValueError("缺少有效扫描开关")
+        scan_on = fields['scan_on'] == '1'
+        stroke = int(fields['stroke_index'])
+        count = len(config.strokes_um()) if config.shape == 'CUSTOM' and config.scan_paths != 'NONE' else 1
+        if not 0 <= stroke < count:
+            raise ValueError("回读线段序号无效")
+        if output and (fields["state"] != "RUNNING" or config.level == 0 or not scan_on):
             raise ValueError("输出使能与状态矛盾")
         focus = tuple(int(fields[key]) / 1000 for key in ("fx_um", "fy_um", "fz_um"))
         if not (-400 <= focus[0] <= 400 and -400 <= focus[1] <= 400 and 20 <= focus[2] <= 300):
@@ -132,4 +141,4 @@ class Snapshot:
         if min(counters) < 0 or not fields["boot"]:
             raise ValueError("状态计数非法")
         return cls(fields["boot"], *counters, fields["mode"], fields["state"], output,
-                   config, array, focus, phases, fields["simulated"] == "1", fields.get("reason", "NONE"))
+                   config, array, focus, phases, fields["simulated"] == "1", fields.get("reason", "NONE"), scan_on, stroke)

@@ -5,9 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import csv
 import json
+import os
 from pathlib import Path
 import queue
 import sys
+import tempfile
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -20,8 +22,9 @@ from matplotlib.figure import Figure
 import numpy as np
 
 from .controller import Session
-from .model import ArraySpec, ARRAY_PRESETS, Config, SHAPES, array_coordinates, config_from_document, encode_points, field_slice, focus_phases, trajectory_path, trajectory_point
-from .editor import PathEditor
+from .model import ArraySpec, ARRAY_PRESETS, Config, SHAPES, array_coordinates, config_from_document, field_slice, focus_phases, trajectory_path, trajectory_point
+from .sketch_editor import SketchEditor
+from .sketch import Sketch
 from .playback import PlaybackPanel
 from .presets import PresetPreview
 from .transport import available_ports
@@ -171,10 +174,15 @@ class App:
         self.hardware_line = tk.StringVar(value="实际阵列尚未由设备确认")
         self.syncing_geometry = False
         self.vars = {}
+        self.current_file = None
+        self.saved_signature = None
+        self.file_directory = Path.home()
+        self.file_line = tk.StringVar(value="未命名图形")
         self.size_label = tk.StringVar(value="预设图形半径 / mm")
         self._style()
         self._layout()
         self.set_config(Config())
+        self.saved_signature = self.draft_signature()
         for name in ("cx_um", "cy_um"):
             self.vars[name].trace_add("write", lambda *_: self.sync_editor())
         for variable in self.vars.values():
@@ -183,6 +191,8 @@ class App:
         self.tabs.select(self.editor_tab)
         self.toggle_debug()
         self.root.after(60, self.tick)
+        self.root.bind("<Control-o>", lambda _: self.load_config())
+        self.root.bind("<Control-s>", lambda _: self.save_config())
 
     def _style(self):
         style = ttk.Style(self.root)
@@ -232,7 +242,7 @@ class App:
         self.connect_button.pack(side="left", padx=(0, 6))
         self.disconnect_button = ttk.Button(connection, text="断开", command=self.disconnect)
         self.disconnect_button.pack(side="left")
-        self.protocol_label = ttk.Label(connection, text="HAP2 · 双向串口 · 8N1", style="Muted.TLabel")
+        self.protocol_label = ttk.Label(connection, text="HAP3 · 双向串口 · 8N1", style="Muted.TLabel")
         self.protocol_label.pack(side="right")
         ttk.Label(self.root, textvariable=self.status_line, style="Muted.TLabel", padding=(22,7),
                   wraplength=1040).pack(side="bottom", fill="x")
@@ -302,8 +312,10 @@ class App:
         actions.columnconfigure((0, 1), weight=1)
         self.apply_button = ttk.Button(actions, text="发送到设备", style="Primary.TButton", command=self.apply_config)
         self.apply_button.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ttk.Button(actions, text="打开图形", command=self.load_config).grid(row=1, column=0, sticky="ew", pady=5, padx=(0, 4))
+        ttk.Button(actions, text="导入图形", command=self.load_config).grid(row=1, column=0, sticky="ew", pady=5, padx=(0, 4))
         ttk.Button(actions, text="保存图形", command=self.save_config).grid(row=1, column=1, sticky="ew", pady=5, padx=(4, 0))
+        ttk.Label(actions, textvariable=self.file_line, style="Muted.TLabel", wraplength=290).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(2, 4))
         self.copy_button = ttk.Button(left, text="读取设备图形", command=self.copy_actual)
         self.copy_button.grid(row=4, column=0, sticky="ew")
         ttk.Label(left, textvariable=self.config_line, wraplength=295, style="Muted.TLabel").grid(row=5, column=0, sticky="w", pady=8)
@@ -394,7 +406,7 @@ class App:
         ttk.Label(forecast_tab, text="电脑期望参数的静态预览 · 不发送命令、不改变设备输出", style="Muted.TLabel", padding=8).pack(fill="x")
         self.forecast_plot = PlotPanel(forecast_tab)
         self.forecast_plot.pack(fill="both", expand=True)
-        self.editor = PathEditor(self.editor_tab, self.preview_custom, self.apply_custom, self.save_custom, self.load_config,
+        self.editor = SketchEditor(self.editor_tab, self.preview_sketch, self.apply_custom, self.save_custom, self.load_config,
                                  on_change=lambda: self.vars["shape"].set(SHAPES["CUSTOM"]))
         self.editor.pack(fill="both", expand=True)
         self._measurement_tab(measured_tab)
@@ -476,16 +488,25 @@ class App:
         self.measurement_canvas.get_tk_widget().pack(fill="both",expand=True)
         self.measurement_colorbar = None
 
-    def set_config(self, config):
+    def set_config(self, config, document=None):
         config.validate()
+        self.editor.set_config(config, document)
         self.syncing_geometry = True
         for name, variable in self.vars.items():
             value = getattr(config, name)
             variable.set(SHAPES[value] if name == "shape" else f"{value / self.scales[name]:g}")
         self.syncing_geometry = False
         self.sync_editor()
-        self.editor.set_path(config.points_um(), config.path_closed)
         self.refresh_pattern_preview()
+
+    def preview_sketch(self):
+        self.vars['shape'].set(SHAPES['CUSTOM'])
+        try:
+            config = self.get_config()
+            self.preset_preview.set_config(config)
+            self.tabs.select(self.preset_tab)
+        except (ValueError, OverflowError) as error:
+            messagebox.showerror('无法预览', str(error), parent=self.root)
 
     def choose_shape(self, code):
         self.vars["shape"].set(SHAPES[code])
@@ -556,8 +577,8 @@ class App:
                 if not np.isfinite(number) or abs(number - round(number)) > 1e-6:
                     raise ValueError(f"{name} 数值精度或格式不正确")
                 values[name] = round(number)
-        values["path_xy_um"] = encode_points(self.editor.points)
-        values["path_closed"] = int(self.editor.closed.get())
+        values.update(self.editor.config_fields())
+        values['blank_us'] = self.editor.blank_us
         return Config(**values).validate()
 
     def refresh_ports(self):
@@ -657,7 +678,7 @@ class App:
         self.send("CONFIG", **config.wire())
 
     def copy_actual(self):
-        if self.state:
+        if self.state and self.confirm_replace_draft("读取设备图形"):
             try:
                 self.set_config(self.state.config)
                 self.select_shape()
@@ -826,6 +847,7 @@ class App:
         self.root.after(80, self.tick)
 
     def update_controls(self):
+        self.update_file_line()
         alive = bool(self.session and self.session.is_alive())
         fresh = bool(self.ready and self.state and time.monotonic() - self.received < 1.6)
         remote = fresh and self.state.mode == "REMOTE"
@@ -854,7 +876,7 @@ class App:
         self.demo_array_picker.configure(state="readonly" if not alive and not serial_selected else "disabled")
         for entry in self.hw_entries:
             entry.configure(state="normal" if not alive and not serial_selected else "disabled")
-        self.editor.apply_button.configure(state="normal" if remote and idle and free and "CUSTOM_XY" in self.capabilities else "disabled")
+        self.editor.apply_button.configure(state="normal" if remote and idle and free and "SCAN_PATHS" in self.capabilities else "disabled")
         demo_live = self.ready and self.session and self.session.is_demo
         for button in self.demo_buttons:
             button.configure(state="normal" if demo_live else "disabled")
@@ -910,29 +932,102 @@ class App:
         self.playback.update_state(self.state, fresh, feedback)
         self.preset_preview.apply_button.configure(state=self.apply_button["state"])
 
+    def draft_signature(self):
+        # Include invalid/incomplete edits so they cannot be discarded silently.
+        return (tuple((name, var.get()) for name, var in self.vars.items()),
+                self.editor.signature(), self.editor.blank_us)
+
+    def draft_dirty(self):
+        return self.saved_signature is not None and self.draft_signature() != self.saved_signature
+
+    def update_file_line(self):
+        name = self.current_file.name if self.current_file else "未命名图形"
+        state = "有未保存的更改" if self.draft_dirty() else ("已保存" if self.current_file else "尚未保存")
+        self.file_line.set(f"{name} · {state}")
+
+    def confirm_replace_draft(self, action):
+        if not self.draft_dirty():
+            return True
+        answer = messagebox.askyesnocancel("保存图形", f"当前图形有未保存的更改，是否先保存再{action}？\n"
+                                           "选择“否”会放弃这些更改；选择“取消”保留当前图形。", parent=self.root)
+        if answer is None:
+            return False
+        return self.save_config() if answer else True
+
     def save_config(self):
+        temporary = None
         try:
             config = self.get_config()
-            filename = filedialog.asksaveasfilename(parent=self.root,defaultextension=".json",filetypes=[("配置 JSON","*.json")],initialfile="haptics-config.json")
-            if filename:
-                Path(filename).write_text(json.dumps({"schema":"haptics-config-2","config":config.wire()},ensure_ascii=False,indent=2),encoding="utf-8")
+            filename = filedialog.asksaveasfilename(parent=self.root, title="保存图形", defaultextension=".json",
+                                                   filetypes=[("触见图形 (*.json)", "*.json")],
+                                                   initialdir=str(self.file_directory),
+                                                   initialfile=self.current_file.name if self.current_file else "我的图形.json")
+            if not filename:
+                return False
+            target = Path(filename)
+            data = json.dumps({"schema":"haptics-config-3", "config":config.wire(),
+                               "sketch": self.editor.stored_document()}, ensure_ascii=False, indent=2)
+            if len(data.encode('utf-8')) > 65536:
+                raise ValueError('草图文件过大，请简化图形或移除不需要的关系。')
+            # Replace only after a complete write; a failed save keeps the previous file.
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent,
+                                             prefix=".haptics-", suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(data)
+            os.replace(temporary, target)
+            self.current_file, self.file_directory = target, target.parent
+            self.saved_signature = self.draft_signature()
+            self.update_file_line()
+            self.status_line.set(f"已保存：{target}。下次点击“导入图形”选择此文件。")
+            return True
         except (OSError, ValueError, OverflowError) as error:
             messagebox.showerror("保存失败",str(error),parent=self.root)
+            return False
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def read_config_file(filename):
+        path = Path(filename)
+        if path.stat().st_size > 65536:
+            raise ValueError("配置文件过大")
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        config = config_from_document(data)
+        document = data.get('sketch')
+        if document is not None:
+            sketch = Sketch.from_document(document)
+            from .model import encode_strokes
+            if encode_strokes(sketch.compile()[0]) != config.scan_paths:
+                raise ValueError('草图与扫描路径不一致，无法导入。')
+        return config, document
 
     def load_config(self):
-        filename = filedialog.askopenfilename(parent=self.root,filetypes=[("配置 JSON","*.json")])
+        filename = filedialog.askopenfilename(parent=self.root, title="导入已保存的图形",
+                                              initialdir=str(self.file_directory),
+                                              filetypes=[("触见图形 (*.json)", "*.json")])
         if not filename:
             return
         try:
-            if Path(filename).stat().st_size > 65536:
-                raise ValueError("配置文件过大")
-            data = json.loads(Path(filename).read_text(encoding="utf-8-sig"))
-            config = config_from_document(data)
-            self.set_config(config)
+            self.read_config_file(filename)  # Reject bad files before asking about edits.
+            if not self.confirm_replace_draft("导入"):
+                return
+            # Saving from the prompt may have replaced this same file.
+            config, document = self.read_config_file(filename)
+            self.set_config(config, document)
+            self.current_file = Path(filename)
+            self.file_directory = self.current_file.parent
+            self.saved_signature = self.draft_signature()
+            # Loading a document is distinct from the current device receipt.
+            self.confirmed_config = None
+            self.pending_config = None
             self.select_shape()
-            self.status_line.set("图形已打开，可继续编辑或发送到设备。")
+            self.status_line.set(f"已导入：{self.current_file.name}。检查图形后发送到设备，等待确认再播放。")
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-            messagebox.showerror("读取失败",str(error),parent=self.root)
+            messagebox.showerror("导入失败",str(error),parent=self.root)
 
     def export_snapshot(self):
         if not self.state:
@@ -992,6 +1087,8 @@ class App:
 
     def close(self):
         if self.closing:
+            return
+        if not self.confirm_replace_draft("关闭"):
             return
         self.closing=True
         if self.session:

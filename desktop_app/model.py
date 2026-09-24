@@ -13,6 +13,9 @@ import re
 
 import numpy as np
 
+MAX_SCAN_POINTS = 256
+MAX_STROKES = 32
+
 SHAPES = {"POINT": "固定点", "LINE_X": "水平线", "LINE_Y": "竖直线",
           "CIRCLE": "圆", "SQUARE": "正方形", "TRIANGLE": "三角形", "ARROW": "箭头", "CUSTOM": "自定义图形"}
 ARRAY_PRESETS = {"4 × 4 · 16 路": (4, 4), "6 × 6 · 36 路": (6, 6),
@@ -103,13 +106,15 @@ class Config:
     shape: str = "CIRCLE"
     path_xy_um: str = "NONE"
     path_closed: int = 1
+    scan_paths: str = "NONE"
+    blank_us: int = 2000
 
     def validate(self):
         limits = {"carrier_hz": (20000, 80000), "phase_steps": (8, 256),
                   "cx_um": (-100000, 100000), "cy_um": (-100000, 100000),
                   "z_um": (20000, 300000), "radius_um": (0, 80000),
                   "repeat_millihz": (10, 200000), "mod_hz": (0, 1000), "level": (0, 100),
-                  "path_closed": (0, 1)}
+                  "path_closed": (0, 1), "blank_us": (100, 100000)}
         for name, (lo, hi) in limits.items():
             value = getattr(self, name)
             if type(value) is not int or not lo <= value <= hi:
@@ -119,9 +124,17 @@ class Config:
         if self.shape not in SHAPES:
             raise ValueError("未知图形")
         points = self.points_um()
-        if self.shape == "CUSTOM" and not points:
-            raise ValueError("请先在画布上添加一个节点")
+        strokes = self.strokes_um()
+        if points and strokes:
+            raise ValueError("不能同时指定旧路径和多段草图")
+        if self.shape == "CUSTOM" and not (points or strokes):
+            raise ValueError("请先绘制图形")
+        if self.shape == 'CUSTOM' and strokes and self.blank_us*len(strokes)*self.repeat_millihz >= 1000000000:
+            raise ValueError("轮廓切换时间不足，请降低重复频率或减少独立线段。")
         return self
+
+    def strokes_um(self):
+        return decode_strokes(self.scan_paths)
 
     def points_um(self):
         """Signed local x:y coordinate pairs, in integer micrometres."""
@@ -150,7 +163,7 @@ class Config:
             if name not in fields:
                 raise ValueError(f"缺少配置字段 {name}")
             value = fields[name]
-            if name not in ("shape", "path_xy_um"):
+            if name not in ("shape", "path_xy_um", "scan_paths"):
                 # JSON booleans/floats must not silently become valid integers.
                 if not (type(value) is int or isinstance(value, str) and value.lstrip("-+").isdigit()):
                     raise ValueError(f"{name} 必须是整数")
@@ -170,10 +183,37 @@ def encode_points(points):
     return ",".join(f"{x}:{y}" for x, y in points) if points else "NONE"
 
 
+def encode_strokes(paths):
+    result = "|".join(encode_points(path) for path in paths) if paths else "NONE"
+    decode_strokes(result)
+    return result
+
+
+def decode_strokes(value):
+    if value == "NONE":
+        return ()
+    if not isinstance(value, str) or len(value) > MAX_SCAN_POINTS*16:
+        raise ValueError("草图路径格式无效")
+    paths = []
+    for raw in value.split('|'):
+        tokens = raw.split(',')
+        if any(not re.fullmatch(r'-?[0-9]{1,6}:-?[0-9]{1,6}', token) for token in tokens):
+            raise ValueError("草图路径坐标无效")
+        path = tuple(tuple(map(int, token.split(':'))) for token in tokens)
+        if any(abs(v) > 300000 for point in path for v in point) or any(a == b for a, b in zip(path, path[1:])):
+            raise ValueError("草图路径越界或存在重复相邻点")
+        paths.append(path)
+    if len(paths) > MAX_STROKES or sum(map(len, paths)) > MAX_SCAN_POINTS:
+        raise ValueError("草图超出路径容量，请简化图形。")
+    return tuple(paths)
+
+
 def config_from_document(data):
     """Read coordinate files or migrate existing grid files without moving points."""
-    if data.get("schema") == "haptics-config-2":
+    if data.get("schema") == "haptics-config-3":
         return Config.from_wire(data["config"])
+    if data.get("schema") == "haptics-config-2":
+        return Config.from_wire(dict({'scan_paths': 'NONE', 'blank_us': 2000}, **data["config"]))
     if data.get("schema") != "haptics-config-1":
         raise ValueError("配置版本不支持")
     fields = dict(data["config"])
@@ -192,6 +232,8 @@ def config_from_document(data):
             r, c = divmod(node, cols)
             points.append((round((c - (cols-1)/2)*pitch), round((r - (rows-1)/2)*pitch)))
     fields["path_xy_um"] = encode_points(points)
+    fields.setdefault('scan_paths', 'NONE')
+    fields.setdefault('blank_us', 2000)
     return Config.from_wire(fields)
 
 
@@ -225,6 +267,8 @@ def _polyline(points, fraction):
 
 
 def trajectory_point(config, seconds):
+    if config.shape == "CUSTOM" and config.scan_paths != "NONE":
+        return trajectory_sample(config, seconds)[0]
     fraction = seconds * config.repeat_millihz / 1000 % 1
     r = config.radius_um / 1000
     if config.shape == "CUSTOM":
@@ -258,15 +302,48 @@ def trajectory_point(config, seconds):
 
 
 def trajectory_path(config, samples=121):
+    if config.shape == "CUSTOM" and config.scan_paths != "NONE":
+        paths = trajectory_paths(config)
+        return np.concatenate([np.vstack((path, np.full((1, 3), np.nan))) for path in paths])[:-1]
     period = 1000 / config.repeat_millihz
     return np.array([trajectory_point(config, t) for t in np.linspace(0, period, samples)])
+
+
+def trajectory_paths(config):
+    if config.shape == 'CUSTOM' and config.scan_paths != 'NONE':
+        return [np.column_stack((np.array(path)/1000+np.array([config.cx_um, config.cy_um])/1000,
+                                 np.full(len(path), config.z_um/1000))) for path in config.strokes_um()]
+    return [trajectory_path(config)]
+
+
+def trajectory_sample(config, seconds):
+    """Return focus, scan gate and stroke index, including output-off transfers."""
+    if config.shape != 'CUSTOM' or config.scan_paths == 'NONE':
+        return trajectory_point(config, seconds), True, 0
+    paths = trajectory_paths(config)
+    period = 1000/config.repeat_millihz
+    blank = config.blank_us/1000000
+    active = period-len(paths)*blank
+    weights = [max(.1, float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum())) for path in paths]
+    offset = seconds % period
+    for index, (path, weight) in enumerate(zip(paths, weights)):
+        duration = active*weight/sum(weights)
+        if offset < duration:
+            return _polyline(path, offset/duration), True, index
+        offset -= duration
+        if offset < blank:
+            following = paths[(index+1) % len(paths)][0]
+            return path[-1]+(following-path[-1])*(offset/blank), False, index
+        offset -= blank
+    return paths[0][0], True, 0
 
 
 def trajectory_bounds(config):
     """Exact conservative envelope in um; do not miss extrema by sampling."""
     config.validate()
     if config.shape == "CUSTOM":
-        xy = np.asarray(config.points_um())
+        xy = np.asarray([point for path in config.strokes_um() for point in path]
+                        if config.scan_paths != 'NONE' else config.points_um())
         low, high = xy.min(axis=0), xy.max(axis=0)
     else:
         r = config.radius_um

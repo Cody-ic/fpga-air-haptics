@@ -5,7 +5,8 @@ from tkinter import ttk
 
 import numpy as np
 
-from .model import SHAPES, trajectory_path
+from .model import SHAPES, trajectory_path, trajectory_paths
+from .hand_view import HandView
 
 
 class PlaybackPanel(ttk.Frame):
@@ -62,9 +63,9 @@ class PlaybackPanel(ttk.Frame):
                               and state.config.radius_um == 0)
                 self.message.set("亮点表示正在呈现的固定位置。" if stationary else "亮点表示设备返回的当前位置。")
             elif state.state == "RUNNING":
-                self.message.set("正在运行，但设备报告输出已关闭。")
+                self.message.set("正在切换线段，此时不输出触觉。" if not state.scan_on else "正在运行，但设备报告输出已关闭。")
             elif state.state == "PAUSED":
-                self.message.set("已暂停，橙色圆点保留暂停位置。")
+                self.message.set("已暂停，橙色圆点保留暂停位置。" if state.scan_on else "已暂停在线段切换期间，此时没有触觉输出。")
             elif state.state == "FAULT":
                 self.message.set("设备报告故障，请停止并检查设备。")
             else:
@@ -78,43 +79,26 @@ class PlaybackPanel(ttk.Frame):
             self.draw_marker()
 
     def screen(self, point):
-        return (self.center_x + (point[0] - self.origin[0]) * self.scale,
-                self.center_y - (point[1] - self.origin[1]) * self.scale)
+        return self.view.screen(point)
 
     def draw(self):
         c = self.canvas
         c.delete("all")
         self.marker = self.halo = None
+        self.view = HandView(c, self.path)
+        self.view.draw()
         width, height = max(c.winfo_width(), 260), max(c.winfo_height(), 180)
         if self.path is None:
-            c.create_text(width/2, height/2, text="发送图形后在这里查看播放", fill="#526680",
+            c.create_text(width/2, height-8, text="发送图形后在这里查看播放", fill="#526680",
                           font=("Microsoft YaHei UI", 13))
             return
-        low, high = self.path.min(axis=0), self.path.max(axis=0)
-        self.origin = (low + high) / 2
-        span = np.maximum((high-low)*1.35, 20)
-        self.center_x, self.center_y = width/2, height/2
-        self.scale = min((width-100)/span[0], (height-80)/span[1])
-        left, top, right, bottom = 48, 30, width-28, height-40
-        c.create_rectangle(left, top, right, bottom, outline="#dce5ef")
-        c.create_text(left, height-20, text="X / mm", anchor="w", fill="#526680")
-        c.create_text(left, 15, text="Y / mm", anchor="w", fill="#526680")
-        for axis, bounds in enumerate(((left, right), (bottom, top))):
-            for pixel in np.linspace(*bounds, 5):
-                value = (pixel-self.center_x)/self.scale+self.origin[0] if axis == 0 else (
-                    self.center_y-pixel)/self.scale+self.origin[1]
-                if axis == 0:
-                    c.create_text(pixel, bottom+12, text=f"{value:g}" if value == int(value) else f"{value:.1f}",
-                                  fill="#7a8da2", font=("Microsoft YaHei UI", 8))
-                else:
-                    c.create_text(left-6, pixel, text=f"{value:.1f}", anchor="e", fill="#7a8da2",
-                                  font=("Microsoft YaHei UI", 8))
-        locations = [self.screen(point) for point in self.path]
-        c.create_line(*[value for pair in locations for value in pair], fill="#9abce2", width=4,
-                      tags="device_path")
-        if np.all(np.ptp(self.path, axis=0) == 0):
-            x, y = locations[0]
-            c.create_oval(x-5, y-5, x+5, y+5, fill="#9abce2", outline="", tags="device_path")
+        for stroke in trajectory_paths(self.plot_config):
+            locations = [self.screen(point[:2]) for point in stroke]
+            if len(locations) > 1:
+                c.create_line(*[value for pair in locations for value in pair], fill="#3779ba", width=3, tags="device_path")
+            if len(locations) == 1 or np.all(np.ptp(stroke, axis=0) == 0):
+                x, y = locations[0]
+                c.create_oval(x-5, y-5, x+5, y+5, fill="#9abce2", outline="", tags="device_path")
         self.halo = c.create_oval(0, 0, 0, 0, outline="#77cebe", width=3, state="hidden")
         self.marker = c.create_oval(0, 0, 0, 0, outline="white", width=2, state="hidden", tags="position")
         self.draw_marker()
@@ -122,7 +106,7 @@ class PlaybackPanel(ttk.Frame):
     def draw_marker(self):
         state = self.snapshot
         visible = bool(self.fresh and state and
-                       (state.state == "PAUSED" or (state.state == "RUNNING" and state.output)))
+                       ((state.state == "PAUSED" and state.scan_on) or (state.state == "RUNNING" and state.output)))
         self.position_mm = tuple(state.focus_mm[:2]) if visible else None
         if self.marker is None:
             return
