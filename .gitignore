@@ -1,0 +1,9 @@
+# Python and local application outputs
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+desktop_app/.runtime/
+desktop_app/exports/
+desktop_app/dist/
+desktop_app/build/
