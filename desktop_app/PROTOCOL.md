@@ -1,0 +1,125 @@
+# HAP2 串口协议（坐标路径草案）
+
+更新日期：2026-09-24。本文与 `protocol.py`、`controller.py`、`demo.py` 对应，供 FPGA 固件实现使用。客户端与 Demo 已实现，真实固件尚未联调。
+
+HAP2 将旧版网格编号改为实际坐标，不能与 HAP1 固件混用。旧 JSON 文件可由上位机迁移，串口不自动降级。
+
+## 1. 传输与帧格式
+
+默认 115200 baud、8N1、无流控。ASCII 文本，一帧一行，最大 4096 字节（含 CRC 和换行）：
+
+```text
+HAP2 KIND SEQ VERB key=value key=value*CCCC\n
+HAP2 CMD 1 HELLO*B3CE\n
+```
+
+以上 `\n` 表示一个 LF 字节。发送用 LF，接收兼容 CRLF。字段以单个空格分隔，不允许重复字段名；字段名符合 `[a-z][a-z0-9_]*`，值使用 `[A-Za-z0-9_,.?:+\-]+`，顺序不影响含义。
+
+- `KIND`：`CMD`、`ACK`、`ERR`、`TEL`。
+- 命令 `SEQ` 为 1～65535；ACK/ERR 原样回显命令序号和动词。遥测为 `TEL 0 STATE`。
+- CRC16-CCITT-FALSE：多项式 `0x1021`、初值 `0xFFFF`、不反射、异或输出 `0x0000`；覆盖从 `HAP2` 到最后一个字段的原始 ASCII 字节，不含 `*`、CRC 或换行。输出四位大写十六进制。校验向量 `123456789 → 29B1`。
+- 接收端重组分片，超长帧整行丢弃至下一个 LF。校验失败、截断或解析失败不得应用部分配置。客户端不自动重发控制命令。
+
+## 2. HELLO：能力、实际阵列与命令范围
+
+HELLO 返回 ACK 后发送一帧完整 STATE。以下为 ACK 字段示例，实际传输需合成一帧并附 CRC：
+
+```text
+proto=2 device=FPGA boot=boot_id simulated=0 hb_ms=3000
+caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY
+max_rows=16 max_cols=16 max_channels=256 max_nodes=64
+hw_rows=4 hw_cols=4 hw_pitch_um=10000 mapping=ROW_MAJOR_XY
+x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000
+z_min_um=20000 z_max_um=300000
+```
+
+`simulated=0` 为真实固件；Demo 固定为 1。客户端拒绝来源与连接模式不符的设备。`boot` 每次复位改变，同一会话保持不变。客户端要求 `hb_ms ≥ 2000`，Demo 使用 3000。
+
+`max_*` 表示容量，`hw_*` 表示实际接线阵列，两者不能混用。当前客户端支持物理行列各 1～16、间距 1000～30000 µm，只支持完整规则矩形阵列。通道 `r*hw_cols+c` 的坐标为：
+
+```text
+x = (c - (hw_cols-1)/2) * hw_pitch_um
+y = (r - (hw_rows-1)/2) * hw_pitch_um
+z = 0
+```
+
+阵列中心为原点，列向 +x、行向 +y、发射方向为 +z。半间距位置可能包含 0.5 µm，板端定点实现需正确表示。
+
+坐标范围是固件接受命令的包围盒，不保证触觉清晰度。以上范围仅为 Demo 示例，实际固件应声明自身验证范围。客户端允许 x/y 边界在 ±400000 µm 内，z 边界在 20000～300000 µm 内，且每轴下界小于上界。
+
+## 3. CONFIG：一次提交完整图形
+
+所有数值字段为十进制整数。CONFIG 包含下表全部字段及 `hw_rows hw_cols hw_pitch_um mapping`，后四项必须与 HELLO 一致。
+
+| 字段 | 范围／含义 |
+|---|---|
+| `carrier_hz` | 20000～80000；默认 40000，固件可拒绝自身不支持的取值 |
+| `phase_steps` | 8、16、32、64、128、256；默认 64 |
+| `cx_um cy_um` | 各 -100000～100000；图形整体平移 |
+| `z_um` | 20000～300000；所有路径点共用高度 |
+| `radius_um` | 0～80000；预设图形半径／半长，自定义图形忽略 |
+| `repeat_millihz` | 10～200000；完整路径每秒循环次数乘 1000 |
+| `mod_hz` | 0～1000；调制频率，0 表示无调制请求 |
+| `level` | 0～100；归一化驱动等级，不是电压或声压 |
+| `shape` | `POINT LINE_X LINE_Y CIRCLE TRIANGLE ARROW CUSTOM` 之一 |
+| `path_xy_um` | `NONE` 或最多 64 个 `x:y` 坐标对，以逗号分隔 |
+| `path_closed` | 1 闭合循环；0 沿原路径往返 |
+
+坐标为相对图形中心的有符号整数微米，每个分量在 ±300000 µm 内。板端目标为 `(x+cx_um, y+cy_um, z_um)`。例如：
+
+```text
+shape=CUSTOM path_xy_um=-17321:-12456,18234:-11098,1234:21678 path_closed=1
+```
+
+三个顶点定义一个三角形；它们不是阵元编号，也不是同时存在的三个焦点。CUSTOM 至少需要一个点，一个点表示静止焦点。相邻点不能相同，闭合路径不重复首点。非 CUSTOM 可以携带自定义草稿，播放时忽略该草稿。设备的 `max_nodes` 可低于 64，客户端下发前检查。
+
+CUSTOM 按路径长度匀速插值。闭合时补最后一点到首点的线段；往返时沿原线段返回，不添加斜向闭合边。预设图形定义以 `model.py::trajectory_point` 为参考。配置须同时通过参数范围、实际路径包围盒和阵列匹配检查，完整验证后原子替换，`rev` 加一，再发 `ACK applied=1 rev=N` 和完整 STATE；拒绝时返回 ERR 并保留原配置。
+
+首版没有多焦点、手部跟踪或独立散点模式。64 点为协议和编辑器的容量选择，不是触觉像素数。放点及保存精度为 1 µm，不代表定位精度。
+
+## 4. 控制命令与模式
+
+| 命令 | 条件与动作 |
+|---|---|
+| `HELLO` | 握手并读状态，不启动输出 |
+| `PING` | 刷新主机心跳，返回 ACK |
+| `CONFIG` | 仅 REMOTE 且 IDLE；更新配置并将路径进度归零 |
+| `MODE value=LOCAL/REMOTE` | 仅 IDLE；切换控制来源 |
+| `START` | 仅 REMOTE 且 IDLE/PAUSED；开始／继续 |
+| `PAUSE` | 仅 REMOTE 且 RUNNING；冻结路径进度，关闭输出 |
+| `STOP` | 两种模式均可；关闭输出，回到 IDLE 并将进度归零 |
+| `SNAP` | 请求完整状态，不改变输出 |
+
+除 HELLO 的专用应答外，成功命令返回 `ACK applied=1 rev=N`；除 PING 外紧跟 STATE。ERR 格式为 `ERR SEQ VERB code=...`，示例码包括 `BUSY`、`LOCAL_CONTROL`、`BAD_CONFIG`、`OUT_OF_WORKSPACE`、`HARDWARE_MISMATCH`、`NOT_RUNNING`、`BAD_MODE`、`UNKNOWN_COMMAND`。非法命令不改变已生效配置或运行状态。
+
+Demo 的本地 NEXT/PLAY/STOP 为模拟物理按键，不是串口命令。NEXT 只在 LOCAL+IDLE 生效，校验新图形范围后 `rev` 加一；本地停止键在两种模式均有效。
+
+## 5. STATE：原子数字快照
+
+STATE 包含完整 CONFIG 字段、实际阵列字段以及：
+
+| 字段 | 含义 |
+|---|---|
+| `boot` | 本次设备启动标识 |
+| `sample` | 每份完整快照递增，同一 boot 内不回绕 |
+| `uptime_ms` | 本次启动的单调运行时间，毫秒 |
+| `rev` | 已应用配置版本；配置或本地图形选择变化时递增 |
+| `mode state` | LOCAL/REMOTE；IDLE/RUNNING/PAUSED/FAULT |
+| `output` | 0/1；1 仅允许 RUNNING 且 level>0 |
+| `simulated reason` | 数据来源；停止或异常原因，无原因用 NONE |
+| `fx_um fy_um fz_um` | 与相位快照同一时刻的目标坐标 |
+| `phases` | 按实际阵列通道顺序排列的逗号分隔相位码 |
+
+相位数量严格等于 `hw_rows*hw_cols`，每项在 `0..phase_steps-1`。参考模型采用 `p=Σexp(j(kr+phase))/r`，发送相位为 `-kr` 的量化值；若 RTL 使用延迟码，需在接口层换算。固件必须锁存同一时刻的已应用寄存器、坐标及相位表，再异步发送，不能混用两帧数据。
+
+客户端从 STATE 更新界面，ACK 单独到达不改变实际显示。旧 sample、倒退 uptime/rev 被丢弃；boot 或阵列改变要求重新握手。数字寄存器回读不等于测得换能器电压或声压。
+
+## 6. 时序、断线与实现边界
+
+Demo 每 0.5 秒回传完整快照，另外在控制命令后即时回传。客户端每 0.8 秒发送 PING，ACK 超过 2 秒或状态超过 2.5 秒未到达则关闭会话；界面超过 1.6 秒标为过期，控制命令在 3.5 秒内没有后续匹配版本快照也会断开。
+
+REMOTE 运行或暂停期间，板端超过 `hb_ms` 未收到 PING，应关闭输出、回到 IDLE 并报告 `HEARTBEAT_TIMEOUT`。客户端断开 REMOTE 时尝试 STOP，但失联后不能保证命令送达。LOCAL 断开保留独立运行，不应用主机心跳停机规则。上电和复位必须关闭输出，重连不隐含 START。
+
+PC 一次提交完整图形，由 FPGA 自己插值、相位求解和高速循环输出。`repeat_millihz` 是轮廓循环频率，不是相位更新率、载波或串口回传频率。当前协议未报告实际相位更新率，后续固件须补充测量与能力声明，不能从界面刷新推断性能。
+
+Demo 默认 0.5 次/秒，用于看清路径；仅在取快照时计算当前理论位置和相位，未实现硬实时更新循环。`mod_hz` 被保存与回传，参考声场未模拟调制包络。高速扫描、多焦点、手部移动适应性及图形辨识均需真实硬件验证。
