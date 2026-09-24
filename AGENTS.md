@@ -14,9 +14,10 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python -m desktop_app --demo`: connect a simulated device, initially idle.
 - `python -m unittest discover -s desktop_app/tests -v`: run automated checks.
 - `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
+- `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
 - `rg --files --hidden`: inspect workspace files.
 
-Quote PowerShell paths containing spaces or parentheses. No formatter, linter, packaging, or HDL build is configured.
+Quote PowerShell paths containing spaces or parentheses. PyInstaller uses `touchsee.spec`; keep `dist/` and `build/` ignored. The desktop shortcut targets the EXE; rebuild after runtime edits. No formatter, linter, or HDL build is configured.
 
 ## Coding Style & Naming Conventions
 

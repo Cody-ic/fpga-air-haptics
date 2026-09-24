@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 desktop_app/.runtime/
 desktop_app/exports/
+desktop_app/dist/
+desktop_app/build/

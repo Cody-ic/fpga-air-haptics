@@ -24,9 +24,9 @@ from desktop_app.sketch import Sketch, rotation_matrix
 from desktop_app.palm import HAND_OUTLINE, PALM_OUTLINE
 
 
-def main():
-    runtime = Path(__file__).resolve().parents[1] / ".runtime"
-    runtime.mkdir(exist_ok=True)
+def main(runtime_path=None):
+    runtime = Path(runtime_path) if runtime_path is not None else Path(__file__).resolve().parents[1] / ".runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()
     app = App(root)
     root.geometry("1380x920+25+25")

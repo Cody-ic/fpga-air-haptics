@@ -4,7 +4,7 @@
 
 2026 年全国大学生嵌入式芯片与系统设计竞赛 FPGA 创新设计赛道参赛准备项目。
 
-> 更新于 **2026-09-24**。已有可运行的电脑上位机、Demo 模拟设备、双向串口客户端和测试。硬件仍处于方案设计与选型阶段，尚无 RTL、PCB 工程或硬件实测结果；软件演示不代表触觉效果已验证。
+> 更新于 **2026-09-25**。已有可运行的电脑上位机、Windows 便携 EXE、Demo 模拟设备、双向串口客户端和测试。硬件仍处于方案设计与选型阶段，尚无 RTL、PCB 工程或硬件实测结果；软件演示不代表触觉效果已验证。
 
 ## 项目简介
 
@@ -68,7 +68,7 @@ python -m desktop_app --demo
 python -m unittest discover -s desktop_app/tests -v
 ```
 
-可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、Matplotlib 3.10.7、pyserial 3.5；截图需要 Pillow。无打包器、格式化器、HDL 构建或 RTL 仿真命令。
+可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 64 位可用 PyInstaller 构建独立 EXE，见[启动与打包说明](desktop_app/README.md#启动)；本机构建产物位于 `desktop_app/dist/`，不提交到 Git。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、pyserial 3.5；实际打包依赖版本记录在 `build-info.json`，截图需要 Pillow。无格式化器、HDL 构建或 RTL 仿真命令。
 
 上位机默认打开草图编辑器，支持连续直线、矩形、圆、拖动成圆弧和控制点曲线，可组合多个轮廓、擦除线条、设置必要几何关系与尺寸、整体倍数缩放和指定呈现顺序。原打点操作已并入连续直线工具。公共线按顺序仅呈现一次，段间关闭输出；编译后最多 32 段、256 个坐标。图形按实际坐标保存，换阵列不会改变位置。Demo 可设置 4×4、6×6、8×8、12×12、16×16 及自定义行列；真实硬件规模由 FPGA 握手声明。普通界面保留绘图与播放，勾选“调试模式”查看相位、声场和串口日志。
 

@@ -8,6 +8,8 @@
 
 ## 启动
 
+Windows 64 位便携版：双击 `desktop_app/dist/触见图形工作台.exe`，无需安装 Python。给队友分发时使用同目录的 `TouchSee-Windows-x64.zip`，内含程序、使用说明、构建信息与依赖许可。首次启动需要解包运行库，请稍等；程序不需要管理员权限。构建产物保留在本地，不提交到 Git。
+
 使用 Python 3.10+（含 Tk），在仓库根目录执行：
 
 ```powershell
@@ -15,7 +17,28 @@ python -m pip install -r desktop_app/requirements.txt
 python -m desktop_app --demo
 ```
 
-本机解释器为 `D:\python\python.exe`；桌面快捷方式为 `触见调试台.lnk`。`--demo` 自动连接模拟设备但不播放，省略此参数则先离线编辑。
+本机桌面快捷方式 `触见调试台.lnk` 指向已打包的 `.exe`，带 `--demo` 参数，自动连接模拟设备但不播放。直接双击 `.exe` 或省略 `--demo` 则先离线编辑。源码仍可使用 `D:\python\python.exe` 运行。
+
+### 构建 Windows 可执行程序
+
+在 Windows 上使用 64 位 Python 3.10+，建议建立独立构建环境：
+
+```powershell
+python -m venv desktop_app/.runtime/build-venv
+desktop_app/.runtime/build-venv/Scripts/python.exe -m pip install -r desktop_app/requirements-build.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop_app/build_windows.ps1 -Python desktop_app/.runtime/build-venv/Scripts/python.exe
+```
+
+脚本使用 PyInstaller 生成单文件窗口程序，同时生成便携 ZIP 与 `build-info.json`（记录实际依赖版本及 EXE 的 SHA-256）。只打包 TkAgg 绘图后端；输出目录 `dist/` 和构建缓存 `build/` 均被 Git 忽略。打包版启动错误写入 `%LOCALAPPDATA%\TouchSee\logs\startup-error.log`，不写入临时解包目录。
+
+打包后可执行以下自检，运行可见 Demo 流程并自动关闭，不连接真实串口：
+
+```powershell
+Start-Process -FilePath 'desktop_app/dist/触见图形工作台.exe' -ArgumentList '--self-test desktop_app/.runtime/frozen-check' -WindowStyle Hidden -Wait
+Get-Content desktop_app/.runtime/frozen-check/gui-smoke.json
+```
+
+自检覆盖绘图、尺寸与关系、保存导入、发送确认、播放、阵列切换和回传超时。报告中 `passed` 应为 `true`；截图写入指定目录。已在本机从仅含 EXE 的独立目录、移除 Python 环境路径后通过此检查；真实板卡联调仍待硬件。修改源码后需要重新构建，桌面快捷方式才会运行新版。
 
 ## 绘制与保存图形
 
