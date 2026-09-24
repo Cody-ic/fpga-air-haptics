@@ -7,7 +7,7 @@ import numpy as np
 from desktop_app.demo import DemoDevice
 from desktop_app.model import Config, ArraySpec, encode_strokes, trajectory_paths, trajectory_sample, config_from_document
 from desktop_app.protocol import Snapshot, decode, encode, MAX_LINE
-from desktop_app.sketch import Bezier, Sketch, cross
+from desktop_app.sketch import Bezier, Sketch, cross, rotation_matrix
 
 
 def length(paths):
@@ -115,6 +115,113 @@ class SketchTests(unittest.TestCase):
         low, high = s.selection_bounds(edges)
         np.testing.assert_allclose(high-low, [50, 30], atol=.002)
         self.assertEqual([c['value'] for c in s.constraints if 'value' in c], [50, 30])
+
+    def test_dimensioned_rectangle_rotates_rigidly_and_roundtrips(self):
+        s = Sketch()
+        edges = s.add_rectangle((-10, -5), (10, 5))
+        s.constrain('width', edges, 24)
+        s.constrain('height', edges, 12)
+        before = np.array(s.nodes)
+        center = before.mean(axis=0)
+        s.rotate(edges, 37)
+        np.testing.assert_allclose(s.nodes, (before-center) @ rotation_matrix(37).T+center, atol=1e-8)
+        s.check_constraints()
+        self.assertEqual([c['value'] for c in s.constraints if 'value' in c], [24, 12])
+        loaded = Sketch.from_document(json.loads(json.dumps(s.document())))
+        self.assertEqual(loaded.compile(), s.compile())
+        loaded.constrain('width', list(reversed(edges)), 30)
+        self.assertEqual(sum(c['kind'] == 'width' for c in loaded.constraints), 1)
+        self.assertAlmostEqual(loaded.dimension_angle(edges, 'width'), 37)
+        loaded.check_constraints()
+
+    def test_rigid_rotation_respects_external_and_direction_relations(self):
+        s = Sketch()
+        a = s.add_polyline([(0, 0), (10, 0)])[0]
+        s.constrain('horizontal', [a])
+        original = s.document()
+        with self.assertRaises(ValueError):
+            s.copy().rotate([a], 20)
+        self.assertEqual(s.document(), original)
+        s.rotate([a], 180)
+        s.remove_constraint(0)
+        s.rotate([a], 25)
+        b = s.add_polyline([(20, 0), (30, 10)])[0]
+        s.constrain('parallel', [a, b])
+        with self.assertRaises(ValueError):
+            s.copy().rotate([a], 30)
+        s.rotate([a, b], 30)
+        s.check_constraints()
+
+    def test_coincidence_persists_can_be_removed_and_remaps_on_erasure(self):
+        s = Sketch()
+        unwanted = s.add_circle((-30, 0), 5)
+        a = s.add_polyline([(0, 0), (10, 0)])[0]
+        b = s.add_polyline([(12, 3), (20, 10)])[0]
+        nodes = [s.edge(a)['b'], s.edge(b)['a']]
+        s.constrain('coincident', [], nodes=nodes)
+        np.testing.assert_allclose(s.nodes[nodes[0]], s.nodes[nodes[1]], atol=.002)
+        for node in s.coincident_nodes([nodes[0]]):
+            s.nodes[node][1] += 4
+        s.solve()
+        np.testing.assert_allclose(s.nodes[nodes[0]], s.nodes[nodes[1]], atol=.002)
+        s.remove([unwanted])
+        s = Sketch.from_document(json.loads(json.dumps(s.document())))
+        nodes = s.constraints[0]['nodes']
+        np.testing.assert_allclose(s.nodes[nodes[0]], s.nodes[nodes[1]], atol=.002)
+        s.remove_constraint(0)
+        s.nodes[nodes[0]][0] += 3
+        s.check_constraints()
+        self.assertGreater(np.linalg.norm(np.subtract(s.nodes[nodes[0]], s.nodes[nodes[1]])), 2)
+
+    def test_coincidence_preflight_rejects_collapse_and_checks_conflicts(self):
+        s = Sketch()
+        a = s.add_polyline([(0, 0), (10, 0)])[0]
+        nodes = [s.edge(a)['a'], s.edge(a)['b']]
+        self.assertFalse(s.relation_status('coincident', [], nodes)[0])
+        b = s.add_polyline([(20, 0), (30, 0)])[0]
+        s.constrain('horizontal', [a])
+        s.constrain('vertical', [b])
+        original = s.document()
+        self.assertFalse(s.relation_status('parallel', [a, b])[0])
+        self.assertFalse(s.relation_status('horizontal', [a])[0])
+        self.assertFalse(s.relation_status('tangent', [a, b])[0])
+        self.assertTrue(s.relation_status('perpendicular', [a, b])[0])
+        self.assertEqual(s.document(), original)
+
+    def test_coincident_endpoints_support_tangency_and_cancel_dependency(self):
+        s = Sketch()
+        line = s.add_polyline([(-10, 0), (0, 0)])[0]
+        curve = s.add_bezier([(1, 1), (5, 2), (5, 10), (10, 10)])
+        s.constrain('coincident', [], nodes=[s.edge(line)['b'], s.edge(curve)['a']])
+        s.constrain('tangent', [line, curve])
+        s.check_constraints()
+        s.remove_constraint(0)
+        self.assertFalse(s.constraints)
+        s.validate()
+
+    def test_rotated_arc_and_bezier_keep_true_dimension_bounds(self):
+        s = Sketch()
+        arc = s.add_polyline([(-10, 0), (10, 0)])[0]
+        s.edge(arc)['bend'] = .5
+        curve = s.add_bezier([(-20, 15), (-30, 25), (15, 45), (20, 15)])
+        s.constrain('width', [arc], 20)
+        s.constrain('height', [curve], 20)
+        s.rotate([arc, curve], -63)
+        s.check_constraints()
+        for c in s.constraints:
+            low, high = s.selection_bounds(c['edges'], c['angle'])
+            self.assertAlmostEqual((high-low)[0 if c['kind'] == 'width' else 1], c['value'], places=4)
+
+    def test_malformed_coincidence_and_dimension_axis_rejected(self):
+        s = Sketch()
+        edges = s.add_rectangle((0, 0), (10, 10))
+        for constraint in [dict(kind='coincident', edges=[], nodes=[0, 999]),
+                           dict(kind='coincident', edges=[], nodes=[False, 1]),
+                           dict(kind='width', edges=edges, value=10, angle=float('nan'))]:
+            data = s.document()
+            data['constraints'].append(constraint)
+            with self.assertRaises(ValueError):
+                Sketch.from_document(data)
 
     def test_circle_external_and_internal_tangency(self):
         for center, radius in (((17, 0), 5), ((6, 0), 5)):

@@ -21,6 +21,12 @@ def cross(a, b):
     return float(a[0]*b[1]-a[1]*b[0])
 
 
+def rotation_matrix(degrees):
+    angle = math.radians(degrees)
+    return np.array([[math.cos(angle), -math.sin(angle)],
+                     [math.sin(angle), math.cos(angle)]])
+
+
 @dataclass
 class Curve:
     start: np.ndarray
@@ -240,8 +246,8 @@ class Sketch:
         if abs(x-u) < .01 or abs(y-v) < .01:
             raise ValueError("矩形的宽和高须大于 0.01 mm。")
         group = self.add_polyline([(x, y), (u, y), (u, v), (x, v)], True)
-        for i, edge in enumerate(group):
-            self.constraints.append(dict(kind='horizontal' if i % 2 == 0 else 'vertical', edges=[edge]))
+        for kind, a, b in [('parallel', 0, 2), ('parallel', 1, 3), ('perpendicular', 0, 1)]:
+            self.constraints.append(dict(kind=kind, edges=[group[a], group[b]]))
         return group
 
     def add_circle(self, center, radius):
@@ -276,8 +282,15 @@ class Sketch:
         center = (a+b)/2+n*(bend*bend-1)/(4*bend)
         return Curve(a, b, center, -4*math.atan(bend))
 
-    def bounds(self, edge):
+    def bounds(self, edge, angle=0.0):
         curve = self.curve(edge)
+        if angle:
+            matrix = rotation_matrix(-angle)
+            if isinstance(curve, Bezier):
+                curve = Bezier(curve.controls @ matrix.T)
+            else:
+                curve = Curve(matrix @ curve.start, matrix @ curve.end,
+                              None if curve.center is None else matrix @ curve.center, curve.sweep)
         parameters = [0.0, 1.0]
         if isinstance(curve, Bezier):
             a, b, c, d = curve.controls
@@ -294,9 +307,68 @@ class Sketch:
         points = np.array([curve.point(t) for t in parameters])
         return points.min(axis=0), points.max(axis=0)
 
-    def selection_bounds(self, identifiers):
-        bounds = [self.bounds(self.edge(i)) for i in identifiers]
+    def selection_bounds(self, identifiers, angle=0.0):
+        bounds = [self.bounds(self.edge(i), angle) for i in identifiers]
         return np.min([b[0] for b in bounds], axis=0), np.max([b[1] for b in bounds], axis=0)
+
+    def edge_nodes(self, identifiers):
+        return {i for e in self.edges if e['id'] in identifiers
+                for i in [e['a'], e['b'], *(e['controls'] or [])] if i is not None}
+
+    def coincident_nodes(self, nodes):
+        result = set(nodes)
+        while True:
+            previous = len(result)
+            for c in self.constraints:
+                if c['kind'] == 'coincident' and result.intersection(c['nodes']):
+                    result.update(c['nodes'])
+            if len(result) == previous:
+                return result
+
+    def common_endpoint(self, a, b):
+        for i in (a['a'], a['b']):
+            for j in (b['a'], b['b']):
+                if j in self.coincident_nodes([i]):
+                    return i, j
+        return None
+
+    def dimension_angle(self, identifiers, kind):
+        for c in self.constraints:
+            if c['kind'] == kind and set(c['edges']) == set(identifiers):
+                return c.get('angle', 0.0)
+        for c in self.constraints:
+            if c['kind'] in ('width', 'height') and set(c['edges']) == set(identifiers):
+                return c.get('angle', 0.0)
+        group = next((g for g in self.groups if set(g) == set(identifiers)), None)
+        if group and len(group) == 4 and self.is_closed(group):
+            curves = [self.curve(self.edge(i)) for i in group]
+            directions = [c.end-c.start for c in curves]
+            if (all(c.center is None and not isinstance(c, Bezier) for c in curves)
+                    and all(abs(np.dot(a, b)) < .001 for a, b in zip(directions, directions[1:]+directions[:1]))):
+                return math.degrees(math.atan2(directions[0][1], directions[0][0]))
+        return 0.0
+
+    def rotate(self, identifiers, degrees, pivot=None):
+        """Rigid rotation: carry dimension axes; never solve by deforming a shape."""
+        if not identifiers:
+            raise ValueError('请先选择要旋转的线条或轮廓。')
+        if not math.isfinite(degrees):
+            raise ValueError('请输入有效角度。')
+        if pivot is None:
+            low, high = self.selection_bounds(identifiers)
+            pivot = (low+high)/2
+        pivot = np.asarray(pivot)
+        matrix = rotation_matrix(degrees % 360)
+        for i in self.edge_nodes(identifiers):
+            self.nodes[i] = (pivot+matrix @ (np.array(self.nodes[i])-pivot)).tolist()
+        for c in self.constraints:
+            if c['kind'] in ('width', 'height') and set(c['edges']).issubset(identifiers):
+                c['angle'] = (c.get('angle', 0.0)+degrees) % 360
+        self.validate()
+        try:
+            self.check_constraints()
+        except ValueError as error:
+            raise ValueError('旋转受已有关系限制；请在“关系”页移除方向关系，或一起选中相连的图形。') from error
 
     def remove(self, identifiers):
         identifiers = set(identifiers)
@@ -307,12 +379,21 @@ class Sketch:
         self.order = []
         used = sorted({i for e in self.edges for i in [e['a'], e['b'], *(e['controls'] or [])] if i is not None})
         mapping = {old: new for new, old in enumerate(used)}
+        self.constraints = [c for c in self.constraints
+                            if c['kind'] != 'coincident' or all(i in mapping for i in c['nodes'])]
+        for c in self.constraints:
+            if c['kind'] == 'coincident':
+                c['nodes'] = [mapping[i] for i in c['nodes']]
         self.nodes = [self.nodes[i] for i in used]
         for e in self.edges:
             e['a'] = mapping[e['a']]
             e['b'] = mapping[e['b']] if e['b'] is not None else None
             if e['controls'] is not None:
                 e['controls'] = [mapping[i] for i in e['controls']]
+        # A deleted coincidence can remove the common endpoint needed by tangency.
+        self.constraints = [c for c in self.constraints if c['kind'] != 'tangent'
+                            or any(self.edge(i)['radius'] is not None for i in c['edges'])
+                            or self.common_endpoint(*[self.edge(i) for i in c['edges']])]
 
     def ordered_groups(self):
         return [(i, self.groups[i]) for i in (self.order or list(range(len(self.groups))))]
@@ -428,7 +509,20 @@ class Sketch:
         single = {'horizontal', 'vertical', 'length', 'radius', 'diameter'}
         span = {'width', 'height'}
         pair = {'parallel', 'perpendicular', 'tangent'}
-        if not isinstance(c, dict) or c.get('kind') not in single | pair | span:
+        if not isinstance(c, dict):
+            raise ValueError('几何关系无效')
+        if c.get('kind') == 'coincident':
+            nodes = c.get('nodes')
+            if (c.get('edges') != [] or not isinstance(nodes, list) or len(nodes) != 2
+                    or any(type(i) is not int or not 0 <= i < len(self.nodes) for i in nodes)
+                    or nodes[0] == nodes[1]):
+                raise ValueError('按住 Shift 选择两个不同的点，再设置重合。')
+            joined = self.coincident_nodes(nodes)
+            if any(e['b'] is not None and e['a'] != e['b']
+                   and {e['a'], e['b']}.issubset(joined) for e in self.edges):
+                raise ValueError('同一条线的两端不能重合；这会使线条消失。')
+            return
+        if c.get('kind') not in single | pair | span:
             raise ValueError("不支持此几何关系")
         ids = c.get('edges')
         if (not isinstance(ids, list) or not ids or len(ids) > MAX_EDGES
@@ -440,18 +534,25 @@ class Sketch:
         straight = lambda e: e['radius'] is None and e['controls'] is None and e['a'] != e['b'] and abs(e['bend']) < 1e-7
         if c['kind'] in {'horizontal', 'vertical', 'parallel', 'perpendicular', 'length'} and not all(map(straight, edges)):
             raise ValueError("该关系适用于直线；弯曲前请先移除直线关系。")
+        opposite = {'horizontal': 'vertical', 'vertical': 'horizontal',
+                    'parallel': 'perpendicular', 'perpendicular': 'parallel'}
+        if any(old['kind'] == opposite.get(c['kind']) and set(old['edges']) == set(ids) for old in self.constraints):
+            raise ValueError('与已添加的方向关系冲突，请先移除原关系。')
         if c['kind'] in {'length', 'radius', 'diameter', 'width', 'height'}:
             value = c.get('value')
             if type(value) not in (float, int) or not math.isfinite(value) or not .01 <= value <= 600:
                 raise ValueError("尺寸应为 0.01～600 mm。")
             if c['kind'] in {'radius', 'diameter'} and self.curve(edges[0]).center is None:
                 raise ValueError("半径适用于圆或圆弧。")
+        if 'angle' in c and (c['kind'] not in span or type(c['angle']) not in (float, int)
+                             or not math.isfinite(c['angle'])):
+            raise ValueError('尺寸方向无效')
         if c['kind'] == 'tangent':
             a, b = edges
             if any(e['controls'] is not None and e['a'] == e['b'] for e in edges):
                 raise ValueError('请将闭合控制点曲线拆成多段后，再设置端点相切。')
             if a['radius'] is None and b['radius'] is None:
-                if not ({a['a'], a['b']} & {b['a'], b['b']}) or (straight(a) and straight(b)):
+                if not self.common_endpoint(a, b) or (straight(a) and straight(b)):
                     raise ValueError("线与圆弧需有共同端点；两条直线请使用平行。")
             elif a['radius'] is not None and b['radius'] is not None:
                 if c.get('side') not in ('external', 'internal'):
@@ -464,6 +565,10 @@ class Sketch:
     def residuals(self):
         result = []
         for c in self.constraints:
+            if c['kind'] == 'coincident':
+                a, b = c['nodes']
+                result.extend(np.subtract(self.nodes[a], self.nodes[b]))
+                continue
             edges = [self.edge(i) for i in c['edges']]
             curves = [self.curve(e) for e in edges]
             kind = c['kind']
@@ -480,7 +585,7 @@ class Sketch:
             elif kind == 'diameter':
                 result.append(2*a.radius-c['value'])
             elif kind in ('width', 'height'):
-                low, high = self.selection_bounds(c['edges'])
+                low, high = self.selection_bounds(c['edges'], c.get('angle', 0.0))
                 result.append((high-low)[0 if kind == 'width' else 1]-c['value'])
             elif kind in ('parallel', 'perpendicular'):
                 v = curves[1].end-curves[1].start
@@ -496,12 +601,12 @@ class Sketch:
                     v = line.end-line.start
                     result.append(abs(cross(v, circle.center-line.start))/max(.001, np.linalg.norm(v))-circle.radius)
                 else:
-                    common = next(iter({edges[0]['a'], edges[0]['b']} & {edges[1]['a'], edges[1]['b']}))
-                    p = np.array(self.nodes[common])
+                    common = self.common_endpoint(*edges)
                     vectors = []
-                    for curve in curves:
+                    for curve, node, edge in zip(curves, common, edges):
+                        p = np.array(self.nodes[node])
                         if isinstance(curve, Bezier):
-                            v = curve.tangent(np.linalg.norm(p-curve.start) < TOL)
+                            v = curve.tangent(node == edge['a'])
                         else:
                             v = curve.end-curve.start if curve.center is None else np.array([-(p-curve.center)[1], (p-curve.center)[0]])
                         vectors.append(v/max(.001, np.linalg.norm(v)))
@@ -532,7 +637,8 @@ class Sketch:
             return
         involved = {i for c in self.constraints for i in c['edges']}
         active = sorted({i for e in self.edges if e['id'] in involved
-                         for i in [e['a'], e['b'], *(e['controls'] or [])] if i is not None})
+                         for i in [e['a'], e['b'], *(e['controls'] or [])] if i is not None}
+                        | {i for c in self.constraints if c['kind'] == 'coincident' for i in c['nodes']})
         parameters = []
         for i in active:
             parameters.extend((('node', i, 0), ('node', i, 1)))
@@ -580,10 +686,16 @@ class Sketch:
             assign(original)
             raise
 
-    def constrain(self, kind, identifiers, value=None):
+    def constrain(self, kind, identifiers, value=None, nodes=()):
         c = dict(kind=kind, edges=list(identifiers))
+        if kind == 'coincident':
+            c['nodes'] = list(nodes)
+            if len(nodes) == 2 and nodes[1] in self.coincident_nodes([nodes[0]]):
+                raise ValueError('这两个点已经保持重合。')
         if value is not None:
             c['value'] = float(value)
+        if kind in ('width', 'height'):
+            c['angle'] = self.dimension_angle(identifiers, kind)
         if kind == 'tangent' and len(identifiers) == 2:
             a, b = [self.curve(self.edge(i)) for i in identifiers]
             if all(self.edge(i)['radius'] is not None for i in identifiers):
@@ -593,10 +705,54 @@ class Sketch:
         # Editing a dimension replaces that dimension, but does not erase other relations.
         if kind in ('length', 'radius', 'diameter', 'width', 'height'):
             same_kinds = {'radius', 'diameter'} if kind in ('radius', 'diameter') else {kind}
-            self.constraints = [old for old in self.constraints if not (old['kind'] in same_kinds and old['edges'] == c['edges'])]
+            self.constraints = [old for old in self.constraints if not (old['kind'] in same_kinds and set(old['edges']) == set(c['edges']))]
         if c not in self.constraints:
             self.constraints.append(c)
+        try:
+            self.check_constraints()
+            return
+        except ValueError:
+            pass
+        # Seed a genuine rotation before solving. Starting a vertical relation
+        # on an exactly horizontal line otherwise collapses its two endpoints.
+        if kind in ('horizontal', 'vertical', 'parallel', 'perpendicular'):
+            edge = self.edge(identifiers[-1])
+            a, b = np.array(self.nodes[edge['a']]), np.array(self.nodes[edge['b']])
+            if kind in ('horizontal', 'vertical'):
+                direction = np.array([1.0, 0.0] if kind == 'horizontal' else [0.0, 1.0])
+            else:
+                first = self.curve(self.edge(identifiers[0]))
+                direction = first.end-first.start
+                if kind == 'perpendicular':
+                    direction = np.array([-direction[1], direction[0]])
+                direction = direction/max(.001, np.linalg.norm(direction))
+            if np.dot(direction, b-a) < 0:
+                direction = -direction
+            half = direction*np.linalg.norm(b-a)/2
+            self.nodes[edge['a']] = ((a+b)/2-half).tolist()
+            self.nodes[edge['b']] = ((a+b)/2+half).tolist()
         self.solve()
+
+    def relation_status(self, kind, identifiers, nodes=()):
+        """Non-mutating feasibility check, also used to gate UI actions."""
+        if kind != 'coincident' and nodes:
+            return False, '此关系需要选择线条；点击线条中部选择。'
+        if any(c['kind'] == kind and set(c['edges']) == set(identifiers)
+               for c in self.constraints if kind != 'coincident'):
+            return False, '已添加此关系，可在下方列表中移除。'
+        try:
+            candidate = self.copy()
+            candidate.constrain(kind, identifiers, nodes=nodes)
+            return True, '可以添加此关系。'
+        except (ValueError, StopIteration, OverflowError, FloatingPointError) as error:
+            return False, str(error)
+
+    def remove_constraint(self, index):
+        removed = self.constraints.pop(index)
+        if removed['kind'] == 'coincident':
+            self.constraints = [c for c in self.constraints if c['kind'] != 'tangent'
+                                or any(self.edge(i)['radius'] is not None for i in c['edges'])
+                                or self.common_endpoint(*[self.edge(i) for i in c['edges']])]
 
     def scale(self, factor):
         if not math.isfinite(factor) or not .01 <= factor <= 100:

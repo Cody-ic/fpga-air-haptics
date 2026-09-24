@@ -9,12 +9,13 @@ import numpy as np
 
 from .editor import clip_segment
 from .model import encode_strokes
-from .sketch import Bezier, Sketch, cross
+from .palm import HAND_OUTLINE, PALM_OUTLINE, palm_warning
+from .sketch import Bezier, Sketch, cross, rotation_matrix
 
 
 RELATIONS = {'horizontal': '水平', 'vertical': '竖直', 'parallel': '平行',
              'perpendicular': '垂直', 'tangent': '相切', 'length': '长度', 'radius': '半径',
-             'diameter': '直径', 'width': '宽度', 'height': '高度'}
+             'diameter': '直径', 'width': '宽度', 'height': '高度', 'coincident': '重合'}
 
 
 class SketchEditor(ttk.Frame):
@@ -26,8 +27,15 @@ class SketchEditor(ttk.Frame):
         self.blank_us = 2000
         self.compiled_key = self.compiled_value = None
         self.cx = self.cy = 0.0
-        self.view_span = 80.0
+        self.view_span = 140.0
+        self.view_center = (PALM_OUTLINE.min(axis=0)+PALM_OUTLINE.max(axis=0))/2
+        self.fit_bounds = (PALM_OUTLINE.min(axis=0), PALM_OUTLINE.max(axis=0)+[0, 10])
         self.selected = []
+        self.selected_nodes = []
+        self.relation_cache_key = None
+        self.relation_states = {}
+        self.rotation_handle = None
+        self.snap_pair = None
         self.undo_stack, self.redo_stack = [], []
         self.anchor = self.hover_point = None
         self.chain = None
@@ -37,12 +45,16 @@ class SketchEditor(ttk.Frame):
         self.tool = tk.StringVar(value='select')
         self.message = tk.StringVar(value='选择工具开始绘制；Shift 可多选线条。')
         self.hint = tk.StringVar()
+        self.palm_notice = tk.StringVar()
         self.selection_text = tk.StringVar(value='尚未选择线条')
         self.dimension_hint = tk.StringVar(value='先选中要修改的线条或轮廓。')
         self.dimension_selection = None
         self.size_value = tk.StringVar()
         self.size_kind = tk.StringVar(value='长度')
         self.scale_value = tk.StringVar(value='1.0')
+        self.rotation_value = tk.StringVar(value='15')
+        self.rotation_hint = tk.StringVar()
+        self.relation_hint = tk.StringVar(value='选择点或线条后，可用的关系会亮起。')
         self.order_auto = tk.BooleanVar(value=True)
         self.tool_buttons = {}
         tools = ttk.Frame(self, padding=(8, 6))
@@ -55,11 +67,13 @@ class SketchEditor(ttk.Frame):
         bar = ttk.Frame(self, padding=(8, 2))
         bar.pack(fill='x')
         for label, command in [('撤销', self.undo), ('重做', self.redo), ('清空', self.clear),
-                               ('完成绘制', self.finish), ('适合窗口', self.fit)]:
-            ttk.Button(bar, text=label, command=command, width=9).pack(side='left', padx=2)
-        ttk.Button(bar, text='导入图形', command=on_load).pack(side='right', padx=2)
-        ttk.Button(bar, text='保存图形', command=on_save).pack(side='right', padx=2)
+                               ('完成绘制', self.finish), ('适合窗口', self.fit), ('放入掌面', self.fit_to_palm)]:
+            ttk.Button(bar, text=label, command=command, width=6).pack(side='left', padx=2)
+        ttk.Button(bar, text='导入图形', width=8, command=on_load).pack(side='right', padx=2)
+        ttk.Button(bar, text='保存图形', width=8, command=on_save).pack(side='right', padx=2)
         ttk.Label(self, textvariable=self.hint, foreground='#526680', padding=(10, 5)).pack(fill='x')
+        self.palm_label = ttk.Label(self, textvariable=self.palm_notice, foreground='#8a8179', padding=(10, 0), wraplength=740)
+        self.palm_label.pack(fill='x')
         actions = ttk.Frame(self, padding=8)
         actions.pack(side='bottom', fill='x')
         self.apply_button = ttk.Button(actions, text='发送到设备', command=on_apply)
@@ -72,8 +86,13 @@ class SketchEditor(ttk.Frame):
         side = ttk.Frame(body, width=224, padding=(6, 0, 8, 0))
         side.pack(side='right', fill='y')
         side.pack_propagate(False)
-        self.canvas = tk.Canvas(body, bg='#f8fbff', highlightthickness=0, height=390, takefocus=True)
-        self.canvas.pack(fill='both', expand=True, padx=(8, 0))
+        canvas_holder = ttk.Frame(body)
+        canvas_holder.pack(fill='both', expand=True, padx=(8, 0))
+        self.canvas = tk.Canvas(canvas_holder, bg='#f8fbff', highlightthickness=0, takefocus=True)
+        # Frame the palm prominently; the shared full hand continues naturally
+        # into partially visible fingers. All of the white surface accepts drawing.
+        canvas_holder.bind('<Configure>', lambda e: self.canvas.place(
+            relx=.5, rely=.5, anchor='center', width=min(e.width, max(160, e.height*1.05)), height=e.height))
         self.canvas.bind('<Configure>', lambda _: self.draw())
         self.canvas.bind('<Button-1>', self.press)
         self.canvas.bind('<Double-Button-1>', self.select_contour)
@@ -86,7 +105,7 @@ class SketchEditor(ttk.Frame):
         self.canvas.bind('<Control-z>', lambda _: self.undo())
         self.canvas.bind('<Control-y>', lambda _: self.redo())
         self.canvas.bind('<MouseWheel>', lambda e: self.zoom(.8 if e.delta > 0 else 1.25))
-        tabs = ttk.Notebook(side)
+        tabs = self.property_tabs = ttk.Notebook(side)
         tabs.pack(fill='both', expand=True)
         def scroll_page(label):
             tab = ttk.Frame(tabs)
@@ -107,9 +126,14 @@ class SketchEditor(ttk.Frame):
         ttk.Label(relationships, textvariable=self.selection_text, wraplength=168).pack(fill='x', pady=5)
         relation_buttons = ttk.Frame(relationships)
         relation_buttons.pack(fill='x')
-        for i, kind in enumerate(('horizontal', 'vertical', 'parallel', 'perpendicular', 'tangent')):
-            ttk.Button(relation_buttons, text=RELATIONS[kind], width=7,
-                       command=lambda k=kind: self.add_relation(k)).grid(row=i//2, column=i % 2, padx=2, pady=2)
+        self.relation_buttons = {}
+        for i, kind in enumerate(('coincident', 'horizontal', 'vertical', 'parallel', 'perpendicular', 'tangent')):
+            button = ttk.Button(relation_buttons, text=RELATIONS[kind], width=7, state='disabled',
+                                command=lambda k=kind: self.add_relation(k))
+            button.grid(row=i//2, column=i % 2, padx=2, pady=2)
+            button.bind('<Enter>', lambda _, k=kind: self.relation_hint.set(self.relation_states.get(k, (False, '请先选择点或线条。'))[1]))
+            self.relation_buttons[kind] = button
+        ttk.Label(relationships, textvariable=self.relation_hint, foreground='#526680', wraplength=170).pack(fill='x', pady=5)
         ttk.Label(properties, text='设置实际尺寸 / mm').pack(anchor='w', pady=(10, 3))
         row = ttk.Frame(properties)
         row.pack(fill='x')
@@ -120,16 +144,27 @@ class SketchEditor(ttk.Frame):
         self.dimension_button = ttk.Button(properties, text='应用尺寸', command=self.dimension)
         self.dimension_button.pack(fill='x', pady=4)
         ttk.Label(properties, textvariable=self.dimension_hint, foreground='#526680', wraplength=170).pack(fill='x')
+        ttk.Label(properties, text='旋转所选图形 / °').pack(anchor='w', pady=(10, 3))
+        row = ttk.Frame(properties)
+        row.pack(fill='x')
+        ttk.Entry(row, textvariable=self.rotation_value, width=8).pack(side='left')
+        self.rotate_button = ttk.Button(row, text='旋转', width=7, command=self.rotate_selected)
+        self.rotate_button.pack(side='right')
+        ttk.Label(properties, textvariable=self.rotation_hint, foreground='#526680', wraplength=170).pack(fill='x', pady=4)
         ttk.Label(properties, text='整体缩放（改变实际大小）', wraplength=170).pack(anchor='w', pady=(8, 3))
         row = ttk.Frame(properties)
         row.pack(fill='x')
         ttk.Entry(row, textvariable=self.scale_value, width=8).pack(side='left')
         ttk.Button(row, text='缩放', width=7, command=self.scale_all).pack(side='right')
         ttk.Label(properties, text='例如 2 倍：20 mm → 40 mm；已设尺寸一起更新。', foreground='#526680', wraplength=170).pack(fill='x', pady=4)
-        ttk.Label(relationships, text='所选线条的关系与尺寸').pack(anchor='w', pady=(10, 3))
+        ttk.Label(relationships, text='所选对象的关系与尺寸').pack(anchor='w', pady=(10, 3))
         self.relation_list = tk.Listbox(relationships, height=5, exportselection=False)
         self.relation_list.pack(fill='both', expand=True)
-        ttk.Button(relationships, text='移除选中的关系', command=self.remove_relation).pack(fill='x', pady=4)
+        self.remove_relation_button = ttk.Button(relationships, text='移除选中的关系', command=self.remove_relation, state='disabled')
+        self.remove_relation_button.pack(fill='x', pady=4)
+        self.relation_list.bind('<<ListboxSelect>>', lambda _: self.remove_relation_button.configure(
+            state='normal' if self.relation_list.curselection() else 'disabled'))
+        ttk.Label(relationships, text='取消关系：先选中下方列表中的一项，再点“移除”。', foreground='#526680', wraplength=170).pack(fill='x', pady=4)
         ttk.Button(relationships, text='删除所选线条', command=self.delete_selected).pack(fill='x')
         ttk.Checkbutton(ordering, text='自动安排（跳过排序）', variable=self.order_auto, command=self.auto_order).pack(anchor='w')
         ttk.Label(ordering, text='选中轮廓后上下移动。\n公共线仅在首次经过时呈现。', wraplength=168).pack(fill='x', pady=8)
@@ -181,6 +216,7 @@ class SketchEditor(ttk.Frame):
         self.blank_us = config.blank_us
         self.raw_fields = dict(path_xy_um=encode_points(config.points_um()), path_closed=config.path_closed, scan_paths=config.scan_paths)
         self.selected = []
+        self.selected_nodes = []
         self.undo_stack, self.redo_stack = [], []
         self.anchor = self.chain = self.drag = None
         self.tool.set('select')
@@ -199,8 +235,12 @@ class SketchEditor(ttk.Frame):
         self.draw()
 
     def set_origin(self, cx, cy):
+        changed = (self.cx, self.cy) != (cx, cy)
         self.cx, self.cy = cx, cy
-        self.draw()
+        if changed and self.fit_bounds is not None:
+            self.fit()
+        else:
+            self.draw()
 
     def transaction(self, action, solve=False):
         old = self.snapshot()
@@ -226,6 +266,7 @@ class SketchEditor(ttk.Frame):
         self.sketch = Sketch.from_document(value[0])
         self.raw_fields = value[1]
         self.selected = []
+        self.selected_nodes = []
         self.anchor = self.chain = self.drag = None
         self.refresh()
         self.on_change()
@@ -252,8 +293,10 @@ class SketchEditor(ttk.Frame):
     def choose_tool(self):
         self.anchor = self.hover_point = self.chain = None
         self.curve_points = []
+        if self.tool.get() != 'select':
+            self.selected_nodes = []
         descriptions = {
-            'select': '点击选线，双击选整个轮廓；拖端点改位置、拖线改弧度。Shift 多选。',
+            'select': '点击选点或线，双击选轮廓；Shift 多选。拖线改弧度，拖绿色手柄旋转。',
             'line': '点击起点、终点，或按住拖出一条直线。',
             'polyline': '依次点击连线，点击起点闭合；右键或 Esc 完成，之后可继续画其他轮廓。',
             'bezier': '依次点击起点、两个控制点、终点；画完后拖动控制点塑形。',
@@ -276,6 +319,7 @@ class SketchEditor(ttk.Frame):
         if identifier is not None:
             self.drag = None
             self.selected = next(group[:] for group in self.sketch.groups if identifier in group)
+            self.selected_nodes = []
             self.refresh()
         return 'break'
 
@@ -308,8 +352,30 @@ class SketchEditor(ttk.Frame):
                     result, best = edge['id'], distance
         return result
 
+    def hit_node(self, event):
+        candidates = []
+        for e in self.sketch.edges:
+            nodes = [e['a'], e['b']]
+            if e['id'] in self.selected or self.selected_nodes and set(self.selected_nodes).intersection(e['controls'] or []):
+                nodes += e['controls'] or []
+            for node in nodes:
+                if node is None:
+                    continue
+                x, y = self.to_screen(self.sketch.nodes[node])
+                distance = math.hypot(x-event.x, y-event.y)
+                if distance < 8:
+                    candidates.append((node in self.selected_nodes if getattr(event, 'state', 0) & 1 else False, distance, node))
+        return min(candidates)[2] if candidates else None
+
     def press(self, event):
         self.canvas.focus_set()
+        self.snap_pair = None
+        if self.tool.get() == 'select' and self.rotation_handle:
+            x, y, pivot = self.rotation_handle
+            if math.hypot(event.x-x, event.y-y) < 11:
+                start = ((event.x-self.center_x)/self.scale, (self.center_y-event.y)/self.scale)
+                self.drag = ('rotate', (self.selected[:], pivot), start, self.snapshot())
+                return
         point = self.from_screen(event.x, event.y, snap=self.tool.get() in ('line', 'polyline', 'bezier'))
         if point is None:
             return
@@ -357,17 +423,22 @@ class SketchEditor(ttk.Frame):
         identifier = self.hit(event)
         if tool == 'erase':
             if identifier is not None:
+                self.selected_nodes = []
                 self.transaction(lambda s: s.remove([identifier]))
             return
-        # Selected endpoint handles take precedence over the curve beneath them.
+        # Points are selectable independently; Shift selects two for coincidence.
         if tool == 'select':
-            for selected in self.selected:
-                edge = self.sketch.edge(selected)
-                for node in [edge['a'], *(edge['controls'] or [])] + ([edge['b']] if edge['b'] is not None else []):
-                    x, y = self.to_screen(self.sketch.nodes[node])
-                    if math.hypot(x-event.x, y-event.y) < 8:
-                        self.drag = ('node', node, point, self.snapshot())
-                        return
+            node = self.hit_node(event)
+            if node is not None:
+                self.selected = []
+                if getattr(event, 'state', 0) & 1:
+                    self.selected_nodes = [i for i in self.selected_nodes if i != node] if node in self.selected_nodes else self.selected_nodes+[node]
+                else:
+                    self.selected_nodes = [node]
+                    self.drag = ('node', node, point, self.snapshot())
+                self.refresh()
+                return
+        self.selected_nodes = []
         if getattr(event, 'state', 0) & 1:
             if identifier is not None:
                 self.selected = [i for i in self.selected if i != identifier] if identifier in self.selected else self.selected+[identifier]
@@ -393,6 +464,7 @@ class SketchEditor(ttk.Frame):
                 s.add_polyline([a, b])
         if self.transaction(create):
             self.selected = [self.sketch.edges[-1]['id']]
+            self.selected_nodes = []
             self.refresh()
 
     def hover(self, event):
@@ -411,12 +483,33 @@ class SketchEditor(ttk.Frame):
         if np.linalg.norm(np.subtract(point, start))*self.scale < 2:
             return
         candidate = Sketch.from_document(before[0])
+        self.snap_pair = None
         if kind == 'node':
-            candidate.nodes[identifier] = list(point)
+            moving = candidate.coincident_nodes([identifier])
+            targets = [(np.linalg.norm(np.subtract(p, point)), i) for i, p in enumerate(candidate.nodes)
+                       if i not in moving]
+            target = min(targets, default=(float('inf'), None))
+            if target[0]*self.scale < 7:
+                point = candidate.nodes[target[1]]
+                self.snap_pair = (identifier, target[1])
+            delta = np.subtract(point, candidate.nodes[identifier])
+            for node in moving:
+                candidate.nodes[node] = (np.array(candidate.nodes[node])+delta).tolist()
+        elif kind == 'rotate':
+            ids, pivot = identifier
+            a, b = np.subtract(start, pivot), np.subtract(point, pivot)
+            angle = math.degrees(math.atan2(cross(a, b), np.dot(a, b)))
+            if getattr(event, 'state', 0) & 1:
+                angle = round(angle/15)*15
+            try:
+                candidate.rotate(ids, angle, pivot)
+            except ValueError as error:
+                self.message.set(str(error))
+                return
+            self.message.set(f'旋转 {angle:g}°；按住 Shift 可按 15° 调整。')
         elif kind == 'move':
             delta = np.subtract(point, start)
-            nodes = {n for i in identifier for e in [candidate.edge(i)]
-                     for n in [e['a'], e['b'], *(e['controls'] or [])] if n is not None}
+            nodes = candidate.coincident_nodes(candidate.edge_nodes(identifier))
             for node in nodes:
                 candidate.nodes[node] = (np.array(candidate.nodes[node])+delta).tolist()
         else:
@@ -446,6 +539,7 @@ class SketchEditor(ttk.Frame):
     def release(self, event):
         if self.drag is not None:
             before = self.drag[3]
+            kind = self.drag[0]
             self.drag = None
             if self.sketch.document() != before[0]:
                 candidate = self.sketch.copy()
@@ -453,8 +547,11 @@ class SketchEditor(ttk.Frame):
                 self.raw_fields = before[1]
                 def assign(s):
                     s.__dict__.update(candidate.__dict__)
-                if not self.transaction(assign, solve=True):
+                    if self.snap_pair is not None:
+                        s.constrain('coincident', [], nodes=self.snap_pair)
+                if not self.transaction(assign, solve=kind != 'rotate'):
                     self.draw()
+            self.snap_pair = None
             return
         if self.anchor is not None and self.tool.get() in ('line', 'rectangle', 'circle') and event is not None:
             end = self.from_screen(event.x, event.y, snap=self.tool.get() == 'line')
@@ -471,7 +568,22 @@ class SketchEditor(ttk.Frame):
 
     def add_relation(self, kind):
         ids = self.selected[:]
-        self.transaction(lambda s: s.constrain(kind, ids))
+        nodes = self.selected_nodes[:]
+        available, reason = self.sketch.relation_status(kind, ids, nodes)
+        if not available:
+            self.message.set(reason)
+            return
+        if self.transaction(lambda s: s.constrain(kind, ids, nodes=nodes)):
+            self.message.set(f'已添加{RELATIONS[kind]}关系；选中列表中的关系可移除。')
+
+    def rotate_selected(self):
+        try:
+            degrees = float(self.rotation_value.get())
+        except ValueError:
+            self.message.set('请输入有效角度。')
+            return
+        if self.transaction(lambda s: s.rotate(self.selected, degrees)):
+            self.message.set(f'已旋转 {degrees:g}°，尺寸保持不变；可撤销。')
 
     def dimension(self):
         try:
@@ -499,7 +611,11 @@ class SketchEditor(ttk.Frame):
         choice = self.relation_list.curselection()
         if choice:
             index = self.visible_relations[choice[0]]
-            self.transaction(lambda s: s.constraints.pop(index))
+            name = RELATIONS[self.sketch.constraints[index]['kind']]
+            count = len(self.sketch.constraints)
+            if self.transaction(lambda s: s.remove_constraint(index)):
+                extra = '依赖该重合点的相切关系也已移除。' if len(self.sketch.constraints) < count-1 else ''
+                self.message.set(f'已移除{name}关系，图形保留当前位置；可继续编辑或撤销。'+extra)
 
     def auto_order(self):
         automatic = self.order_auto.get()
@@ -525,15 +641,19 @@ class SketchEditor(ttk.Frame):
         if choice and choice[0] < len(self.sketch.groups):
             _, group = self.sketch.ordered_groups()[choice[0]]
             self.selected = group[:]
+            self.selected_nodes = []
             self.refresh_properties()
             self.draw()
 
     def refresh_properties(self):
         identifiers = {e['id'] for e in self.sketch.edges}
         self.selected = [i for i in self.selected if i in identifiers]
+        self.selected_nodes = [i for i in self.selected_nodes if i in self.sketch.edge_nodes(identifiers)]
         self.selection_text.set('尚未选择线条\n双击选整个轮廓；Shift 多选。')
         options = []
-        if len(self.selected) == 1:
+        if self.selected_nodes:
+            self.selection_text.set(f'已选：{len(self.selected_nodes)} 个点\n按住 Shift 选两个点可设重合。')
+        elif len(self.selected) == 1:
             edge = self.sketch.edge(self.selected[0])
             curve = self.sketch.curve(edge)
             if edge['radius'] is not None:
@@ -571,23 +691,52 @@ class SketchEditor(ttk.Frame):
         elif options:
             self.show_dimension()
         self.relation_list.delete(0, 'end')
+        self.remove_relation_button.configure(state='disabled')
         self.visible_relations = []
+        related_edges = set(self.selected) | {e['id'] for e in self.sketch.edges
+                                            if self.sketch.edge_nodes([e['id']]).intersection(self.selected_nodes)}
+        related_nodes = set(self.selected_nodes) | self.sketch.edge_nodes(self.selected)
         for i, c in enumerate(self.sketch.constraints):
-            if set(c['edges']).intersection(self.selected):
+            if set(c['edges']).intersection(related_edges) or set(c.get('nodes', [])).intersection(related_nodes):
                 label = RELATIONS[c['kind']]+(' '+f"{c['value']:g} mm" if 'value' in c else '')
+                refs = c.get('nodes', []) if c['kind'] == 'coincident' else c['edges']
+                label += ' · '+('点 ' if c['kind'] == 'coincident' else '线 ')+', '.join(str(i+1 if c['kind'] == 'coincident' else i) for i in refs)
                 self.relation_list.insert('end', label)
                 self.visible_relations.append(i)
+        self.refresh_relation_states()
+
+    def refresh_relation_states(self):
+        key = (self.signature(), tuple(self.selected), tuple(self.selected_nodes))
+        if key != self.relation_cache_key:
+            self.relation_cache_key = key
+            self.relation_states = {kind: self.sketch.relation_status(kind, self.selected, self.selected_nodes)
+                                    for kind in self.relation_buttons}
+            self.can_rotate = bool(self.selected and not self.selected_nodes)
+            if self.can_rotate:
+                try:
+                    self.sketch.copy().rotate(self.selected, 1)
+                except ValueError:
+                    self.can_rotate = False
+        for kind, button in self.relation_buttons.items():
+            button.configure(state='normal' if self.relation_states[kind][0] else 'disabled')
+        self.relation_hint.set('可用关系已亮起；指向灰色按钮可查看原因。')
+        self.rotate_button.configure(state='normal' if self.selected and not self.selected_nodes else 'disabled')
+        self.rotation_hint.set('拖绿色手柄旋转；Shift 按 15° 调整。输入正数逆时针，负数顺时针。' if self.can_rotate else
+                               '方向或连接关系限制了自由旋转；可在“关系”页移除，或一起选中相关图形。' if self.selected else
+                               '双击选中轮廓后，可拖绿色手柄或输入角度旋转。')
 
     def show_dimension(self):
-        if not self.selected:
+        if not self.selected or self.selected_nodes:
             self.size_value.set('')
             self.dimension_hint.set('先选中要修改的线条或轮廓。')
             return
         name = self.size_kind.get()
         if name in ('宽度', '高度'):
-            low, high = self.sketch.selection_bounds(self.selected)
+            angle = self.sketch.dimension_angle(self.selected, 'width' if name == '宽度' else 'height')
+            low, high = self.sketch.selection_bounds(self.selected, angle)
             value = (high-low)[0 if name == '宽度' else 1]
-            hint = '沿水平 X 方向的总跨度。' if name == '宽度' else '沿竖直 Y 方向的总跨度。'
+            hint = ('沿水平 X 方向的总跨度。' if name == '宽度' else '沿竖直 Y 方向的总跨度。') if abs(angle % 180) < 1e-6 else f'沿图形的标注方向测量（旋转 {angle:g}°）。'
+            hint += '旋转图形时，标注方向一起转动。'
         else:
             curve = self.sketch.curve(self.sketch.edge(self.selected[0]))
             value = np.linalg.norm(curve.end-curve.start) if name == '长度' else curve.radius*(2 if name == '直径' else 1)
@@ -610,14 +759,31 @@ class SketchEditor(ttk.Frame):
         self.draw()
 
     def fit(self):
-        values = [abs(v) for p in self.sketch.nodes for v in p]
-        for edge in self.sketch.edges:
-            if edge['radius'] is not None:
-                values += [abs(v)+edge['radius'] for v in self.sketch.nodes[edge['a']]]
-        self.view_span = max(60, min(660, max(values, default=20)*2.5))
+        low = PALM_OUTLINE.min(axis=0)-[self.cx, self.cy]
+        high = PALM_OUTLINE.max(axis=0)+[0, 10]-[self.cx, self.cy]
+        if self.sketch.edges:
+            a, b = self.sketch.selection_bounds([e['id'] for e in self.sketch.edges])
+            low, high = np.minimum(low, a), np.maximum(high, b)
+        self.fit_bounds = (low, high)
         self.draw()
 
+    def fit_to_palm(self):
+        if not self.sketch.edges:
+            return
+        def resize(s):
+            ids = [e['id'] for e in s.edges]
+            low, high = s.selection_bounds(ids)
+            # A modest box inside the illustrative palm, with room around its edges.
+            factor = float(min(1.0, *(np.array([52.0, 50.0])/np.maximum(high-low, .001))))
+            s.scale(factor)
+            delta = np.array([2.0, -5.0])-np.array([self.cx, self.cy])-(low+high)*factor/2
+            s.nodes = [(np.array(p)+delta).tolist() for p in s.nodes]
+        if self.transaction(resize):
+            self.fit()
+            self.message.set('已等比例缩小并移到掌面参考中央，已设尺寸同步更新；可撤销。')
+
     def zoom(self, factor):
+        self.fit_bounds = None
         self.view_span = min(660, max(2, self.view_span*factor))
         self.draw()
         return 'break'
@@ -625,18 +791,31 @@ class SketchEditor(ttk.Frame):
     def draw(self):
         c = self.canvas
         c.delete('all')
-        width, height = max(c.winfo_width(), 240), max(c.winfo_height(), 180)
-        self.left, self.top, self.right, self.bottom = 35, 25, width-18, height-30
-        self.center_x, self.center_y = (self.left+self.right)/2, (self.top+self.bottom)/2
+        width, height = max(c.winfo_width(), 140), max(c.winfo_height(), 160)
+        self.left, self.top, self.right, self.bottom = 4, 6, width-4, height-14
+        if self.fit_bounds is not None:
+            low, high = self.fit_bounds
+            self.view_center = (low+high)/2
+            fit_scale = min((self.right-self.left)/(high-low)[0], (self.bottom-self.top)/(high-low)[1])*.94
+            self.view_span = min(self.right-self.left, self.bottom-self.top)/fit_scale
         self.scale = min(self.right-self.left, self.bottom-self.top)/self.view_span
+        self.center_x = (self.left+self.right)/2-self.view_center[0]*self.scale
+        self.center_y = (self.top+self.bottom)/2+self.view_center[1]*self.scale
         c.create_rectangle(self.left, self.top, self.right, self.bottom, fill='white', outline='#dce5ef')
         c.create_line(self.left, self.center_y, self.right, self.center_y, fill='#dce5ef')
         c.create_line(self.center_x, self.top, self.center_x, self.bottom, fill='#dce5ef')
-        c.create_text(self.right, height-12, text=f'毫米 · 视野 {self.view_span:g} mm', anchor='e', fill='#647994')
-        c.create_text(8, 10, text=f'原点 ({self.cx:g}, {self.cy:g}) mm', anchor='w', fill='#647994')
+        palm_positions = [self.to_screen(p-np.array([self.cx, self.cy])) for p in HAND_OUTLINE]
+        for a, b in zip(palm_positions, palm_positions[1:]):
+            clipped = clip_segment((self.left, self.top, self.right, self.bottom), a, b)
+            if clipped:
+                c.create_line(*clipped, fill='#e4dbd1', width=1.5, tags='palm_reference')
+        c.create_text(self.right, height-8, text=f'毫米 · 视野 {self.view_span:.0f} mm', anchor='e', fill='#647994', font=('Microsoft YaHei UI', 8))
+        drawn_paths = []
         for edge in self.sketch.edges:
             curve = self.sketch.curve(edge)
-            positions = [self.to_screen(p) for p in curve.samples(tolerance=.08)]
+            points = curve.samples(tolerance=.08)
+            drawn_paths.append(np.asarray(points)+[self.cx, self.cy])
+            positions = [self.to_screen(p) for p in points]
             if np.linalg.norm(curve.end-curve.start) < .001 and curve.center is None and not isinstance(curve, Bezier):
                 x, y = positions[0]
                 c.create_oval(x-4, y-4, x+4, y+4, fill='#2463c5', outline='white', tags='sketch_line')
@@ -645,14 +824,16 @@ class SketchEditor(ttk.Frame):
                 if clipped:
                     c.create_line(*clipped, fill='#e68a2e' if edge['id'] in self.selected else '#2463c5',
                                   width=3 if edge['id'] in self.selected else 2, tags='sketch_line')
-            if edge['id'] in self.selected:
+            if edge['id'] in self.selected or self.sketch.edge_nodes([edge['id']]).intersection(self.selected_nodes):
                 nodes = [edge['a'], *(edge['controls'] or [])] + ([edge['b']] if edge['b'] is not None else [])
                 if edge['controls'] is not None:
                     coords = [v for node in nodes for v in self.to_screen(self.sketch.nodes[node])]
                     c.create_line(*coords, fill='#bc965c', dash=(3, 4), tags='control_polygon')
                 for node in nodes:
                     x, y = self.to_screen(self.sketch.nodes[node])
-                    c.create_rectangle(x-4, y-4, x+4, y+4, fill='white', outline='#e68a2e', tags='handle')
+                    c.create_rectangle(x-4, y-4, x+4, y+4, fill='#e68a2e' if node in self.selected_nodes else 'white', outline='#e68a2e', tags='handle')
+                    if node in self.selected_nodes:
+                        c.create_text(x+7, y-10, text=f'点 {node+1}', anchor='w', fill='#996225', tags='point_label')
                 x, y = self.to_screen(curve.point(.5))
                 c.create_oval(x-4, y-4, x+4, y+4, fill='#e68a2e', outline='white', tags='handle')
         for relation in self.sketch.constraints:
@@ -660,28 +841,43 @@ class SketchEditor(ttk.Frame):
                 continue
             if self.selected and not set(relation['edges']).intersection(self.selected):
                 continue
-            low, high = self.sketch.selection_bounds(relation['edges'])
-            left, bottom = self.to_screen(low)
-            right, top = self.to_screen(high)
+            angle = relation.get('angle', 0.0)
+            low, high = self.sketch.selection_bounds(relation['edges'], angle)
             name = relation['kind']
             color = '#996225' if set(relation['edges']).intersection(self.selected) else '#768b99'
             label = f"{RELATIONS[name]} {relation['value']:g} mm"
-            if name == 'width':
-                y = bottom+18
-                c.create_line(left, bottom, left, y+4, fill=color, tags='dimension')
-                c.create_line(right, bottom, right, y+4, fill=color, tags='dimension')
-                c.create_line(left, y, right, y, arrow='both', fill=color, tags='dimension')
-                c.create_text((left+right)/2, y+10, text=label, fill=color, tags='dimension')
-            elif name == 'height':
-                x = right+18
-                c.create_line(right, bottom, x+4, bottom, fill=color, tags='dimension')
-                c.create_line(right, top, x+4, top, fill=color, tags='dimension')
-                c.create_line(x, bottom, x, top, arrow='both', fill=color, tags='dimension')
-                c.create_text(x+8, (top+bottom)/2, text=label, anchor='w', fill=color, tags='dimension')
+            if name in ('width', 'height'):
+                offset = 18/self.scale
+                if name == 'width':
+                    a, b = np.array([low[0], low[1]]), np.array([high[0], low[1]])
+                    delta = np.array([0, -offset])
+                else:
+                    a, b = np.array([high[0], low[1]]), np.array([high[0], high[1]])
+                    delta = np.array([offset, 0])
+                matrix = rotation_matrix(angle)
+                screen = lambda p: self.to_screen(matrix @ p)
+                c.create_line(*screen(a), *screen(a+delta*1.25), fill=color, tags='dimension')
+                c.create_line(*screen(b), *screen(b+delta*1.25), fill=color, tags='dimension')
+                c.create_line(*screen(a+delta), *screen(b+delta), arrow='both', fill=color, tags='dimension')
+                c.create_text(*screen((a+b)/2+delta*1.7), text=label,
+                              anchor='w' if name == 'height' and not angle else 'center', fill=color, tags='dimension')
             else:
                 curve = self.sketch.curve(self.sketch.edge(relation['edges'][0]))
                 x, y = self.to_screen(curve.point(.5))
                 c.create_text(x+7, y-15, text=label, anchor='w', fill=color, tags='dimension')
+        self.rotation_handle = None
+        if self.selected and not self.selected_nodes and getattr(self, 'can_rotate', False) and self.tool.get() == 'select':
+            low, high = self.sketch.selection_bounds(self.selected)
+            pivot = (low+high)/2
+            if self.drag and self.drag[0] == 'rotate':
+                pivot = np.array(self.drag[1][1])
+            x, y = self.to_screen([(low[0]+high[0])/2, high[1]])
+            y = max(self.top+13, y-34)
+            x = min(self.right-13, max(self.left+13, x))
+            c.create_line(*self.to_screen(pivot), x, y, fill='#98c1b5', dash=(3, 4), tags='rotation_handle')
+            c.create_oval(x-9, y-9, x+9, y+9, fill='#edf8f2', outline='#308c6c', width=2, tags='rotation_handle')
+            c.create_text(x, y, text='↻', fill='#308c6c', tags='rotation_handle')
+            self.rotation_handle = (x, y, pivot.tolist())
         if self.curve_points:
             pts = self.curve_points+([self.hover_point] if self.hover_point is not None else [])
             if len(pts) > 1:
@@ -706,3 +902,8 @@ class SketchEditor(ttk.Frame):
                     c.create_line(x, y, u, v, fill='#087e8b', dash=(4, 3))
         if not self.sketch.edges:
             c.create_text(width/2, height/2-20, text='选择上方工具，开始绘制草图', fill='#647994', font=('Microsoft YaHei UI', 12))
+        # The same mm reference is used by the editor and palm preview. It only
+        # warns, never crops paths, rescales silently, or blocks transmission.
+        notice = palm_warning(drawn_paths)
+        self.palm_notice.set(notice or '淡色轮廓为手掌参考；每个人的手掌大小不同，轻微超出不影响操作。')
+        self.palm_label.configure(foreground='#ad711e' if notice else '#8a8179')

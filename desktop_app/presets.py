@@ -7,6 +7,7 @@ import numpy as np
 
 from .model import SHAPES, trajectory_path, trajectory_paths
 from .hand_view import HandView
+from .palm import palm_warning
 
 
 class PresetPreview(ttk.Frame):
@@ -21,6 +22,8 @@ class PresetPreview(ttk.Frame):
         self.apply_button.pack(side="bottom", anchor="w", pady=(10, 0))
         self.dimensions = tk.StringVar()
         ttk.Label(self, textvariable=self.dimensions, style="Muted.TLabel").pack(side="bottom", pady=(6, 0))
+        self.warning = tk.StringVar()
+        ttk.Label(self, textvariable=self.warning, foreground='#ad711e', wraplength=700).pack(side='bottom', pady=(4, 0))
         self.canvas = tk.Canvas(self, bg="#ffffff", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda _: self.draw())
@@ -37,6 +40,7 @@ class PresetPreview(ttk.Frame):
         if self.config is None:
             self.title.set("请检查图形参数")
             self.dimensions.set("")
+            self.warning.set('')
             return
         config = self.config
         self.title.set(f"{SHAPES[config.shape]} · 待发送")
@@ -52,3 +56,4 @@ class PresetPreview(ttk.Frame):
                 x, y = positions[0]
                 c.create_oval(x-7, y-7, x+7, y+7, fill="#2463c5", outline="", tags='preview_path')
         self.dimensions.set(f"宽 {high[0]-low[0]:g} mm · 高 {high[1]-low[1]:g} mm · 显示高度 {config.z_um/1000:g} mm")
+        self.warning.set(palm_warning([stroke[:, :2] for stroke in trajectory_paths(config)]))

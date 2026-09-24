@@ -20,6 +20,8 @@ from desktop_app.app import App
 from desktop_app.controller import Session
 from desktop_app.transport import DemoTransport
 from desktop_app.model import ARRAY_PRESETS, Config, SHAPES, encode_points, trajectory_point
+from desktop_app.sketch import Sketch, rotation_matrix
+from desktop_app.palm import HAND_OUTLINE, PALM_OUTLINE
 
 
 def main():
@@ -93,9 +95,9 @@ def main():
         root.update_idletasks()
         editor = app.editor
 
-        def event(point):
+        def event(point, shift=False):
             x, y = editor.to_screen(point)
-            return SimpleNamespace(x=x, y=y, state=0)
+            return SimpleNamespace(x=x, y=y, state=1 if shift else 0)
 
         def tool(name):
             editor.tool.set(name)
@@ -104,6 +106,68 @@ def main():
         def click(point):
             editor.press(event(point))
             editor.release(event(point))
+
+        check(editor.canvas.find_withtag('palm_reference'), 'Faint palm reference is visible while drawing')
+        for point in PALM_OUTLINE:
+            x, y = editor.to_screen(point)
+            check(editor.left <= x <= editor.right and editor.top <= y <= editor.bottom,
+                  'Entire palm fits inside the initial drawing surface; fingers may extend beyond it')
+        check(editor.from_screen((editor.left+editor.right)/2, editor.top+1) is not None,
+              'Drawing near the top is allowed')
+        drawable_fraction = (editor.right-editor.left)*(editor.bottom-editor.top)/(editor.canvas.winfo_width()*editor.canvas.winfo_height())
+        check(drawable_fraction > .85, 'At least 85 percent of the canvas accepts points')
+        capture('demo-hand-editor.png')
+        fingertip = HAND_OUTLINE[np.argmax(HAND_OUTLINE[:, 1])]
+        check(editor.to_screen(fingertip)[1] < editor.top, 'Palm view naturally crops the upper fingers')
+        original_scale = editor.scale
+        editor.zoom(2.4)
+        x, y = editor.to_screen(fingertip)
+        check(editor.left <= x <= editor.right and editor.top <= y <= editor.bottom,
+              'Zooming out reveals actual fingers rather than empty background')
+        check(abs(editor.scale-original_scale/2.4) < 1e-8, 'Hand and drawing use the same zoom transform')
+        capture('demo-hand-zoomed.png')
+        editor.fit()
+        tool('polyline')
+        click((-20, 0))
+        click((-5, 0))
+        editor.finish()
+        tool('polyline')
+        click((5, 3))
+        click((20, 8))
+        editor.finish()
+        click((-5, 0))
+        editor.press(event((5, 3), shift=True))
+        editor.release(event((5, 3), shift=True))
+        check(len(editor.selected_nodes) == 2, 'Shift selects two endpoints independently of edges')
+        check(str(editor.relation_buttons['coincident']['state']) == 'normal', 'Coincidence enabled for distinct endpoints')
+        check(str(editor.relation_buttons['parallel']['state']) == 'disabled', 'Point selection cannot set line relations')
+        editor.relation_buttons['coincident'].invoke()
+        nodes = editor.selected_nodes[:]
+        np.testing.assert_allclose(editor.sketch.nodes[nodes[0]], editor.sketch.nodes[nodes[1]], atol=.002)
+        check(str(editor.relation_buttons['coincident']['state']) == 'disabled', 'Existing coincidence is disabled')
+        editor.property_tabs.select(1)
+        capture('demo-sketch-relations.png')
+        editor.relation_list.selection_set(0)
+        editor.relation_list.event_generate('<<ListboxSelect>>')
+        root.update()
+        editor.remove_relation_button.invoke()
+        check(not editor.sketch.constraints, 'Selected coincidence is removable')
+        editor.undo()
+        check(editor.sketch.constraints[0]['kind'] == 'coincident', 'Undo restores removed coincidence')
+        origin = np.array(editor.sketch.nodes[nodes[0]])
+        editor.press(event(origin))
+        editor.motion(event(origin+[1, 2]))
+        editor.release(event(origin+[1, 2]))
+        np.testing.assert_allclose(editor.sketch.nodes[nodes[0]], editor.sketch.nodes[nodes[1]], atol=.002)
+        # Drag-to-snap creates the same persistent relation, rather than moving once.
+        editor.restore((Sketch().document(), None))
+        editor.transaction(lambda s: (s.add_polyline([(-20, 0), (-5, 0)]), s.add_polyline([(5, 5), (20, 10)])))
+        editor.press(event((-5, 0)))
+        editor.motion(event((5, 5)))
+        editor.release(event((5, 5)))
+        check(any(c['kind'] == 'coincident' for c in editor.sketch.constraints), 'Dropping a point on another adds coincidence')
+        editor.restore((Sketch().document(), None))
+        editor.property_tabs.select(0)
 
         tool('rectangle')
         editor.press(event((-18.123, -13.789)))
@@ -123,6 +187,28 @@ def main():
         editor.size_value.set('25')
         editor.dimension()
         check(editor.canvas.find_withtag('dimension'), 'Assigned dimensions appear on drawing')
+        original = editor.signature()
+        before_rotation = np.array(editor.sketch.nodes)
+        center = before_rotation.mean(axis=0)
+        editor.rotation_value.set('30')
+        editor.rotate_button.invoke()
+        np.testing.assert_allclose(editor.sketch.nodes, (before_rotation-center) @ rotation_matrix(30).T+center, atol=1e-7)
+        check(abs(float(editor.size_value.get())-25) < .002, 'Rotation keeps displayed dimension value')
+        check(editor.canvas.find_withtag('rotation_handle'), 'Rotation handle is visible on whole contour')
+        rotated = editor.signature()
+        editor.undo()
+        check(editor.signature() == original, 'Rotation can be undone')
+        editor.redo()
+        check(editor.signature() == rotated, 'Rotation can be redone')
+        editor.selected = editor.sketch.groups[0][:]
+        editor.refresh()
+        x, y, pivot = editor.rotation_handle
+        handle_start = ((x-editor.center_x)/editor.scale, (editor.center_y-y)/editor.scale)
+        handle_end = np.array(pivot)+rotation_matrix(-30) @ (np.array(handle_start)-pivot)
+        editor.press(event(handle_start))
+        editor.motion(event(handle_end, shift=True))
+        editor.release(event(handle_end, shift=True))
+        np.testing.assert_allclose(editor.sketch.nodes, before_rotation, atol=1e-7)
         before_move = np.array(editor.sketch.nodes[:4])
         first_curve = editor.sketch.curve(editor.sketch.edge(1))
         midpoint = first_curve.point(.5)
@@ -140,6 +226,7 @@ def main():
         editor.dimension()
         check(editor.sketch.constraints[-1]['value'] == 32.125, 'Dimension becomes persistent geometry relation')
         original = editor.signature()
+        check(str(editor.relation_buttons['vertical']['state']) == 'disabled', 'Conflicting relation is disabled before clicking')
         editor.add_relation('vertical')
         check(editor.signature() == original, 'Conflicting relation is rejected without changing draft')
         tool('circle')
@@ -147,6 +234,7 @@ def main():
         click((29, 4))
         check(len(editor.sketch.groups) == 2, 'Independent circle does not replace rectangle')
         check(editor.size_kind.get() == '直径' and '两倍半径' in editor.dimension_hint.get(), 'Circle diameter is explicit')
+        check(str(editor.relation_buttons['horizontal']['state']) == 'disabled', 'Circle cannot have a horizontal relation')
         editor.size_value.set('10')
         editor.dimension()
         tool('polyline')
@@ -193,6 +281,10 @@ def main():
         check(all(e['id'] != circle['id'] for e in editor.sketch.edges), 'Eraser deletes selected circle')
         editor.undo()
         check(any(e['id'] == circle['id'] for e in editor.sketch.edges), 'Undo restores erased geometry and order')
+        editor.selected = editor.sketch.groups[0][:]
+        editor.refresh()
+        editor.rotation_value.set('27')
+        editor.rotate_button.invoke()
         app.preview_sketch()
         root.update_idletasks()
         check(app.preset_preview.canvas.find_withtag('hand_reference'), 'Sketch preview uses hand illustration')
@@ -205,6 +297,17 @@ def main():
         editor.refresh()
         capture('demo-sketch-dimensions.png')
         custom = app.get_config()
+        # Palm guidance shares the preview coordinates, includes global offsets,
+        # and offers an explicit (undoable) fit instead of changing geometry silently.
+        app.vars['cx_um'].set('60')
+        app.sync_editor()
+        check('明显超出' in editor.palm_notice.get(), 'Large palm overhang warns while editing')
+        check('明显超出' in app.preset_preview.warning.get(), 'Preview uses the same palm warning')
+        editor.fit_to_palm()
+        check('明显超出' not in editor.palm_notice.get(), 'Fit moves the drawing into palm even with a global offset: '+editor.message.get())
+        editor.undo()
+        app.vars['cx_um'].set('0')
+        check(abs(editor.view_center[0]) < 10, 'Returning the offset to zero recenters the palm framing')
         app.editor.zoom(.8)
         root.geometry("1200x820+25+25")
         root.update_idletasks()
@@ -282,6 +385,13 @@ def main():
         app.set_config(app.state.config)
         app.update_controls()
         check(str(app.start_button["state"]) == "disabled", "Matching default figure is not an upload receipt")
+        app.set_config(custom)
+        oversized = replace(custom, cx_um=60000)
+        app.set_config(oversized)
+        app.update_controls()
+        check('明显超出' in app.preset_preview.warning.get(), 'Large-hand scenario displays a warning')
+        check(str(app.apply_button['state']) == 'normal', 'Palm warning never disables sending within device limits')
+        capture('demo-palm-warning.png')
         app.set_config(custom)
         app.start_button.invoke()
         app.send("START")
