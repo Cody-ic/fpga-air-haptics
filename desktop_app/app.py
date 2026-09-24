@@ -419,13 +419,11 @@ class App:
         if enabled:
             self.hardware_detail.pack(fill="x", pady=(2, 5), before=self.tabs)
             self.actual_detail.pack(fill="x", pady=(2, 8), before=self.tabs)
-            self.baud_label.pack(side="left", before=self.connect_button)
-            self.baud_picker.pack(side="left", padx=8, before=self.connect_button)
             self.protocol_label.pack(side="right")
             self.demo_box.grid()
             self.device_details.pack(fill="x", pady=(18, 0))
         else:
-            for widget in (self.hardware_detail, self.actual_detail, self.baud_label, self.baud_picker, self.protocol_label, self.device_details):
+            for widget in (self.hardware_detail, self.actual_detail, self.protocol_label, self.device_details):
                 widget.pack_forget()
             self.demo_box.grid_remove()
         self.editor.set_debug(enabled)
