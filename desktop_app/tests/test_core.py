@@ -339,7 +339,8 @@ class SerialAdapterTests(unittest.TestCase):
             port.in_waiting = 7
             port.read.return_value = b"example"
             port.write.return_value = 4
-            transport = SerialTransport("COM99", 115200)
+            transport = SerialTransport("COM99", 31250)
+            self.assertEqual(constructor.call_args.kwargs['baudrate'], 31250)
             self.assertFalse(port.dtr)
             self.assertFalse(port.rts)
             self.assertEqual(port.port, "COM99")

@@ -44,6 +44,9 @@ TEAL = "#087e8b"
 RED = "#b02d40"
 AMBER = "#966414"
 WHITE = "#ffffff"
+BAUD_RATES = (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
+              230400, 460800, 500000, 921600, 1000000, 1500000,
+              2000000, 3000000)
 
 
 class PlotPanel(ttk.Frame):
@@ -236,12 +239,13 @@ class App:
         self.baud_label = ttk.Label(connection, text="波特率")
         self.baud_label.pack(side="left")
         self.baud_picker = ttk.Combobox(connection, textvariable=self.baud_choice, width=9,
-                                       values=["115200", "230400", "460800", "921600"], state="readonly")
+                                       values=[str(rate) for rate in BAUD_RATES], height=12, state="normal")
         self.baud_picker.pack(side="left", padx=8)
         self.connect_button = ttk.Button(connection, text="连接", style="Primary.TButton", command=self.connect)
         self.connect_button.pack(side="left", padx=(0, 6))
         self.disconnect_button = ttk.Button(connection, text="断开", command=self.disconnect)
         self.disconnect_button.pack(side="left")
+        ttk.Label(connection, text="波特率可输入，需与板端一致", style="Muted.TLabel").pack(side="left", padx=8)
         self.protocol_label = ttk.Label(connection, text="HAP3 · 双向串口 · 8N1", style="Muted.TLabel")
         self.protocol_label.pack(side="right")
         ttk.Label(self.root, textvariable=self.status_line, style="Muted.TLabel", padding=(22,7),
@@ -598,10 +602,19 @@ class App:
         if not demo and not self.port_choice.get().strip():
             messagebox.showinfo("选择串口", "请先选择或输入 FPGA 的 COM 端口。", parent=self.root)
             return
-        try:
-            baud = int(self.baud_choice.get())
-        except ValueError:
-            return
+        baud = 115200  # Demo has no physical UART and does not use this field.
+        if not demo:
+            try:
+                value = self.baud_choice.get().strip()
+                if not value.isascii() or not value.isdecimal():
+                    raise ValueError
+                baud = int(value)
+                if not 1 <= baud <= 0xffffffff:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("波特率无效", "请输入有效的正整数波特率，例如 115200 或 1000000。", parent=self.root)
+                self.baud_picker.focus_set()
+                return
         self.generation += 1
         self.state, self.received, self.ready, self.busy = None, 0.0, False, False
         self.hardware, self.workspace, self.capabilities = None, None, set()
@@ -871,7 +884,7 @@ class App:
         self.connection_picker.configure(state="disabled" if alive else "readonly")
         serial_selected = self.mode_choice.get() == "真实串口"
         self.port_picker.configure(state="normal" if not alive and serial_selected else "disabled")
-        self.baud_picker.configure(state="readonly" if not alive and serial_selected else "disabled")
+        self.baud_picker.configure(state="normal" if not alive and serial_selected else "disabled")
         self.refresh_button.configure(state="normal" if not alive else "disabled")
         self.demo_array_picker.configure(state="readonly" if not alive and not serial_selected else "disabled")
         for entry in self.hw_entries:

@@ -63,10 +63,13 @@ def main():
         if not condition:
             raise AssertionError(message)
 
-    def capture(name):
+    def capture(name, prepare=None):
         root.lift()
         root.attributes("-topmost", True)
         root.update()
+        if prepare:
+            prepare()
+            root.update()
         time.sleep(.15)
         try:
             from PIL import ImageGrab
@@ -83,6 +86,31 @@ def main():
         check(not app.debug_mode.get(), "Start in user mode")
         check(all(app.tabs.tab(tab, "state") == "hidden" for tab in app.debug_tabs), "Hide debug tabs")
         check(not app.hardware_detail.winfo_ismapped(), "Hide engineering details in user mode")
+        app.mode_choice.set('真实串口')
+        app.port_choice.set('COM99')
+        app.update_controls()
+        check(str(app.baud_picker['state']) == 'normal', 'Baud rate accepts typed values outside presets')
+        for invalid in ('', '0', '-9600', '115200.5', 'abc', '4294967296'):
+            app.baud_choice.set(invalid)
+            with patch('desktop_app.app.messagebox.showerror') as error, patch('desktop_app.app.Session') as session:
+                app.connect()
+                check(error.called and not session.called, 'Invalid baud is explained before any connection')
+        app.baud_choice.set('115200')
+        capture('serial-baud-options.png', lambda: root.tk.call('ttk::combobox::Post', str(app.baud_picker)))
+        root.tk.call('ttk::combobox::Unpost', str(app.baud_picker))
+        app.baud_choice.set('31250')
+        with patch('desktop_app.app.Session') as session:
+            session.return_value.is_alive.return_value = True
+            session.return_value.is_demo = False
+            app.connect()
+            check(session.call_args.args == (False, 'COM99', 31250), 'Custom baud reaches the real serial session unchanged')
+            check(str(app.baud_picker['state']) == 'disabled', 'Baud cannot change during a connection')
+            app.disconnect()
+        app.session = None
+        app.update_controls()
+        app.baud_choice.set('115200')
+        app.mode_choice.set('Demo 模拟设备')
+        app.update_controls()
         capture("demo-startup.png")
         app.tabs.select(5)
         capture("demo-device.png")
