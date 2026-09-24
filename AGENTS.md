@@ -5,11 +5,12 @@
 This workspace prepares for the 2026 FPGA Innovation Design competition. It currently contains documentation only:
 
 - `README.md`: project overview, current direction, and documentation links.
+- `设计思路.md`: current architecture, interfaces, validation plan, and open decisions.
 - `FPGA赛道选题建议(1).md`: primary research document covering rules, vendor platforms, previous winners, candidate projects, milestones, and references.
 - `CLAUDE.md`: existing project context and assistant guidance.
 - `AGENTS.md`: contributor guidelines.
 
-There are no source, test, or asset directories. Keep research in the existing document; introduce implementation directories only when an actual hardware or software project begins.
+There are no source, test, or asset directories. Maintain current decisions in `设计思路.md` and background research in the original document; add implementation directories when development begins.
 
 ## Build, Test, and Development Commands
 
@@ -37,4 +38,4 @@ Use concise imperative messages, for example `docs: clarify microphone bandwidth
 
 ## Project Decision Constraints
 
-As of 2026-09-14, the team intends to pursue the mid-air haptic graphics display in section 6.2. The research document's original bat-monitor recommendation is historical. Prioritize single-focus tactile validation; treat multi-focus rendering and levitation as extensions. Proposals must explain PL processing, measurable benefits, and schedule feasibility.
+As of 2026-09-24, the team has selected Tang Mega 60K for the haptic display. Follow `设计思路.md`: FPGA handles real-time processing, external buttons enable independent operation, and serial software supports configuration and validation. Array size and components remain provisional; prioritize single-focus validation before extensions.

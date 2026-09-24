@@ -3,6 +3,8 @@
 整理日期：2026-09-04（选题部分于同日修订为场景优先版）
 适用赛季：2026 年（第十届 FPGA 创新设计赛道）
 
+> 2026-09-24 状态补充：团队已选择第 6.2 节触觉图形显示方向，当前设计见 [设计思路](设计思路.md)。本文保留早期调研记录，推荐排序、竞赛检索结论及性能目标不代表当前决策或实测结果；原文对既有 Zynq 方案的板内相位计算能力表述不准确，修正说明见设计思路第 7、9 节。
+
 ---
 
 ## 1. 赛事概况与 2026 时间节点
@@ -323,6 +325,10 @@
 ---
 
 ## 9. 参考资料
+
+- Sipeed Tang Mega 60K 官方说明（2026-09-24 核对）：https://wiki.sipeed.com/hardware/zh/tang/tang-mega-60k/mega-60k.html
+- Sipeed Tang Mega 60K 官方示例（2026-09-24 核对）：https://github.com/sipeed/TangMega-60K-example
+- Zynq 相控阵论文 v2（包含板内相位计算加速，2026-09-24 核对）：https://arxiv.org/html/1901.07317v2
 
 - 2026 年 FPGA 赛道选题指南（安路）：https://www.anlogic.com/support/university/competitions/eda/news1/42.html
 - 2026 年 FPGA 创新设计竞赛通知（北航教务部转发）：https://jiaowu.buaa.edu.cn/info/1016/9028.htm
