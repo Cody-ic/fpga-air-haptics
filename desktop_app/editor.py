@@ -63,7 +63,7 @@ class PathEditor(ttk.Frame):
         self.preview_button = ttk.Button(bottom, text="声场预览", command=on_preview)
         self.apply_button = ttk.Button(bottom, text="发送到设备", command=on_apply)
         self.apply_button.pack(side="left", padx=4)
-        ttk.Label(bottom, text="发送后点击播放。", foreground="#526680").pack(side="left", padx=10)
+        ttk.Label(bottom, text="发送成功后，在播放画面中点击播放。", foreground="#526680").pack(side="left", padx=10)
 
     def set_debug(self, enabled):
         if enabled:

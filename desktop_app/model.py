@@ -14,7 +14,7 @@ import re
 import numpy as np
 
 SHAPES = {"POINT": "固定点", "LINE_X": "水平线", "LINE_Y": "竖直线",
-          "CIRCLE": "圆", "TRIANGLE": "三角形", "ARROW": "箭头", "CUSTOM": "自定义图形"}
+          "CIRCLE": "圆", "SQUARE": "正方形", "TRIANGLE": "三角形", "ARROW": "箭头", "CUSTOM": "自定义图形"}
 ARRAY_PRESETS = {"4 × 4 · 16 路": (4, 4), "6 × 6 · 36 路": (6, 6),
                  "8 × 8 · 64 路": (8, 8), "12 × 12 · 144 路": (12, 12),
                  "16 × 16 · 256 路": (16, 16), "自定义行列": None}
@@ -248,6 +248,8 @@ def trajectory_point(config, seconds):
         xy = np.array([position, 0.0] if config.shape == "LINE_X" else [0.0, position])
     elif config.shape == "TRIANGLE":
         xy = _polyline([(0, 1), (-0.866, -0.5), (0.866, -0.5), (0, 1)], fraction)
+    elif config.shape == "SQUARE":
+        xy = _polyline([(-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1)], fraction)
     else:
         xy = _polyline([(-1, 0), (1, 0), (0.3, 0.7), (1, 0), (0.3, -0.7),
                         (1, 0), (-1, 0)], fraction)
@@ -269,7 +271,7 @@ def trajectory_bounds(config):
     else:
         r = config.radius_um
         spans = {"POINT": (0, 0), "LINE_X": (r, 0), "LINE_Y": (0, r),
-                 "CIRCLE": (r, r), "TRIANGLE": (.866*r, r), "ARROW": (r, .7*r)}
+                 "CIRCLE": (r, r), "SQUARE": (r, r), "TRIANGLE": (.866*r, r), "ARROW": (r, .7*r)}
         dx, dy = spans[config.shape]
         low = np.array([-dx, -dy if config.shape != "TRIANGLE" else -.5*r])
         high = np.array([dx, dy])

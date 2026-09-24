@@ -140,7 +140,10 @@ class DemoDevice:
         now = self.clock()
         if self.mode == "REMOTE" and self.state in ("RUNNING", "PAUSED") and now - self.last_ping > 3:
             self._stop("HEARTBEAT_TIMEOUT")
-        if self.connected and now - self.last_tx >= 0.5:
+        # In-memory Demo feedback is faster for visible motion; this is not a
+        # claim about serial throughput or the eventual FPGA scanning rate.
+        interval = 0.05 if self.state == "RUNNING" else 0.5
+        if self.connected and now - self.last_tx >= interval:
             self.last_tx = now
             return [self.snapshot()]
         return []

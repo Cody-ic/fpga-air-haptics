@@ -163,6 +163,16 @@ class DemoTests(unittest.TestCase):
         response = self.call("CONFIG", **Config(cx_um=100000, radius_um=80000).wire(), **self.device.array.wire())
         self.assertEqual(response[0].fields["code"], "OUT_OF_WORKSPACE")
 
+    def test_square_preset_upload_and_path(self):
+        config = Config(shape="SQUARE", radius_um=10000)
+        response = self.call("CONFIG", **config.wire(), **self.device.array.wire())
+        self.assertEqual(response[0].kind, "ACK")
+        self.assertEqual(Snapshot.parse(response[1].fields).config, config)
+        for seconds, xy in ((0, [-10, -10]), (.5, [10, -10]), (1, [10, 10]), (1.5, [-10, 10])):
+            np.testing.assert_allclose(trajectory_point(config, seconds)[:2], xy)
+        self.assertFalse(self.device.workspace.incompatibility(config))
+        self.assertTrue(self.device.workspace.incompatibility(replace(config, cx_um=100000)))
+
     def test_pause_resume_and_heartbeat_timeout(self):
         self.call("START")
         self.now = .25
@@ -177,6 +187,18 @@ class DemoTests(unittest.TestCase):
         self.device.poll()
         self.assertEqual(self.device.state, "IDLE")
         self.assertEqual(self.device.reason, "HEARTBEAT_TIMEOUT")
+
+    def test_demo_running_feedback_moves_and_paused_feedback_stays_fixed(self):
+        self.call("START")
+        initial = Snapshot.parse(decode(self.device.poll()[0]).fields)
+        self.now = .06
+        moved = Snapshot.parse(decode(self.device.poll()[0]).fields)
+        self.assertNotEqual(initial.focus_mm, moved.focus_mm)
+        self.call("PAUSE")
+        self.now = .7
+        paused = Snapshot.parse(decode(self.device.poll()[0]).fields)
+        self.assertEqual(paused.focus_mm, moved.focus_mm)
+        self.assertFalse(paused.output)
 
     def test_local_buttons_and_independent_operation(self):
         self.call("MODE", value="LOCAL")

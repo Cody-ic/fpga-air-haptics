@@ -17,6 +17,8 @@ import numpy as np
 import tkinter as tk
 
 from desktop_app.app import App
+from desktop_app.controller import Session
+from desktop_app.transport import DemoTransport
 from desktop_app.editor import MAX_EDITOR_POINTS
 from desktop_app.model import ARRAY_PRESETS, Config, SHAPES, encode_points, trajectory_point
 
@@ -31,6 +33,22 @@ def main():
     steps = []
     deadline = time.monotonic() + 40
     custom = None
+    running_position = None
+    running_sample = None
+    paused_position = None
+    paused_sample = None
+    hold_feedback = {"value": False}
+
+    def deferred_session(*args, **kwargs):
+        transport = DemoTransport(array=kwargs.get("demo_array"))
+        snapshot = transport.device.snapshot
+
+        def delayed_snapshot():
+            raw = snapshot()
+            return b"" if hold_feedback["value"] else raw
+
+        transport.device.snapshot = delayed_snapshot
+        return Session(*args, **kwargs, factory=lambda: transport)
 
     def fail(error):
         errors.append(str(error))
@@ -132,21 +150,78 @@ def main():
         check(app.get_config() == custom, "File roundtrip")
         check(not app.debug_mode.get(), "Loading a figure stays in user mode")
         capture("demo-editor.png")
-        app.debug_mode.set(True)
-        app.toggle_debug()
         app.demo_array_choice.set("8 × 8 · 64 路")
         app.select_hardware()
-        app.connect()
+        with patch("desktop_app.app.Session", side_effect=deferred_session):
+            app.connect()
 
     def apply():
         check(not app.state.output, "Connection must not enable output")
         check(app.hardware.count == 64, "Installed array handshake")
-        app.apply_custom()
+        check(str(app.start_button["state"]) == "disabled", "No playback before explicit upload")
+        app.set_config(app.state.config)
+        app.update_controls()
+        check(str(app.start_button["state"]) == "disabled", "Matching default figure is not an upload receipt")
+        app.set_config(custom)
+        app.start_button.invoke()
+        app.send("START")
+        check(not app.busy, "Guard START even when called outside the disabled button")
+        hold_feedback["value"] = True
+        app.editor.apply_button.invoke()
+        check(str(app.playback.play_button["state"]) == "disabled", "No playback while waiting for upload confirmation")
+        check(app.tabs.select() == str(app.playback_tab), "Uploading opens ordinary feedback page")
+
+    def release_feedback():
+        check(app.pending_verb is None, "Device ACK was consumed")
+        check(app.await_revision is not None, "Still waiting for STATE after ACK")
+        check(str(app.playback.play_button["state"]) == "disabled", "ACK alone cannot unlock playback")
+        check(not app.config_confirmed(), "Do not claim upload success before matching feedback")
+        hold_feedback["value"] = False
 
     def play():
         check(app.state.config == custom, "Applied design readback")
         check(len(app.state.phases) == 64, "Use all installed emitters")
-        app.send("START")
+        check(not app.debug_mode.get(), "Feedback accessible in normal mode")
+        check(app.playback.plot_config == custom, "Show received figure after upload")
+        check("发送成功" in app.playback.feedback.get(), "Show upload confirmation")
+        check(str(app.playback.play_button["state"]) == "normal", "Enable playback after confirmed upload")
+        # Even a connected, previously configured device must not play a new draft.
+        app.vars["cx_um"].set("1")
+        app.update_controls()
+        check(str(app.start_button["state"]) == "disabled", "Editing disables playback")
+        app.vars["cx_um"].set("0")
+        app.update_controls()
+        capture("demo-upload-confirmed.png")
+        app.playback.play_button.invoke()
+
+    def visible_running():
+        nonlocal running_position, running_sample
+        check(app.tabs.select() == str(app.playback_tab), "Play keeps ordinary feedback visible")
+        check("正在播放" in app.playback.heading.get(), "Visible running status")
+        check(app.playback.position_mm == app.state.focus_mm[:2], "Marker comes from received position")
+        running_position = app.playback.position_mm
+        running_sample = app.state.sample
+
+    def visible_moving():
+        check(app.playback.position_mm != running_position, "Marker visibly moves as feedback arrives")
+        check(app.playback.position_mm == app.state.focus_mm[:2], "No locally invented position")
+        capture("demo-playback.png")
+        app.playback.pause_button.invoke()
+
+    def visible_paused():
+        nonlocal paused_position, paused_sample
+        check("已暂停" in app.playback.heading.get(), "Show pause immediately after readback")
+        paused_position = app.playback.position_mm
+        paused_sample = app.state.sample
+
+    def resume():
+        check(app.playback.position_mm == paused_position, "Paused marker stays fixed across snapshots")
+        check(str(app.playback.play_button["state"]) == "normal", "Resume remains available")
+        app.playback.play_button.invoke()
+
+    def show_debug():
+        app.debug_mode.set(True)
+        app.toggle_debug()
 
     def inspect_running():
         payload = app.actual_plot.last_payload
@@ -167,6 +242,19 @@ def main():
         app.send("STOP")
 
     def local():
+        check(app.playback.position_mm is None, "Stop removes active marker")
+        for code in SHAPES:
+            if code == "CUSTOM":
+                continue
+            app.shape_buttons[code].invoke()
+            check(app.tabs.select() == str(app.preset_tab), "Preset buttons open preview")
+            check(app.preset_preview.config.shape == code, "Preview selected preset")
+            check(str(app.start_button["state"]) == "disabled", "New preset requires upload")
+            check(app.state.config == custom, "Selecting a preset does not alter the device")
+        app.shape_buttons["SQUARE"].invoke()
+        capture("demo-preset-square.png")
+        app.shape_buttons["CUSTOM"].invoke()
+        check(app.get_config() == custom, "Preset selection preserves custom drawing")
         app.send("MODE", value="LOCAL")
 
     def button():
@@ -188,6 +276,7 @@ def main():
         app.set_config(replace(custom, cx_um=100000))
         app.update_controls()
         check(str(app.apply_button["state"]) == "disabled", "Reject trajectory outside declared workspace")
+        check(str(app.start_button["state"]) == "disabled", "Reconnect resets upload confirmation")
         app.set_config(custom)
         app.update_controls()
         check(str(app.apply_button["state"]) == "normal", "Free-position drawing accepted on small array")
@@ -202,6 +291,10 @@ def main():
         app.debug_mode.set(False)
         app.toggle_debug()
         root.geometry("1100x780+25+25")
+        app.tabs.select(app.playback_tab)
+        capture("demo-playback-minimum.png")
+        check(app.playback.play_button.winfo_ismapped(), "Playback controls visible at minimum size")
+        app.tabs.select(app.editor_tab)
         capture("demo-minimum.png")
         check(app.editor.apply_button.winfo_ismapped(), "Send button visible at minimum size")
         check(app.editor.apply_button.winfo_rooty()+app.editor.apply_button.winfo_height()
@@ -211,13 +304,21 @@ def main():
     def finish():
         check(not app.ready, "Lost telemetry must close connection")
         check("未知" in app.source_line.get(), "Disconnected state must be visibly unknown")
+        check(app.playback.position_mm is None, "Lost feedback removes live marker")
+        check(str(app.start_button["state"]) == "disabled", "Lost feedback disables playback")
         check(any("超时" in record["text"] for record in app.log_records), "Timeout reported")
         app.close()
 
     steps.extend([
         (lambda: True, start),
         (lambda: app.ready and app.state is not None, apply),
+        (lambda: app.await_revision is not None, release_feedback),
         (lambda: app.state and app.state.revision == 1 and not app.busy, play),
+        (lambda: app.state.output and not app.busy, visible_running),
+        (lambda: app.state.sample > running_sample + 2, visible_moving),
+        (lambda: app.state.state == "PAUSED" and not app.busy, visible_paused),
+        (lambda: app.state.sample > paused_sample, resume),
+        (lambda: app.state.output and not app.busy, show_debug),
         (lambda: app.state and app.state.output and app.actual_plot.last_payload is not None
          and app.actual_plot.last_payload[4] is True, inspect_running),
         (lambda: app.state.state == "PAUSED" and not app.busy, stopped),
@@ -230,7 +331,7 @@ def main():
         (lambda: app.state.revision == 1 and not app.busy, small_running),
         (lambda: app.state.output and not app.busy and app.actual_plot.last_payload is not None
          and app.actual_plot.last_payload[1].count == 16 and app.actual_plot.last_payload[4], mute),
-        (lambda: not app.session.is_alive(), finish),
+        (lambda: not app.session.is_alive() and not app.ready, finish),
     ])
 
     def run_step():

@@ -22,6 +22,8 @@ import numpy as np
 from .controller import Session
 from .model import ArraySpec, ARRAY_PRESETS, Config, SHAPES, array_coordinates, config_from_document, encode_points, field_slice, focus_phases, trajectory_path, trajectory_point
 from .editor import PathEditor
+from .playback import PlaybackPanel
+from .presets import PresetPreview
 from .transport import available_ports
 
 if sys.platform == "win32":
@@ -140,6 +142,10 @@ class App:
         self.command_deadline = 0.0
         self.await_revision = None
         self.await_sample = None
+        self.await_verb = None
+        self.pending_config = None
+        self.confirmed_config = None
+        self.last_actual_plot = 0.0
         self.generation = 0
         self.jobs = {}
         self.wanted = {}
@@ -165,11 +171,14 @@ class App:
         self.hardware_line = tk.StringVar(value="实际阵列尚未由设备确认")
         self.syncing_geometry = False
         self.vars = {}
+        self.size_label = tk.StringVar(value="预设图形半径 / mm")
         self._style()
         self._layout()
         self.set_config(Config())
         for name in ("cx_um", "cy_um"):
             self.vars[name].trace_add("write", lambda *_: self.sync_editor())
+        for variable in self.vars.values():
+            variable.trace_add("write", lambda *_: self.refresh_pattern_preview())
         self.refresh_ports()
         self.tabs.select(self.editor_tab)
         self.toggle_debug()
@@ -274,10 +283,12 @@ class App:
             for row, (name, title, scale) in enumerate(entries):
                 self.vars[name] = tk.StringVar()
                 self.scales[name] = scale
-                ttk.Label(parent, text=title).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
+                label = ttk.Label(parent, textvariable=self.size_label) if name == "radius_um" else ttk.Label(parent, text=title)
+                label.grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
                 if name == "shape":
                     widget = ttk.Combobox(parent, textvariable=self.vars[name], values=list(SHAPES.values()),
                                           state="readonly", width=12)
+                    widget.bind("<<ComboboxSelected>>", self.select_shape)
                 elif name == "phase_steps":
                     widget = ttk.Combobox(parent, textvariable=self.vars[name], values=[8,16,32,64,128,256],
                                           state="readonly", width=12)
@@ -285,7 +296,7 @@ class App:
                     widget = ttk.Entry(parent, textvariable=self.vars[name], width=13)
                 widget.grid(row=row, column=1, sticky="ew")
         ttk.Label(array_tab, text="等级不是电压或声压；范围仅为协议边界。", style="Muted.TLabel", wraplength=270).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
-        ttk.Button(shape_tab, text="编辑自定义图形", command=lambda: self.tabs.select(self.editor_tab)).grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
+        ttk.Button(shape_tab, text="编辑自定义图形", command=lambda: self.choose_shape("CUSTOM")).grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
         actions = ttk.Frame(left)
         actions.grid(row=3, column=0, sticky="ew", pady=10)
         actions.columnconfigure((0, 1), weight=1)
@@ -335,6 +346,15 @@ class App:
         self.hardware_detail.pack(fill="x", pady=(2, 5))
         self.actual_detail = ttk.Label(right, textvariable=self.actual_line, wraplength=950, style="Muted.TLabel")
         self.actual_detail.pack(fill="x", pady=(2,8))
+        quick_shapes = ttk.Frame(right)
+        quick_shapes.pack(fill="x", pady=(3, 8))
+        ttk.Label(quick_shapes, text="图案").pack(side="left", padx=(0, 6))
+        self.shape_buttons = {}
+        for code, label in SHAPES.items():
+            button = ttk.Button(quick_shapes, text="自定义" if code == "CUSTOM" else label,
+                                width=5, padding=(3, 6), command=lambda value=code: self.choose_shape(value))
+            button.pack(side="left", expand=True, fill="x", padx=1)
+            self.shape_buttons[code] = button
         self.tabs = ttk.Notebook(right)
         self.tabs.pack(fill="both", expand=True)
         actual_tab, forecast_tab, self.editor_tab, measured_tab, log_tab, device_tab = [ttk.Frame(self.tabs) for _ in range(6)]
@@ -345,6 +365,16 @@ class App:
         self.tabs.add(measured_tab, text="实测数据")
         self.tabs.add(log_tab, text="通信日志")
         self.tabs.add(device_tab, text="设备设置")
+        self.preset_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.preset_tab, text="图案预览")
+        self.preset_preview = PresetPreview(self.preset_tab, self.apply_config)
+        self.preset_preview.pack(fill="both", expand=True)
+        self.playback_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.playback_tab, text="播放画面")
+        self.playback = PlaybackPanel(self.playback_tab, lambda: self.send("START"),
+                                      lambda: self.send("PAUSE"), lambda: self.send("STOP"),
+                                      self.select_shape)
+        self.playback.pack(fill="both", expand=True)
         self._device_tab(device_tab)
         view_row = ttk.Frame(actual_tab, padding=8)
         view_row.pack(fill="x")
@@ -425,7 +455,7 @@ class App:
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=14)
         self.device_details = ttk.Frame(content)
         ttk.Button(self.device_details, text="用此阵列更新电脑预测", command=self.preview).pack(anchor="w")
-        ttk.Label(self.device_details, text="Demo 默认 0.5 次/秒，仅演示扫描路径；状态快照每 0.5 秒回传。"
+        ttk.Label(self.device_details, text="Demo 默认 0.5 次/秒，仅演示扫描路径；运行时每 0.05 秒回传，其他状态每 0.5 秒回传。"
                   "本程序未模拟 FPGA 的高速更新时序，也未验证触觉效果。",
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
         ttk.Label(self.device_details, textvariable=self.hardware_line, wraplength=650, style="Heading.TLabel").pack(anchor="w", pady=(24, 8))
@@ -457,6 +487,28 @@ class App:
         self.syncing_geometry = False
         self.sync_editor()
         self.editor.set_path(config.points_um(), config.path_closed)
+        self.refresh_pattern_preview()
+
+    def choose_shape(self, code):
+        self.vars["shape"].set(SHAPES[code])
+        self.select_shape()
+
+    def select_shape(self, _event=None):
+        custom = self.vars["shape"].get() == SHAPES["CUSTOM"]
+        self.tabs.select(self.editor_tab if custom else self.preset_tab)
+        self.refresh_pattern_preview()
+        self.update_controls()
+
+    def refresh_pattern_preview(self):
+        if self.syncing_geometry:
+            return
+        try:
+            self.preset_preview.set_config(self.get_config())
+        except (ValueError, OverflowError):
+            self.preset_preview.set_config(None)
+        for code, button in self.shape_buttons.items():
+            button.configure(style="Primary.TButton" if self.vars["shape"].get() == SHAPES[code] else "TButton")
+        self.size_label.set("正方形半边长 / mm" if self.vars["shape"].get() == SHAPES["SQUARE"] else "预设图形半径 / mm")
 
     def select_hardware(self, _event=None):
         size = ARRAY_PRESETS[self.demo_array_choice.get()]
@@ -535,6 +587,7 @@ class App:
         self.state, self.received, self.ready, self.busy = None, 0.0, False, False
         self.hardware, self.workspace, self.capabilities = None, None, set()
         self.await_revision, self.await_sample, self.pending_verb = None, None, None
+        self.await_verb = self.pending_config = self.confirmed_config = None
         self.mute.set(False)
         self.actual_plot.clear("等待握手与第一帧设备状态")
         self.device_label.set("正在连接…")
@@ -551,6 +604,7 @@ class App:
 
     def disconnect(self):
         if self.session:
+            self.confirmed_config = self.pending_config = None
             self.session.close()
             self.status_line.set("正在断开连接…")
             self.ready = False
@@ -559,13 +613,38 @@ class App:
     def send(self, verb, **fields):
         if not self.session or not self.ready:
             return
+        if verb == "START" and not self.can_play():
+            self.status_line.set("请先发送当前图形，等待设备确认后再播放。")
+            return
         if self.session.command(verb, **fields):
+            if verb == "CONFIG":
+                self.confirmed_config = None
+                self.pending_config = Config.from_wire(fields)
+            if verb == "STOP":
+                self.pending_config = None
             if verb in ("CONFIG", "MODE", "START", "PAUSE", "STOP"):
                 self.busy, self.pending_verb = True, verb
                 self.command_deadline = time.monotonic() + 3.5
                 self.await_revision, self.await_sample = None, None
+                self.await_verb = None
+                if verb in ("CONFIG", "START", "PAUSE", "STOP"):
+                    self.tabs.select(self.playback_tab)
             self.status_line.set("正在等待设备确认…")
             self.update_controls()
+
+    def config_confirmed(self):
+        return bool(self.state and self.confirmed_config ==
+                    (self.state.boot, self.state.revision, self.state.config))
+
+    def can_play(self):
+        if not (self.ready and self.state and time.monotonic()-self.received < 1.6
+                and not self.busy and self.await_revision is None and self.config_confirmed()
+                and self.state.mode == "REMOTE" and self.state.state in ("IDLE", "PAUSED")):
+            return False
+        try:
+            return self.get_config() == self.state.config
+        except (ValueError, OverflowError):
+            return False
 
     def apply_config(self):
         try:
@@ -583,7 +662,7 @@ class App:
         if self.state:
             try:
                 self.set_config(self.state.config)
-                self.tabs.select(self.editor_tab)
+                self.select_shape()
             except ValueError as error:
                 messagebox.showerror("无法载入编辑器", str(error), parent=self.root)
 
@@ -687,6 +766,7 @@ class App:
                     verb = event["verb"]
                     if verb == self.pending_verb:
                         self.pending_verb = None
+                        self.await_verb = verb
                         self.await_sample = event["after_sample"]
                         self.await_revision = int(event["fields"]["rev"])
                     if verb not in ("PING", "HELLO"):
@@ -695,15 +775,24 @@ class App:
                     self.state, self.received = event["state"], event["when"]
                     if (self.await_sample is not None and self.state.sample > self.await_sample
                             and self.state.revision >= self.await_revision):
+                        completed = self.await_verb
+                        if completed == "CONFIG":
+                            if self.state.config == self.pending_config and self.state.revision == self.await_revision:
+                                self.confirmed_config = (self.state.boot, self.state.revision, self.state.config)
+                            self.pending_config = None
                         self.await_revision, self.await_sample = None, None
+                        self.await_verb = None
                         self.busy = False
-                        self.status_line.set("设备已确认。")
-                    self.plot_actual()
+                        self.status_line.set({"CONFIG": "图形发送成功，设备已确认，可以播放。" if self.config_confirmed()
+                                              else "设备返回的图形与发送内容不一致，请重新发送。",
+                                              "START": "设备已开始播放。", "PAUSE": "设备已暂停。",
+                                              "STOP": "设备已停止。"}.get(completed, "设备已确认。"))
                 elif kind in ("error", "rejected"):
                     if kind == "error" or event.get("verb") == self.pending_verb:
                         self.busy = False
                         self.pending_verb = None
                         self.await_revision, self.await_sample = None, None
+                        self.await_verb = self.pending_config = None
                     text = event.get("text", "设备操作未完成")
                     friendly = {"BUSY": "请先停止播放。", "LOCAL_CONTROL": "请先切换到电脑控制。",
                                 "OUT_OF_WORKSPACE": "图形超出设备范围，请调整位置、尺寸或高度。",
@@ -714,6 +803,7 @@ class App:
                 elif kind == "closed":
                     self.ready = self.busy = False
                     self.await_revision, self.await_sample = None, None
+                    self.await_verb = self.pending_config = self.confirmed_config = None
                     self.device_label.set("未连接")
                     self.source_line.set("连接已断开 · 当前设备状态未知")
                     self.source_banner.configure(bg="#fbe9e9", fg=RED)
@@ -726,6 +816,11 @@ class App:
             self.ready = self.busy = False
         self._pump_plots()
         self.update_controls()
+        # Expensive acoustic plots must not throttle ordinary playback feedback.
+        if (self.debug_mode.get() and self.ready and self.state and time.monotonic()-self.received < 1.6
+                and time.monotonic()-self.last_actual_plot >= .5):
+            self.plot_actual()
+            self.last_actual_plot = time.monotonic()
         if time.monotonic() - self.last_log_refresh > 0.8:
             if self.tabs.index(self.tabs.select()) == 4:
                 self.render_log()
@@ -741,11 +836,18 @@ class App:
         for button, enabled in ((self.connect_button,not alive), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
                                 (self.remote_button,idle and free), (self.copy_button,fresh),
-                                (self.start_button,remote and free and self.state.state in ("IDLE","PAUSED") if fresh else False),
+                                (self.start_button,self.can_play()),
                                 (self.pause_button,remote and free and self.state.state == "RUNNING" if fresh else False),
                                 (self.stop_button,self.ready), (self.header_stop,self.ready),
                                 (self.snap_button,self.ready), (self.export_button,self.state is not None)):
             button.configure(state="normal" if enabled else "disabled")
+        for target, source in ((self.playback.play_button, self.start_button),
+                               (self.playback.pause_button, self.pause_button),
+                               (self.playback.stop_button, self.stop_button)):
+            target.configure(state=source["state"])
+        play_label = "继续播放" if fresh and self.state.state == "PAUSED" else "播放"
+        self.start_button.configure(text=play_label)
+        self.playback.play_button.configure(text=play_label)
         self.connection_picker.configure(state="disabled" if alive else "readonly")
         serial_selected = self.mode_choice.get() == "真实串口"
         self.port_picker.configure(state="normal" if not alive and serial_selected else "disabled")
@@ -780,7 +882,12 @@ class App:
             try:
                 config = self.get_config()
                 same = config == state.config
-                message = "图形已同步。" if same else "图形有更改，请发送到设备。"
+                message = "图形发送成功，可以播放。" if same and self.config_confirmed() else (
+                    "请先发送图形，确认后才能播放。" if same else "图形有更改，请重新发送后播放。")
+                if same and self.config_confirmed() and state.state == "RUNNING":
+                    message = "正在播放设备已接收的图形。"
+                if same and self.config_confirmed() and state.state == "PAUSED":
+                    message = "已暂停，可以继续播放。"
                 mismatch = self.workspace.incompatibility(config) if self.workspace else ""
                 if mismatch:
                     message = "图形超出设备范围，请调整位置、尺寸或高度。"
@@ -793,6 +900,17 @@ class App:
                 self.config_line.set(message)
             except (ValueError, OverflowError):
                 self.config_line.set("请完成图形并检查输入的数值。")
+        else:
+            self.config_line.set("请先连接设备，再发送图形。")
+        feedback = self.config_line.get()
+        if self.busy:
+            action = self.pending_verb or self.await_verb
+            feedback = {"CONFIG": "正在发送图形，等待设备确认…", "START": "正在等待设备开始播放…",
+                        "PAUSE": "正在等待设备暂停…", "STOP": "正在等待设备停止…"}.get(action, "正在等待设备确认…")
+        if fresh and self.state.mode == "LOCAL":
+            feedback = "设备按键控制中；电脑显示设备返回的播放状态。"
+        self.playback.update_state(self.state, fresh, feedback)
+        self.preset_preview.apply_button.configure(state=self.apply_button["state"])
 
     def save_config(self):
         try:
@@ -813,7 +931,7 @@ class App:
             data = json.loads(Path(filename).read_text(encoding="utf-8-sig"))
             config = config_from_document(data)
             self.set_config(config)
-            self.tabs.select(self.editor_tab)
+            self.select_shape()
             self.status_line.set("图形已打开，可继续编辑或发送到设备。")
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             messagebox.showerror("读取失败",str(error),parent=self.root)
