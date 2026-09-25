@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 根目录可执行 `python -m desktop_app --demo` 和 `python -m unittest discover -s desktop_app/tests -v`，GUI 测试为 `python -m desktop_app.tests.gui_smoke`。安装依赖见 `desktop_app/requirements.txt`。Demo 和模拟串口测试不能作为物理硬件验证。
 
+`mobile_app/` 提供 Flutter Android 原型，支持触屏草图、图形库、JSON 互通、Demo 与 BLE 双向回传；进入该目录执行 `flutter analyze`、`flutter test`。APK 构建与验证边界见 `mobile_app/README.md`。当前没有实体手机／蓝牙模块联调或 iOS 安装包，桌面 CAD 几何关系不在手机编辑范围。
+
 ## 这是什么项目
 
 2026 年(第十届)全国大学生嵌入式芯片与系统设计竞赛 **FPGA 创新设计赛道** 的参赛准备。原选题文档记录赛事规则与时间节点、厂商赛题方向、2020–2025 年往届作品、评判标准分析及三个候选选题；当前方案另见 `设计思路.md`。
