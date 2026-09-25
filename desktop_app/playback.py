@@ -43,7 +43,7 @@ class PlaybackPanel(ttk.Frame):
         self.canvas.pack(fill="both", expand=True, pady=(10, 0))
         self.canvas.bind("<Configure>", lambda _: self.draw())
 
-    def update_state(self, state, fresh, feedback):
+    def update_state(self, state, fresh, feedback, connection_label="串口"):
         self.snapshot, self.fresh = state, fresh
         self.feedback.set(feedback)
         self.notice.configure(bg="#e5f3ee" if fresh else "#fff0d5")
@@ -52,7 +52,7 @@ class PlaybackPanel(ttk.Frame):
             self.heading.set("等待发送图形")
             self.message.set("发送成功后，这里会显示设备收到的图形。")
         else:
-            self.source.set("Demo · 模拟设备反馈" if state.simulated else "设备反馈 · 串口连接")
+            self.source.set("Demo · 模拟设备反馈" if state.simulated else f"设备反馈 · {connection_label}")
             status = {"IDLE": "已停止", "RUNNING": "正在播放", "PAUSED": "已暂停", "FAULT": "设备故障"}[state.state]
             self.heading.set(f"{status if fresh else '状态未知'} · {SHAPES[state.config.shape]}")
             if not fresh:

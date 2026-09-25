@@ -1,12 +1,12 @@
-# HAP3 串口协议（多段草图路径草案）
+# HAP3 设备协议草案（串口／BLE）
 
-更新日期：2026-09-25。本文与 `protocol.py`、`controller.py`、`demo.py` 对应，供 FPGA 固件实现使用。客户端与 Demo 已实现，真实固件尚未联调。
+更新日期：2026-09-25。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的上位机侧草案，尚未与 FPGA 端共同定稿。客户端与 Demo 已实现，真实固件尚未实现和联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
 
 HAP3 在实际坐标基础上增加多段路径和关闭输出的跳转，拒绝 HAP1／HAP2 固件，避免旧设备将断开轮廓连起来。旧 JSON 文件可迁移；串口不自动降级。
 
 ## 1. 传输与帧格式
 
-默认 115200 baud、8N1、无流控。ASCII 文本，一帧一行，最大 8192 字节（含 CRC 和换行）：
+串口默认 115200 baud、8N1、无流控；BLE 传输映射见 [BLE 对接说明](BLE.md)，不使用 COM 口和电脑端波特率。两种连接暂共用以下应用层草案：ASCII 文本，一帧一行，最大 8192 字节（含 CRC 和换行）：
 
 ```text
 HAP3 KIND SEQ VERB key=value key=value*CCCC\n
