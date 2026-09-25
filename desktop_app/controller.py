@@ -9,6 +9,7 @@ import time
 from .protocol import VERSION, Decoder, Snapshot, encode
 from .model import ArraySpec, Config, Workspace
 from .transport import DemoTransport, SerialTransport
+from .ble_transport import BleTransport
 
 
 @dataclass
@@ -18,14 +19,21 @@ class Pending:
 
 
 class Session(threading.Thread):
-    def __init__(self, demo=True, port="", baudrate=115200, factory=None, demo_array=None):
-        super().__init__(daemon=True, name="haptics-serial")
+    def __init__(self, demo=True, port="", baudrate=115200, factory=None, demo_array=None,
+                 ble_device=None, ble_profile=None):
+        super().__init__(daemon=True, name="haptics-io")
+        if demo and ble_device is not None:
+            raise ValueError("BLE 连接不能作为 Demo")
         self.is_demo = demo
-        self.factory = factory or ((lambda: DemoTransport(array=demo_array)) if demo else lambda: SerialTransport(port, baudrate))
+        self.connection_label = "Demo" if demo else ("BLE 蓝牙" if ble_device is not None else "串口")
         self.events = queue.Queue(maxsize=1000)
         self.commands = queue.PriorityQueue(maxsize=64)
         self.order = itertools.count()
         self.closing = threading.Event()
+        self.factory = factory or (
+            (lambda: DemoTransport(array=demo_array)) if demo else
+            (lambda: BleTransport(ble_device, ble_profile, cancel_event=self.closing)) if ble_device is not None else
+            (lambda: SerialTransport(port, baudrate)))
         self.pending = {}
         self.seq = 0
         self.ready = False
@@ -162,9 +170,11 @@ class Session(threading.Thread):
         stop_sent = False
         try:
             transport = self.factory()
+            if self.closing.is_set():
+                return
             opened = time.monotonic()
             next_ping = opened + 0.8
-            self.emit("opening", text="端口已打开，等待协议握手")
+            self.emit("opening", text=f"{self.connection_label} 已接通，等待设备确认")
             self._write(transport, "HELLO")
             while not self.closing.is_set():
                 now = time.monotonic()
