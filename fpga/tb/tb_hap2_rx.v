@@ -290,6 +290,7 @@ module tb_hap2_rx;
     reg  [7:0]  phase_data;
     /* verilator lint_off UNUSEDSIGNAL */
     wire [11:0] tx_txt_addr;       // 同上：只接出来，不参与判断
+    wire        state_capture_unused;   // 同上
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_tx #(
@@ -307,8 +308,11 @@ module tb_hap2_rx;
         .reply_seq        (reply_seq),
         .reply_code       (reply_code),
         .reply_want_state (reply_want_state),
+        .state_push       (1'b0),
+        .state_capture    (state_capture_unused),
         .boot_id          (32'hA1B2C3D4),
         .revision         (cmd_rev),
+        .revision_report  (cmd_rev),
         .mode             (cmd_mode),
         .run_state        (cmd_run),
         .reason           (cmd_reason),

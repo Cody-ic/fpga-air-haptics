@@ -79,6 +79,7 @@ module tb_hap2_top;
     // ---------------- 向量 ----------------
     reg [7:0]  pkt   [0:8191];
     reg [31:0] tplan [0:63];       // 每条报文两个字段（偏移、长度）
+    reg [7:0]  dot_exp [0:255];    // 单点草图的相位串期望值（以 0 结尾）
 
     integer errors = 0;
     integer checks = 0;
@@ -193,6 +194,53 @@ module tb_hap2_top;
             checks = checks + 1;
             if (val < 0) begin
                 $display("[用例 %0d] 应答里找不到字段「%0s」  **失败**", case_i, key);
+                errors = errors + 1;
+            end
+        end
+    endtask
+
+    // 在收到的字节里找「以 0 结尾的那串期望字节」（单点草图的相位串）
+    task found_expect;
+        input [8*32-1:0] what;
+        integer a, b, hit, n, ok;
+        begin
+            n = 0;
+            while (n < 256 && dot_exp[n] != 8'h00) n = n + 1;
+            ok = 0;
+            for (a = 0; a + n <= txlen; a = a + 1) begin
+                hit = 1;
+                for (b = 0; b < n; b = b + 1)
+                    if (txbuf[a + b] !== dot_exp[b]) hit = 0;
+                if (hit) ok = 1;
+            end
+            checks = checks + 1;
+            if (!ok) begin
+                $display("[用例 %0d] %0s 与参考实现不一致  **失败**", case_i, what);
+                errors = errors + 1;
+            end else begin
+                $display("  %0s 与参考实现逐位一致（%0d 个字符）", what, n);
+            end
+        end
+    endtask
+
+    // 断言某段文本**不**出现（比如「相位串全是 0」）
+    task absent;
+        input [8*64-1:0] needle;
+        integer a, b, hit, nlen, found_it;
+        begin
+            nlen = 0;
+            for (b = 0; b < 64; b = b + 1)
+                if (needle[8*b +: 8] != 8'h00) nlen = b + 1;
+            found_it = 0;
+            for (a = 0; a + nlen <= txlen; a = a + 1) begin
+                hit = 1;
+                for (b = 0; b < nlen; b = b + 1)
+                    if (txbuf[a + b] !== needle[8*(nlen-1-b) +: 8]) hit = 0;
+                if (hit) found_it = 1;
+            end
+            checks = checks + 1;
+            if (found_it) begin
+                $display("[用例 %0d] 不应出现的「%0s」出现了  **失败**", case_i, needle);
                 errors = errors + 1;
             end
         end
@@ -313,6 +361,7 @@ module tb_hap2_top;
     initial begin
         $readmemh("tb/vectors/top_packets.mem", pkt);
         $readmemh("tb/vectors/top_plan.mem",    tplan);
+        $readmemh("tb/vectors/top_dot_phase.mem", dot_exp);
 
         rst_n     = 1'b0;
         uart_line = 1'b1;
@@ -356,6 +405,7 @@ module tb_hap2_top;
         found("state=RUNNING");
         // 走一圈是 25 毫秒（2500 拍）：这里看 1.2 百万拍 = 24 毫秒 = 2400 个节拍，
         // 足够看到「扫描 → 抬笔 → 第二笔」
+        absent("phases=0,0,0,0,0,0");     // 跑起来相位不该全是 0
         watch_trajectory(1200000);
 
         // ---- 4. 暂停：位置冻住、输出关掉 ----
@@ -462,6 +512,8 @@ module tb_hap2_top;
         found("state=RUNNING");
         // 单点在 10 µm : 2 µm，换成 0.5 µm 单位就是 (20,4)
         watch_dot(1200000, 20, 4);
+        // 相位串要和参考实现逐位一致：这一条把「相位引擎 + 同一瞬间快照 + 回传」整条链钉住
+        found_expect("单点草图的相位串");
 
         // ---- 13. 停止 ----
         case_i = 12;

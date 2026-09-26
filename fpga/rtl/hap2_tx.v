@@ -37,10 +37,14 @@ module hap2_tx #(
     // 既不是 ACK 也不是 ERR，只是一份「主动上报」的 STATE（没人下命令也要回，
     // 上位机靠它刷新界面，超过 2.5 秒收不到就会判状态过期）
     input  wire        state_push,
+    // 单拍：这一拍开始拼一份 STATE，请上游把「同一瞬间」的那份快照锁存好
+    output reg         state_capture,
 
     // ---- 设备状态（状态帧用）----
     input  wire [31:0] boot_id,
     input  wire [15:0] revision,
+    // 状态帧里的 rev 要用快照那份（ACK 里用的是当前生效的 revision）
+    input  wire [15:0] revision_report,
     input  wire [1:0]  mode,
     input  wire [1:0]  run_state,
     input  wire [2:0]  reason,
@@ -226,7 +230,7 @@ module hap2_tx #(
                     case (idx)
                         5'd0:  value_at = {16'h0, sample};
                         5'd1:  value_at = uptime_ms;
-                        5'd2:  value_at = {16'h0, revision};
+                        5'd2:  value_at = {16'h0, revision_report};
                         5'd3:  value_at = output_on ? 32'd1 : 32'd0;
                         5'd4:  value_at = scan_on ? 32'd1 : 32'd0;
                         5'd5:  value_at = {26'h0, stroke_index};
@@ -505,6 +509,7 @@ module hap2_tx #(
             crc_init  <= 1'b0;
             crc_valid <= 1'b0;
             crc_feed_en <= 1'b1;
+            state_capture <= 1'b0;
 
             // 待发队列：入队与出队可以同一拍发生，所以队列长度只算一次
             if (q_push) begin
@@ -540,6 +545,7 @@ module hap2_tx #(
                         end else begin
                             frame_sel <= F_STATE;      // 主动上报：直接开始一份状态快照
                             sample    <= sample + 1'b1;
+                            state_capture <= 1'b1;     // 让上游锁存这一瞬间的数据
                         end
                         pos       <= 10'd0;
                         num_idx   <= 5'd0;
@@ -640,6 +646,7 @@ module hap2_tx #(
                         num_idx   <= 5'd0;
                         crc_init  <= 1'b1;
                         sample    <= sample + 1'b1;
+                        state_capture <= 1'b1;     // 让上游锁存这一瞬间的数据
                         state     <= S_NEXT;
                     end else begin
                         state <= S_IDLE;

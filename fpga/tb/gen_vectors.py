@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from desktop_app.demo import DemoDevice
-from desktop_app.model import ArraySpec, Config, trajectory_sample
+from desktop_app.model import ArraySpec, Config, focus_phases, trajectory_sample
 from desktop_app.protocol import encode
 
 HERE = Path(__file__).resolve().parent
@@ -418,6 +418,56 @@ def traj_samples(scan_paths, repeat_millihz, blank_us, laps, moves):
     return samples
 
 
+# ============================================================================
+# 相位：焦点坐标 → 每一路的相位码
+# ============================================================================
+
+# 三份用例：真板子的 4×4、将来要扩的 8×8、以及一个「组内会跨行」的 3×4
+# （PIPE < COLS 时组首靠右，一组会跨到下一行，专门测那支补减）
+PHASE_CASES = [
+    ("board_4x4", 4, 4, 10000, 4, 40000, 64, 150000,
+     [(0, 0), (10000, 2000), (-15000, -15000), (20000, -8000), (-1000, 4000)]),
+    ("array_8x8", 8, 8, 10000, 4, 40000, 256, 100000,
+     [(0, 0), (5000, -5000), (-20000, 12000), (30000, 30000)]),
+    ("array_3x4_small_pipe", 3, 4, 12000, 3, 60000, 32, 60000,
+     [(0, 0), (-6000, 6000), (12000, -18000)]),
+]
+
+
+def build_phase_vectors():
+    """写出相位用例的向量，返回给 $display 用的清单。
+
+    期望值直接调参考实现 `focus_phases()`，和 golden.py 用的是同一个函数，
+    所以「RTL 与上位机一致」这件事是在这里被钉住的。
+    """
+    plan_lines = []
+    focus_lines = []
+    code_lines = []
+    listing = []
+    focus_off = 0
+    code_off = 0
+    for name, rows, cols, pitch, pipe, carrier, steps, z_um, points in PHASE_CASES:
+        array = ArraySpec(rows, cols, pitch, "ROW_MAJOR_XY")
+        config = Config(carrier_hz=carrier, phase_steps=steps, z_um=z_um)
+        for fx_um, fy_um in points:
+            focus_mm = (fx_um / 1000, fy_um / 1000, z_um / 1000)
+            codes = focus_phases(config, focus_mm, array)
+            focus_lines.append("%08X %08X %08X"
+                               % (fx_um & 0xFFFFFFFF, fy_um & 0xFFFFFFFF, z_um & 0xFFFFFFFF))
+            code_lines.append(" ".join("%02X" % int(value) for value in codes))
+        frames = len(points)
+        plan_lines.append("%03X %03X %06X %02X %02X %03X %06X %03X %05X %05X"
+                          % (rows, cols, pitch, pipe, steps, carrier,
+                             z_um, frames, focus_off, code_off))
+        listing.append((name, rows, cols, pipe, steps, carrier, z_um, frames))
+        focus_off += frames * 3
+        code_off += frames * rows * cols
+    (VECTOR_DIR / "phase_plan.mem").write_text("\n".join(plan_lines) + "\n", encoding="ascii")
+    (VECTOR_DIR / "phase_focus.mem").write_text("\n".join(focus_lines) + "\n", encoding="ascii")
+    (VECTOR_DIR / "phase_codes.mem").write_text("\n".join(code_lines) + "\n", encoding="ascii")
+    return listing
+
+
 # 端到端用例（tb_hap2_top 用）：一条一条真实报文，按顺序发给板子
 TOP_SKETCH  = "1000:2000,11000:2000|1000:7000,11000:7000"
 TOP_TOOFINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 61))
@@ -625,6 +675,24 @@ def main():
               % (name, "通过" if ok else "拒绝", npt, nst, nmv, laps, blank, nsmp))
 
     # ---- 端到端（整条通路，对着串口线）----
+    phase_list = build_phase_vectors()
+    print("相位：%d 份用例" % len(phase_list))
+    for name, rows, cols, pipe, steps, carrier, z_um, frames in phase_list:
+        print("  %-22s %d×%d 路（%d 路）、并行 %d、%d 档、载波 %d Hz、z=%.1f mm、%d 帧"
+              % (name, rows, cols, rows * cols, pipe, steps, carrier, z_um / 1000, frames))
+
+    # 单点草图的相位串期望值：单点 + 不动，所以相位是唯一确定的，
+    # 端到端测试直接搜这一段文本，等于把「相位引擎 + 快照 + 回传」一整条链钉死。
+    dot_cfg = Config(shape="CUSTOM", scan_paths=TOP_DOT, repeat_millihz=40000,
+                     blank_us=2000, level=30)
+    # 注意单位：传入参考实现的是**毫米**，所以 z_um 要除以 1000
+    dot_codes = focus_phases(dot_cfg, (10 / 1000, 2 / 1000, dot_cfg.z_um / 1000),
+                             DemoDevice(array=ArraySpec(4, 4, 10000, "ROW_MAJOR_XY")).array)
+    dot_expect = ("phases=" + ",".join(str(int(v)) for v in dot_codes)).encode("ascii")
+    write_bytes(VECTOR_DIR / "top_dot_phase.mem", dot_expect + b"\x00")
+    print("单点草图的相位串期望：%s（%d 字节）"
+          % (dot_expect.decode("ascii"), len(dot_expect)))
+
     tp = bytearray()
     t_lines = []
     top_cases = build_top_cases(device)
@@ -643,6 +711,7 @@ def main():
                "tx_expect": len(tx_lines),
                "scan_cases": len(s_lines),
                "traj_cases": len(traj_list),
+               "phase_cases": len(phase_list),
                "top_cases": len(t_lines),
                "field_order": ["offset", "bytes", "expect_ok", "expect_verb",
                                "expect_err", "expect_seen_mask"]}

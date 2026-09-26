@@ -30,6 +30,7 @@ module hap2_top #(
     // 草图很长时一帧状态本身就要几百毫秒，可以把这里调大。
     // 0 表示关掉（测试台用 0，免得打乱「这一条命令该回几帧」的核对）。
     parameter integer        STATE_MS     = 500,
+    parameter integer        PH_PIPE      = 4,         // 相位并行几条开方流水线
     parameter integer        TICK_CYC     = 500        // 50 MHz 下 10 µs = 500 拍
 ) (
     input  wire clk,
@@ -144,6 +145,7 @@ module hap2_top #(
     wire [5:0]  traj_stk;
     wire        traj_ready;
     wire        connected;
+    wire        state_capture;      // 发送模块开始拼 STATE 的那一拍
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_cmd #(
@@ -264,6 +266,113 @@ module hap2_top #(
     // 协议规定三件事同时成立才允许输出：运行中、等级大于 0、正在扫描。
     assign output_on = (cmd_run == 2'd1) && (cfg_level != 32'd0) && scan_on;
 
+    // ---------------- 相位计算 ----------------
+    // 每拍更新一次：把焦点坐标变成每一路的相位码。载波换了要重算常数。
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire        ph_busy, ph_done;   // 只在波形上看
+    wire [8:0]  ph_cnt;
+    /* verilator lint_on UNUSEDSIGNAL */
+    wire        ph_pub_sel;
+    wire [7:0]  ph_rd_addr, ph_rd_data;
+    wire signed [20:0] ph_pub_fx, ph_pub_fy;
+    wire [31:0] ph_pub_fz_um;
+
+    hap2_phase #(
+        .ROWS (HW_ROWS), .COLS (HW_COLS), .PITCH_UM (HW_PITCH_UM), .PIPE (PH_PIPE)
+    ) u_phase (
+        .clk                (clk),
+        .rst_n              (rst_n),
+        .cfg_carrier_hz     (cfg_carrier_hz),
+        .cfg_phase_steps    (cfg_phase_steps),
+        .cfg_z_um           (cfg_z_um),
+        .cfg_change         (config_changed),
+        .focus_x            (focus_x),
+        .focus_y            (focus_y),
+        .start              (beat_pulse),
+        .busy               (ph_busy),
+        .done               (ph_done),
+        .sweep_cnt          (ph_cnt),
+        .pub_sel            (ph_pub_sel),
+        .rd_sel             (snap_sel),
+        .rd_addr            (ph_rd_addr),
+        .rd_data            (ph_rd_data),
+        .pub_fx             (ph_pub_fx),
+        .pub_fy             (ph_pub_fy),
+        .pub_fz_um          (ph_pub_fz_um)
+    );
+
+    // ---------------- 状态快照 ----------------
+    // 一帧 STATE 要发几十毫秒，期间焦点一直在动、配置也可能被换掉。协议要求这一帧里
+    // 的配置、坐标、相位表来自同一瞬间，所以发送模块一开始拼 STATE，就把它们锁存下来，
+    // 相位表再复制一份；复制时把「读哪一半」钉住，这边翻指针也不会读串。
+    reg  [7:0]  snap_ph [0:255];
+    reg  [7:0]  snap_idx;
+    reg         snap_wait, snap_copy;
+    reg         snap_sel;
+    reg  [8:0]  snap_count;
+
+    reg [31:0] sn_carrier, sn_steps, sn_cx, sn_cy, sn_z, sn_radius;
+    reg [31:0] sn_repeat, sn_mod, sn_level, sn_closed, sn_blank;
+    reg [2:0]  sn_shape;
+    reg [1:0]  sn_mode, sn_run;
+    reg [2:0]  sn_reason;
+    reg [15:0] sn_rev;
+    reg        sn_scan;
+    reg [5:0]  sn_stroke;
+
+    assign ph_rd_addr = snap_idx;
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            snap_idx  <= 8'd0;
+            snap_wait <= 1'b0;
+            snap_copy <= 1'b0;
+            snap_sel  <= 1'b0;
+            snap_count<= 9'd0;
+            sn_carrier<= 32'd40000; sn_steps <= 32'd64;  sn_cx <= 32'd0;
+            sn_cy     <= 32'd0;     sn_z     <= 32'd150000;
+            sn_radius <= 32'd20000; sn_repeat<= 32'd500;
+            sn_mod    <= 32'd200;   sn_level <= 32'd30;
+            sn_closed <= 32'd1;     sn_blank <= 32'd2000;
+            sn_shape  <= 3'd3;      sn_mode  <= 2'd1;
+            sn_run    <= 2'd0;      sn_reason<= 3'd0;
+            sn_rev    <= 16'd0;     sn_scan  <= 1'b0;
+            sn_stroke <= 6'd0;
+        end else begin
+            if (state_capture) begin
+                // 锁存这一瞬间：配置、状态、扫描开关
+                sn_carrier <= cfg_carrier_hz; sn_steps <= cfg_phase_steps;
+                sn_cx      <= cfg_cx_um;      sn_cy    <= cfg_cy_um;
+                sn_z       <= cfg_z_um;       sn_radius<= cfg_radius_um;
+                sn_repeat  <= cfg_repeat_millihz; sn_mod <= cfg_mod_hz;
+                sn_level   <= cfg_level;      sn_closed<= cfg_path_closed;
+                sn_blank   <= cfg_blank_us;   sn_shape <= cfg_shape;
+                sn_mode    <= cmd_mode;       sn_run   <= cmd_run;
+                sn_reason  <= cmd_reason;     sn_rev   <= cmd_rev;
+                sn_scan    <= scan_on;        sn_stroke<= stroke_index;
+                // 相位表：钉住现在对外的哪一半，从头复制一遍
+                snap_sel   <= ph_pub_sel;
+                snap_idx   <= 8'd0;
+                snap_wait  <= 1'b0;
+                snap_copy  <= 1'b1;
+                snap_count <= HW_ROWS * HW_COLS;
+            end else if (snap_copy) begin
+                if (snap_wait) begin
+                    snap_ph[snap_idx] <= ph_rd_data;
+                    snap_wait <= 1'b0;
+                    if ({1'b0, snap_idx} + 9'd1 >= snap_count) snap_copy <= 1'b0;
+                    else                                       snap_idx  <= snap_idx + 8'd1;
+                end else begin
+                    snap_wait <= 1'b1;      // 地址这一拍已经发出，等数据回来
+                end
+            end
+        end
+    end
+
+    // 发送模块读相位快照（同步读，一拍出数据）
+    reg [7:0] snap_rd_data;
+    always @(posedge clk) snap_rd_data <= snap_ph[phase_addr];
+
     // ---------------- 应答组装与发送 ----------------
     /* verilator lint_off UNUSEDSIGNAL */
     wire [7:0] phase_addr;      // 相位表读口：相位计算做出来之前没人读
@@ -308,35 +417,38 @@ module hap2_top #(
         .reply_want_state (reply_want_state),
         .boot_id          (BOOT_ID),
         .state_push       (state_push),
+        .state_capture    (state_capture),
         .revision         (cmd_rev),
-        .mode             (cmd_mode),
-        .run_state        (cmd_run),
-        .reason           (cmd_reason),
-        .output_on        (output_on),
+        .revision_report  (sn_rev),
+        // 下面这些一律来自**快照**：一份状态帧里的数据必须来自同一瞬间
+        .mode             (sn_mode),
+        .run_state        (sn_run),
+        .reason           (sn_reason),
+        .output_on        (sn_run == 2'd1 && sn_level != 32'd0 && sn_scan),
         .hw_rows          (HW_ROWS[7:0]),
         .hw_cols          (HW_COLS[7:0]),
         .hw_pitch_um      (HW_PITCH_UM),
-        .cfg_carrier_hz   (cfg_carrier_hz),
-        .cfg_phase_steps  (cfg_phase_steps),
-        .cfg_cx_um        (cfg_cx_um),
-        .cfg_cy_um        (cfg_cy_um),
-        .cfg_z_um         (cfg_z_um),
-        .cfg_radius_um    (cfg_radius_um),
-        .cfg_repeat_millihz (cfg_repeat_millihz),
-        .cfg_mod_hz       (cfg_mod_hz),
-        .cfg_level        (cfg_level),
-        .cfg_shape        (cfg_shape),
-        .cfg_path_closed  (cfg_path_closed),
-        .cfg_blank_us     (cfg_blank_us),
-        // 焦点的单位是 0.5 µm，回传时换成整数微米（丢掉那半个微米）
-        .fx_um            ($signed(focus_x) >>> 1),
-        .fy_um            ($signed(focus_y) >>> 1),
-        .fz_um            (cfg_z_um),
-        .scan_on          (scan_on),
-        .stroke_index     (stroke_index),
+        .cfg_carrier_hz   (sn_carrier),
+        .cfg_phase_steps  (sn_steps),
+        .cfg_cx_um        (sn_cx),
+        .cfg_cy_um        (sn_cy),
+        .cfg_z_um         (sn_z),
+        .cfg_radius_um    (sn_radius),
+        .cfg_repeat_millihz (sn_repeat),
+        .cfg_mod_hz       (sn_mod),
+        .cfg_level        (sn_level),
+        .cfg_shape        (sn_shape),
+        .cfg_path_closed  (sn_closed),
+        .cfg_blank_us     (sn_blank),
+        // 焦点与相位表来自同一次计算（相位引擎把那次用的坐标一并给出来），
+        // 单位从 0.5 µm 换成整数微米
+        .fx_um            ($signed(ph_pub_fx) >>> 1),
+        .fy_um            ($signed(ph_pub_fy) >>> 1),
+        .fz_um            (ph_pub_fz_um),
+        .scan_on          (sn_scan),
+        .stroke_index     (sn_stroke),
         .phase_addr       (phase_addr),
-        // 相位计算还没做：先回全 0。协议允许 0..phase_steps-1，0 是合法的。
-        .phase_data       (8'd0),
+        .phase_data       (snap_rd_data),
         .txt_addr         (txt_addr),
         .txt_data         (txt_data),
         .txt_len          (txt_len),
