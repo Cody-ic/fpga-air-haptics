@@ -126,4 +126,18 @@ python -m desktop_app.tests.gui_smoke
 
 测试覆盖重合与取消、旋转及尺寸保持、关系预检、掌面提醒、公共线去重、曲线编译、关闭输出的跳转、协议与文件迁移；GUI 场景覆盖点选／吸附重合、关系置灰、旋转手柄、缩小视图露出手指、提醒不阻止发送、保存导入、手掌预览、发送确认、4×4/8×8 回读和超时。截图需 Pillow，写入被忽略的 `.runtime/`。真实串口适配器有模拟测试，尚无板卡联调结果。
 
-代码分工：`sketch_editor.py` 草图交互，`sketch.py` 几何关系与编译，`editor.py` 画布裁剪，`presets.py` 图案预览，`playback.py` 设备反馈，`hand_view.py` 手掌示意，`model.py` 路径与声场参考，`app.py` 界面与文件，通信模块见协议说明。
+代码分工：`sketch_editor.py` 草图交互，`sketch.py` 几何关系与编译，`editor.py` 画布裁剪，`presets.py` 图案预览，`playback.py` 设备反馈，`hand_view.py` 手掌示意，`model.py` 路径与声场参考，`golden.py` 相位黄金向量导出，`app.py` 界面与文件，通信模块见协议说明。
+
+## 相位黄金向量（供 FPGA 逐通道比对）
+
+`golden.py` 用 `model.py` 的参考模型批量导出相位码，供 RTL（Register Transfer Level，寄存器传输级）仿真对拍：
+
+```powershell
+python -m desktop_app.golden
+python -m desktop_app.golden --array 8x8 --rate-hz 2000
+python -m desktop_app.golden --file 图形.json --out desktop_app/exports/我的向量
+```
+
+默认导出完整一圈，输出到 `desktop_app/exports/golden-*/`：`*.csv` 是每帧的焦点坐标与全部相位码（人看），`*_phases.mem` 每行一帧、每通道两位十六进制（`$readmemh` 可直接读），`*_focus.mem` 是 32 位补码的焦点坐标，`*.json` 记录参数与 SHA-256 校验和。
+
+导出内容是**设备期望值**，不是实测数据；更换阵列尺寸或修改图形后必须重新导出。

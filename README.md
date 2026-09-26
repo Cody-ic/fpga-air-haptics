@@ -4,7 +4,7 @@
 
 2026 年全国大学生嵌入式芯片与系统设计竞赛 FPGA 创新设计赛道参赛准备项目。
 
-> 更新于 **2026-09-25**。已有可运行的电脑上位机、Windows 便携 EXE、Demo 模拟设备、双向串口客户端和测试。硬件仍处于方案设计与选型阶段，尚无 RTL、PCB 工程或硬件实测结果；软件演示不代表触觉效果已验证。
+> 更新于 **2026-09-26**。已有可运行的电脑上位机、Windows 便携 EXE、Demo 模拟设备、双向串口客户端和测试；FPGA 侧已有 HAP2 接收、命令裁决、应答组装和心跳看门狗的 RTL 与仿真测试（见 [FPGA 工程说明](fpga/README.md)），但**尚未上板**，而且上位机协议已升到 HAP3，固件还需要一次版本更新。硬件仍处于方案设计与选型阶段，没有 PCB 工程，也没有任何硬件实测结果；软件演示与仿真都不代表触觉效果已验证。
 
 ## 项目简介
 
@@ -51,6 +51,7 @@ Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、�
 - [设计思路](设计思路.md)：当前架构、按键与串口分工、硬件选型、验证步骤和待决策事项。
 - [交互与放手引导提案](交互与放手引导提案.md)：腕托与语音、使用流程、手掌示意、既定软件交互和实现状态。
 - [上位机使用说明](desktop_app/README.md)：组合草图、尺寸和顺序、手掌预览、Demo 与数据边界。
+- [FPGA 工程说明](fpga/README.md)：串口收发通路的 RTL、仿真向量与运行方式；当前实现的是 HAP2，待升级到 HAP3。
 - [HAP3 串口协议](desktop_app/PROTOCOL.md)：坐标路径、设备能力声明、完整配置提交、原子状态快照和看门狗。
 - [选题调研](FPGA赛道选题建议%281%29.md)：原始候选方案和参考资料；推荐排序及部分判断属于历史调研。
 - [贡献指南](AGENTS.md)：文档维护、核验和提交约定。
@@ -68,7 +69,7 @@ python -m desktop_app --demo
 python -m unittest discover -s desktop_app/tests -v
 ```
 
-可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 64 位可用 PyInstaller 构建独立 EXE，见[启动与打包说明](desktop_app/README.md#启动)；本机构建产物位于 `desktop_app/dist/`，不提交到 Git。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、pyserial 3.5；实际打包依赖版本记录在 `build-info.json`，截图需要 Pillow。无格式化器、HDL 构建或 RTL 仿真命令。
+可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 64 位可用 PyInstaller 构建独立 EXE，见[启动与打包说明](desktop_app/README.md#启动)；本机构建产物位于 `desktop_app/dist/`，不提交到 Git。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、pyserial 3.5；实际打包依赖版本记录在 `build-info.json`，截图需要 Pillow。无格式化器，也没有配置 HDL 构建；RTL 仿真用 WSL 里的 Verilator，命令见 [fpga/README.md](fpga/README.md)。
 
 上位机默认打开草图编辑器，支持连续直线、矩形、圆、拖动成圆弧和控制点曲线，可组合多个轮廓、擦除线条、设置必要几何关系与尺寸、整体倍数缩放和指定呈现顺序。原打点操作已并入连续直线工具。公共线按顺序仅呈现一次，段间关闭输出；编译后最多 32 段、256 个坐标。图形按实际坐标保存，换阵列不会改变位置。Demo 可设置 4×4、6×6、8×8、12×12、16×16 及自定义行列；真实硬件规模由 FPGA 握手声明。普通界面保留绘图与播放，勾选“调试模式”查看相位、声场和串口日志。
 
