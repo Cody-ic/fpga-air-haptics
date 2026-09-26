@@ -1,0 +1,20 @@
+{
+  "project": "Haptics_4x4_R5_12VDC",
+  "schematic_drc": [],
+  "pcb_drc": [],
+  "components": 78,
+  "vias_total": 125,
+  "via_span_counts": {
+    "": 125
+  },
+  "through_drill_files": [
+    "Drill_PTH_Through.DRL",
+    "Drill_NPTH_Through.DRL",
+    "Drill_PTH_Through_Via.DRL"
+  ],
+  "testpads": 19,
+  "epro_sha256": "f05e2b8b35d2f062f1b27b3120a5c86bb81650224e933391c1688773a73feb6d",
+  "gerber_sha256": "18520a17822ed171fb8ed770eda478b9bbd29219021bfeef285846f4f5277e3c",
+  "output_testpads": 16,
+  "power_testpads": 3
+}
