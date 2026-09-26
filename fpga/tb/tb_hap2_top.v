@@ -78,7 +78,7 @@ module tb_hap2_top;
 
     // ---------------- 向量 ----------------
     reg [7:0]  pkt   [0:8191];
-    reg [31:0] tplan [0:31];
+    reg [31:0] tplan [0:63];       // 每条报文两个字段（偏移、长度）
 
     integer errors = 0;
     integer checks = 0;
@@ -260,6 +260,56 @@ module tb_hap2_top;
         end
     endtask
 
+    // 单点草图：焦点应当一直停在那一点上，扫描开关照常一开一关（原地停留 + 抬笔）
+    integer dot_scan, dot_blank, dot_moved, dot_gate_bad;
+    task watch_dot;
+        input integer cycles;
+        input integer wx;
+        input integer wy;
+        integer c, lx, ly;
+        begin
+            dot_scan = 0; dot_blank = 0; dot_moved = 0; dot_gate_bad = 0;
+            lx = 0; ly = 0;
+            for (c = 0; c < cycles; c = c + 1) begin
+                @(negedge clk);
+                if (beat_pulse) begin
+                    if (scan_on) dot_scan = dot_scan + 1;
+                    else         dot_blank = dot_blank + 1;
+                    if ((lx != 0 || ly != 0) && (focus_x !== lx || focus_y !== ly))
+                        dot_moved = 1;
+                    lx = focus_x;
+                    ly = focus_y;
+                end
+                if (output_on !== (scan_on && walk_running)) dot_gate_bad = 1;
+            end
+            checks = checks + 1;
+            if (focus_x !== wx || focus_y !== wy) begin
+                $display("[用例 %0d] 单点草图应当停在 (%0d,%0d)：实测 (%0d,%0d)  **失败**",
+                         case_i, wx, wy, focus_x, focus_y);
+                errors = errors + 1;
+            end
+            checks = checks + 1;
+            if (dot_moved) begin
+                $display("[用例 %0d] 单点草图不应该移动焦点  **失败**", case_i);
+                errors = errors + 1;
+            end
+            checks = checks + 1;
+            if (dot_scan == 0 || dot_blank == 0) begin
+                $display("[用例 %0d] 单点草图也要「停留一段、抬笔一段」：停留 %0d 拍、抬笔 %0d 拍  **失败**",
+                         case_i, dot_scan, dot_blank);
+                errors = errors + 1;
+            end else begin
+                $display("  单点草图：停留 %0d 拍、抬笔 %0d 拍，焦点始终在 (%0d,%0d)",
+                         dot_scan, dot_blank, focus_x, focus_y);
+            end
+            checks = checks + 1;
+            if (dot_gate_bad) begin
+                $display("[用例 %0d] 输出使能条件不满足  **失败**", case_i);
+                errors = errors + 1;
+            end
+        end
+    endtask
+
     initial begin
         $readmemh("tb/vectors/top_packets.mem", pkt);
         $readmemh("tb/vectors/top_plan.mem",    tplan);
@@ -379,19 +429,60 @@ module tb_hap2_top;
         field_int("rev=");
         expect_val(val, 1, "被拒绝之后的版本号");
 
-        // ---- 9. 预设图形：配置通过，但轨迹还没做 ----
+        // ---- 9. 被拒绝之后启动：上一份草图的节拍表还应当能跑 ----
+        // （节拍表是双缓冲的，编译失败只写另一半，不动正在用的那张）
         case_i = 8;
         clear_rx;
         send_case(8);
         wait_frames(2);
-        found("HAP3 ACK 9 CONFIG applied=1 rev=2");
-        // 预设图形没有草图，回传的 scan_paths 必须是 NONE
-        found("scan_paths=NONE blank_us=");
+        found("HAP3 ACK 9 START");
+        found("state=RUNNING");
+        watch_trajectory(1200000);
 
-        // ---- 10. 启动预设图形：焦点原地不动、扫描开关保持 0 ----
+        // ---- 10. 停止 ----
         case_i = 9;
         clear_rx;
         send_case(9);
+        wait_frames(2);
+        found("state=IDLE");
+
+        // ---- 11. 4 个字符的单点草图：不能被当成 NONE 拒掉 ----
+        case_i = 10;
+        clear_rx;
+        send_case(10);
+        wait_frames(2);
+        found("HAP3 ACK 11 CONFIG applied=1 rev=2");
+        found("scan_paths=10:2 blank_us=");
+
+        // ---- 12. 启动单点草图：原地停留，扫描开关照常开关 ----
+        case_i = 11;
+        clear_rx;
+        send_case(11);
+        wait_frames(2);
+        found("state=RUNNING");
+        // 单点在 10 µm : 2 µm，换成 0.5 µm 单位就是 (20,4)
+        watch_dot(1200000, 20, 4);
+
+        // ---- 13. 停止 ----
+        case_i = 12;
+        clear_rx;
+        send_case(12);
+        wait_frames(2);
+        found("state=IDLE");
+
+        // ---- 14. 预设图形：配置通过，但轨迹还没做 ----
+        case_i = 13;
+        clear_rx;
+        send_case(13);
+        wait_frames(2);
+        found("HAP3 ACK 14 CONFIG applied=1 rev=3");
+        // 预设图形没有草图，回传的 scan_paths 必须是 NONE
+        found("scan_paths=NONE blank_us=");
+
+        // ---- 15. 启动预设图形：焦点原地不动、扫描开关保持 0 ----
+        case_i = 14;
+        clear_rx;
+        send_case(14);
         wait_frames(2);
         found("state=RUNNING");
         repeat (60000) @(negedge clk);
@@ -402,25 +493,35 @@ module tb_hap2_top;
             errors = errors + 1;
         end
 
-        // ---- 11. 停止 ----
-        case_i = 10;
+        // ---- 16. 停止 ----
+        case_i = 15;
         clear_rx;
-        send_case(10);
+        send_case(15);
         wait_frames(2);
         found("state=IDLE");
 
-        // ---- 12. 探活：只回一条 ACK，不跟状态 ----
-        case_i = 11;
+        // ---- 17. 探活：只回一条 ACK，不跟状态 ----
+        case_i = 16;
         clear_rx;
-        send_case(11);
+        send_case(16);
         wait_frames(1);
-        found("HAP3 ACK 12 PING");
+        found("HAP3 ACK 17 PING");
         repeat (20000) @(negedge clk);
         checks = checks + 1;
         if (lf_count !== 1) begin
             $display("[用例 %0d] 探活应当只回一条报文，实测 %0d 条  **失败**", case_i, lf_count);
             errors = errors + 1;
         end
+
+        // ---- 18. 配置和探活连着发：探活不能顶掉配置应答的序号 ----
+        // 探活会在节拍表编译期间到达。这一条是回归用例：以前命令层会在每一帧
+        // 都记「回给谁」，探活一插进来就把序号顶掉了，配置的 ACK 会回错序号。
+        case_i = 17;
+        clear_rx;
+        send_case(17);
+        wait_frames(3);                    // 探活 ACK + 配置 ACK + 配置的 STATE
+        found("HAP3 ACK 19 PING");
+        found("HAP3 ACK 18 CONFIG applied=1 rev=4");
 
         $display("=========================================");
         $display("共检查 %0d 项，失败 %0d 项", checks, errors);

@@ -69,6 +69,12 @@ module tb_traj;
 
     reg  chk_mode;                           // 1 = 测试台直接读节拍表
     reg  [8:0] tb_rd;
+    // 节拍表是双缓冲的：编译写另一半，算完才切过去（这里跟着做同样的事）
+    reg  tbl_sel;
+    always @(posedge clk) begin
+        if (!rst_n)        tbl_sel <= 1'b0;
+        else if (plan_done) tbl_sel <= ~tbl_sel;
+    end
     wire [8:0] walk_rd;
     wire [8:0] rd_mv = chk_mode ? tb_rd : walk_rd;
     wire [23:0] mv_beats;
@@ -80,6 +86,7 @@ module tb_traj;
         .PT_BITS (PT_BITS), .FRAC (FRAC)
     ) u_plan (
         .clk (clk), .rst_n (rst_n),
+        .tbl_sel (tbl_sel),
         .point_count (point_count), .stroke_count (stroke_count),
         .pt_addr (pt_addr), .pt_x (pt_x), .pt_y (pt_y),
         .st_addr (st_addr), .st_start (st_start), .st_len (st_len),

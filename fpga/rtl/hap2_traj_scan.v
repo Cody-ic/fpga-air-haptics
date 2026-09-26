@@ -154,23 +154,60 @@ module hap2_traj_scan #(
     assign txt_len   = txt_len_r;
     assign txt_valid = txt_valid_r;
 
-    // ---- 节拍表 ----
-    wire [8:0]         rd_mv;
-    wire [23:0]        mv_beats;
-    wire signed [31:0] mv_step_x, mv_step_y;
-    wire               mv_scan;
-    wire [5:0]         mv_stroke;
-    wire [8:0]         move_count;
+    // ---- 节拍表 + 走步器（hap2_traj 里已经接好的一对）----
     wire signed [PT_BITS-1:0] plan_x0, plan_y0;
     /* verilator lint_off UNUSEDSIGNAL */
-    wire [31:0]        laps_beats, blank_beats;   // 只在波形上看，暂时没人用
+    wire [31:0] laps_beats, blank_beats;        // 同上：节拍表算出来的全局量
     /* verilator lint_on UNUSEDSIGNAL */
+    wire [8:0] move_count;                      // 编译刚算出来的行数（半成品，不能直接用）
+    reg signed [PT_BITS-1:0] pub_x0, pub_y0;    // 已经把这份节拍表「发布」出去的起点
+    reg [8:0]  pub_moves;                       // 已发布那份表的行数
 
-    hap2_traj_plan #(
-        .PT_BITS (PT_BITS), .MAX_PTS (MAX_PTS), .MAX_STK (MAX_STK), .FRAC (FRAC)
-    ) u_plan (
+    // mv_sel = 走步器现在读哪一半节拍表。编译写的是另一半（双缓冲）：
+    // 编译到一半失败也不会破坏正在用的那张表，所以「被拒绝的配置不改变已生效的东西」
+    // 这条承诺才真的成立——被拒绝之后，上一份草图仍然能启动。
+    reg mv_sel;
+    reg traj_ok;      // 有没有一张对得上当前配置的节拍表
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            mv_sel  <= 1'b0;
+            traj_ok <= 1'b0;
+            pub_x0  <= {PT_BITS{1'b0}};
+            pub_y0  <= {PT_BITS{1'b0}};
+            pub_moves <= 9'd0;
+        end else begin
+            if (plan_done) begin
+                mv_sel  <= ~mv_sel;      // 新表算好了，切到新那一半
+                traj_ok <= 1'b1;
+                pub_x0  <= plan_x0;
+                pub_y0  <= plan_y0;
+                pub_moves <= move_count; // 行数也要跟着切，不然走步器会按错的行数循环
+            end else if (txt_commit && txt_none) begin
+                traj_ok <= 1'b0;         // 这次生效的配置没有草图（预设图形 / NONE）
+            end
+        end
+    end
+
+    // 没有可用节拍表时，走步器停在阵列中心（0,0）并且不开扫描，
+    // 免得把上一份图形的表当成这一份继续走。
+    wire signed [PT_BITS-1:0] walk_x0 = traj_ok ? pub_x0 : {PT_BITS{1'b0}};
+    wire signed [PT_BITS-1:0] walk_y0 = traj_ok ? pub_y0 : {PT_BITS{1'b0}};
+
+    hap2_traj #(
+        .PT_BITS (PT_BITS), .MAX_PTS (MAX_PTS), .MAX_STK (MAX_STK),
+        .FRAC (FRAC), .TICK_CYC (TICK_CYC)
+    ) u_traj (
         .clk                (clk),
         .rst_n              (rst_n),
+        .tbl_sel            (mv_sel),
+        .plan_start         (plan_start),
+        .walk_start         (walk_start),
+        .walk_hold          (walk_hold),
+        .walk_stop          (walk_stop),
+        .walk_x0            (walk_x0),
+        .walk_y0            (walk_y0),
+        .walk_moves         (pub_moves),
         .point_count        (point_count),
         .stroke_count       (stroke_count),
         .pt_addr            (pt_addr),
@@ -181,66 +218,31 @@ module hap2_traj_scan #(
         .st_len             (st_len),
         .cfg_repeat_millihz (cfg_repeat_millihz),
         .cfg_blank_us       (cfg_blank_us),
-        .start              (plan_start),
-        .busy               (plan_busy),
-        .done               (plan_done),
-        .fault              (plan_fault),
+        .plan_busy          (plan_busy),
+        .plan_done          (plan_done),
+        .plan_fault         (plan_fault),
         .laps_beats         (laps_beats),
         .blank_beats        (blank_beats),
         .move_count         (move_count),
-        .start_x            (plan_x0),
-        .start_y            (plan_y0),
-        .rd_mv              (rd_mv),
-        .mv_beats           (mv_beats),
-        .mv_step_x          (mv_step_x),
-        .mv_step_y          (mv_step_y),
-        .mv_scan            (mv_scan),
-        .mv_stroke          (mv_stroke)
+        .traj_x0            (plan_x0),
+        .traj_y0            (plan_y0),
+        .focus_x            (walk_fx),
+        .focus_y            (walk_fy),
+        .scan_on            (walk_scan),
+        .stroke_index       (walk_stroke),
+        .beat_pulse         (beat_pulse),
+        .walk_running       (walk_running)
     );
 
-    // ---- 走步器 ----
-    // 没有有效节拍表时，走步器停在阵列中心（0,0）并且不开扫描，
-    // 免得把上一份图形的表当成这一份继续走。
-    // traj_ok 的意思是「表里这份节拍表对得上当前配置」：
-    //   新配置开始解析 → 旧表作废；
-    //   节拍表编译成功 → 有效；
-    //   编译失败（图形做不出来）→ 作废。
-    // 注意停止（walk_stop）只是停下走步器，不能让表作废——停下之后
-    // 焦点要回到这张表的起点，而不是回到阵列中心。
-    reg  traj_ok;
-    always @(posedge clk) begin
-        if (!rst_n)             traj_ok <= 1'b0;
-        else if (parse_start)   traj_ok <= 1'b0;
-        else if (plan_done)     traj_ok <= 1'b1;
-        else if (plan_fault)    traj_ok <= 1'b0;
-    end
+    wire signed [PT_BITS-1:0] walk_fx, walk_fy;
+    wire        walk_scan;
+    wire [5:0]  walk_stroke;
 
-    wire signed [PT_BITS-1:0] walk_x0 = traj_ok ? plan_x0 : {PT_BITS{1'b0}};
-    wire signed [PT_BITS-1:0] walk_y0 = traj_ok ? plan_y0 : {PT_BITS{1'b0}};
-
-    hap2_traj_walk #(
-        .PT_BITS (PT_BITS), .FRAC (FRAC), .TICK_CYC (TICK_CYC)
-    ) u_walk (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .start        (walk_start),
-        .hold         (walk_hold),
-        .stop         (walk_stop),
-        .start_x      (walk_x0),
-        .start_y      (walk_y0),
-        .move_count   (move_count),
-        .rd_mv        (rd_mv),
-        .mv_beats     (mv_beats),
-        .mv_step_x    (mv_step_x),
-        .mv_step_y    (mv_step_y),
-        .mv_scan      (mv_scan),
-        .mv_stroke    (mv_stroke),
-        .focus_x      (focus_x),
-        .focus_y      (focus_y),
-        .scan_on      (scan_on),
-        .stroke_index (stroke_index),
-        .beat_pulse   (beat_pulse),
-        .running      (walk_running)
-    );
+    // 没有可用节拍表时（预设图形、或还没发过图形），对外一律报「停在阵列中心、
+    // 没在扫描」——走步器内部状态是上一份图形留下的，不能露出去。
+    assign focus_x      = traj_ok ? walk_fx     : {PT_BITS{1'b0}};
+    assign focus_y      = traj_ok ? walk_fy     : {PT_BITS{1'b0}};
+    assign scan_on      = traj_ok ? walk_scan   : 1'b0;
+    assign stroke_index = traj_ok ? walk_stroke : 6'd0;
 
 endmodule

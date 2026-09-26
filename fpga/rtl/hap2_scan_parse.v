@@ -206,8 +206,13 @@ module hap2_scan_parse #(
                     if (!none_ph) begin
                         none_ph <= 1'b1;
                     end else if (rd_data !== none_char(none_i)) begin
-                        fail_flag <= 1'b1;
-                        state     <= S_DONE;
+                        // 不是 NONE：退回正常的草图解析重来一遍。
+                        // （4 个字符的合法草图是存在的，比如单点 "10:2"）
+                        // 不是 NONE：退回正常的草图解析重来一遍。
+                        // （4 个字符的合法草图是存在的，比如单点 "10:2"）
+                        rd_addr <= src_off;
+                        none_ph <= 1'b0;
+                        state   <= S_PRIME;
                     end else if (none_i == 2'd3) begin
                         point_count  <= 9'd0;
                         stroke_count <= 6'd0;

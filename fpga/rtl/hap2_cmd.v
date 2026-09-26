@@ -257,7 +257,8 @@ module hap2_cmd #(
         input [15:0] rseq;
         input [3:0]  rverb;
         begin
-            traj_ready   <= 1'b0;
+            // 注意：这里**不能**动 traj_ready。被拒绝的配置不改变已生效的任何东西，
+            // 上一份草图的节拍表仍然是好的（表本身是双缓冲的，编译不会破坏它）。
             walk_stop    <= 1'b1;
             reply_valid  <= 1'b1;
             reply_kind   <= 2'd1;
@@ -451,8 +452,6 @@ module hap2_cmd #(
             // ---- 2. 帧结束：出结论 ----
             // 只认电脑发来的 CMD；其它帧型（理论上不会收到）一律不回话
             if ((frame_ok || frame_bad) && header_ok && kind == 2'd0) begin
-                lat_verb <= verb;                // 待办配置回话时要用的命令名与序号
-                lat_seq  <= seq;
                 if (pending != P_IDLE) begin
                     // 上一份 CONFIG 还在解析／编译节拍表。电脑正常只会发探活，
                     // 探活照常回；别的命令先回「忙」，这一次编译照旧走完。
@@ -476,6 +475,10 @@ module hap2_cmd #(
                     // 两步都过了才回 ACK（见 P_PARSE / P_PLAN）
                     pending          <= P_PARSE;
                     traj_parse_start <= 1'b1;
+                    // 这几拍之后可能要过一毫秒才回话，先把「回给谁」记下来。
+                    // 只在这条路上记：编译期间插进来的探活不能把序号顶掉。
+                    lat_verb         <= verb;
+                    lat_seq          <= seq;
                 end else begin
                     reply_valid      <= 1'b1;
                     reply_kind       <= 2'd0;

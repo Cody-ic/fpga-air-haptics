@@ -421,6 +421,7 @@ def traj_samples(scan_paths, repeat_millihz, blank_us, laps, moves):
 # 端到端用例（tb_hap2_top 用）：一条一条真实报文，按顺序发给板子
 TOP_SKETCH  = "1000:2000,11000:2000|1000:7000,11000:7000"
 TOP_TOOFINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 61))
+TOP_DOT     = "10:2"      # 4 个字符的单点草图：容易和 NONE 混，专门测一测
 
 
 def build_top_cases(device):
@@ -446,15 +447,32 @@ def build_top_cases(device):
                                repeat_millihz=200000, blank_us=100),
          "碎到分不到一拍的图形：整份拒绝，版本号不动"),
         ("snap", encode("CMD", 8, "SNAP"), "要一份状态快照"),
+        ("start_again", encode("CMD", 9, "START"),
+         "被拒绝之后启动：上一份草图的节拍表还在，应当照常走"),
+        ("stop_again", encode("CMD", 10, "STOP"), "停止"),
+        # 4 个字符的单点草图（dot）：解析器不能把它当成 NONE
+        ("config_dot", cfg(11, shape="CUSTOM", scan_paths=TOP_DOT,
+                           repeat_millihz=40000, blank_us=2000, level=30),
+         "单点草图：4 个字符，不能误判成 NONE"),
+        ("start_dot", encode("CMD", 12, "START"), "启动单点草图：原地停留，扫描开关照常开关"),
+        ("stop_dot", encode("CMD", 13, "STOP"), "停止"),
         # 预设图形（CIRCLE 等）的轨迹还没做：配置接受，但没有节拍表，
         # 启动之后焦点原地不动、扫描开关保持 0。这一条就是把现状钉住，
         # 等相位那一轮做完再改期望值。
-        ("config_circle", cfg(9, shape="CIRCLE", radius_um=20000,
+        ("config_circle", cfg(14, shape="CIRCLE", radius_um=20000,
                               repeat_millihz=40000, level=30),
          "预设图形：配置通过，轨迹暂不可用"),
-        ("start_preset", encode("CMD", 10, "START"), "启动预设图形：焦点原地不动"),
-        ("stop_preset", encode("CMD", 11, "STOP"), "停止"),
-        ("ping", encode("CMD", 12, "PING"), "探活：只回 ACK"),
+        ("start_preset", encode("CMD", 15, "START"), "启动预设图形：焦点原地不动"),
+        ("stop_preset", encode("CMD", 16, "STOP"), "停止"),
+        ("ping", encode("CMD", 17, "PING"), "探活：只回 ACK"),
+        # 最后一条：一份 CONFIG 后面**紧跟着**一条探活，中间没有任何等待。
+        # 探活会在节拍表还在编译的时候到，命令层两件事都不能耽误：
+        # 探活照常回 ACK，而那份配置的 ACK 里序号仍然要是它自己的序号。
+        ("config_then_ping",
+         cfg(18, shape="CUSTOM", scan_paths=TOP_SKETCH,
+             repeat_millihz=40000, blank_us=2000, level=30)
+         + encode("CMD", 19, "PING"),
+         "配置和探活连着发：探活不能顶掉配置应答的序号"),
     ]
 
 

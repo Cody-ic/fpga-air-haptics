@@ -61,6 +61,9 @@ module hap2_traj_plan #(
     output reg  signed [PT_BITS-1:0] start_x,   // 轨迹起点 = 第一笔的第一个点
     output reg  signed [PT_BITS-1:0] start_y,
     // ---- 移动表读口（给轨迹走步器）----
+    // tbl_sel 说明「现在对外用的是哪一半」：读口读 tbl_sel 那一半，
+    // 编译时写的是**另一半**，算到一半失败也不会破坏正在用的表。
+    input  wire                      tbl_sel,
     input  wire [8:0]                rd_mv,
     output reg  [23:0]               mv_beats,
     output reg  signed [31:0]        mv_step_x,
@@ -118,11 +121,12 @@ module hap2_traj_plan #(
     reg signed [31:0] dy_tab  [0:MAX_PTS-1];
 
     // ---- 输出：移动表 ----
-    reg [23:0]        beats_tab [0:MAX_MV-1];
-    reg signed [31:0] stx_tab   [0:MAX_MV-1];
-    reg signed [31:0] sty_tab   [0:MAX_MV-1];
-    reg               scan_tab  [0:MAX_MV-1];
-    reg [5:0]         stroke_tab[0:MAX_MV-1];
+    // 上下两半：一半在用，一半在写（双缓冲，见 tbl_sel）
+    reg [23:0]        beats_tab [0:2*MAX_MV-1];
+    reg signed [31:0] stx_tab   [0:2*MAX_MV-1];
+    reg signed [31:0] sty_tab   [0:2*MAX_MV-1];
+    reg               scan_tab  [0:2*MAX_MV-1];
+    reg [5:0]         stroke_tab[0:2*MAX_MV-1];
 
     reg [4:0]  state;
     reg        fail;
@@ -175,11 +179,11 @@ module hap2_traj_plan #(
 
     // 移动表读口：同步读，给地址后一拍出数据
     always @(posedge clk) begin
-        mv_beats  <= beats_tab [rd_mv];
-        mv_step_x <= stx_tab   [rd_mv];
-        mv_step_y <= sty_tab   [rd_mv];
-        mv_scan   <= scan_tab  [rd_mv];
-        mv_stroke <= stroke_tab[rd_mv];
+        mv_beats  <= beats_tab [{tbl_sel, rd_mv}];
+        mv_step_x <= stx_tab   [{tbl_sel, rd_mv}];
+        mv_step_y <= sty_tab   [{tbl_sel, rd_mv}];
+        mv_scan   <= scan_tab  [{tbl_sel, rd_mv}];
+        mv_stroke <= stroke_tab[{tbl_sel, rd_mv}];
     end
 
     // 当前这一小段的两轴差值、平方和（第一趟用）
@@ -591,11 +595,11 @@ module hap2_traj_plan #(
 
                 // ---- 落一行 ----
                 S_P2_WR: begin
-                    beats_tab [mv_wr] <= wr_beats;
-                    stx_tab   [mv_wr] <= wr_sx;
-                    sty_tab   [mv_wr] <= wr_sy;
-                    scan_tab  [mv_wr] <= wr_scan;
-                    stroke_tab[mv_wr] <= s;
+                    beats_tab [{~tbl_sel, mv_wr}] <= wr_beats;
+                    stx_tab   [{~tbl_sel, mv_wr}] <= wr_sx;
+                    sty_tab   [{~tbl_sel, mv_wr}] <= wr_sy;
+                    scan_tab  [{~tbl_sel, mv_wr}] <= wr_scan;
+                    stroke_tab[{~tbl_sel, mv_wr}] <= s;
                     mv_wr <= mv_wr + 9'd1;
                     case (wr_next)
                         2'd0:    state <= S_P2_SEG;

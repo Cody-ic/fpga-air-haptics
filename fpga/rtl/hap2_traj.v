@@ -20,9 +20,17 @@ module hap2_traj #(
     input  wire                      rst_n,
     // ---- 来自命令层 ----
     input  wire                      plan_start,   // 单拍脉冲：把当前配置编译成节拍表
+    // 节拍表是双缓冲的：读口读 tbl_sel 那一半，编译写另一半。
+    // 编译到一半失败也不会破坏正在用的表，所以被拒绝的配置不改变已生效的东西。
+    input  wire                      tbl_sel,
     input  wire                      walk_start,   // 单拍脉冲：从头开始走
     input  wire                      walk_hold,    // 电平：暂停
     input  wire                      walk_stop,    // 单拍脉冲：停下并回到起点
+    // 走步器「停下时回到哪里」：由调用方给（没有可用节拍表时就给阵列中心）。
+    // 不能直接用节拍表刚算出来的起点：编译到一半失败时那个值是半成品。
+    input  wire signed [PT_BITS-1:0] walk_x0,
+    input  wire signed [PT_BITS-1:0] walk_y0,
+    input  wire [8:0]                walk_moves,   // 走步器按几行循环（同样是「已发布」的那份）
     // ---- 点表 / 段表（直接接到 hap2_scan_parse）----
     input  wire [8:0]                point_count,
     input  wire [5:0]                stroke_count,
@@ -64,6 +72,7 @@ module hap2_traj #(
     ) u_plan (
         .clk               (clk),
         .rst_n             (rst_n),
+        .tbl_sel           (tbl_sel),
         .point_count       (point_count),
         .stroke_count      (stroke_count),
         .pt_addr           (pt_addr),
@@ -99,9 +108,9 @@ module hap2_traj #(
         .start        (walk_start),
         .hold         (walk_hold),
         .stop         (walk_stop),
-        .start_x      (traj_x0),
-        .start_y      (traj_y0),
-        .move_count   (move_count),
+        .start_x      (walk_x0),
+        .start_y      (walk_y0),
+        .move_count   (walk_moves),
         .rd_mv        (rd_mv),
         .mv_beats     (mv_beats),
         .mv_step_x    (mv_step_x),
