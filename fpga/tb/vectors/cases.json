@@ -1,0 +1,14 @@
+{
+  "frame_cases": 7,
+  "field_cases": 10,
+  "cmd_cases": 18,
+  "tx_expect": 3,
+  "field_order": [
+    "offset",
+    "bytes",
+    "expect_ok",
+    "expect_verb",
+    "expect_err",
+    "expect_seen_mask"
+  ]
+}

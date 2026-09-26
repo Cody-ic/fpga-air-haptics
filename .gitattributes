@@ -1,0 +1,7 @@
+# FPGA 目录里的文件一律用 LF 换行。
+#
+# 原因：Windows 上的 Git 默认（core.autocrlf=true）会把文本文件 checkout 成
+# CRLF，而 `fpga/tb/run_verilator.sh` 是 shell 脚本——shebang 和 `set` 参数
+# 后面多出一个 \r 之后就完全跑不起来（报 "pipefail: invalid option name"）。
+# Verilog 的 $readmemh 读向量文件也更适应 LF。
+fpga/** text eol=lf

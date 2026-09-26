@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# 用 Verilator 编译并运行 HAP2 接收通路的仿真。
+#
+#   cd fpga
+#   bash tb/run_verilator.sh
+#
+# 必须在 fpga/ 目录下运行：测试台用相对路径 tb/vectors/ 读向量文件。
+# 默认在 $HOME/.cache/hap2_sim 下编译，不往仓库里塞编译产物；
+# 可以用 BUILD_DIR=... 覆盖。
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [ ! -f tb/vectors/packets.mem ] || [ ! -f tb/vectors/plan.mem ]; then
+    echo "缺少向量文件，请先在仓库根目录执行：python fpga/tb/gen_vectors.py" >&2
+    exit 1
+fi
+
+BUILD_DIR="${BUILD_DIR:-$HOME/.cache/hap2_sim}"
+mkdir -p "$BUILD_DIR"
+
+# -Wno-WIDTH：Verilog-2001 里常量算术一律按 32 位算，赋给窄位寄存器时
+# Verilator 会报大量位宽提示。这些在综合工具里无害，这里统一关闭。
+# -Wno-PINMISSING：有些输出端口是有意不接的（例如只在调试时才看），
+# 这类“端口没接”的提示在这里不需要。
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_hap2_rx -o hap2_rx_sim -Mdir "$BUILD_DIR/obj" \
+          rtl/uart_rx.v rtl/uart_tx.v rtl/dec_ascii.v rtl/hap2_line_rx.v \
+          rtl/crc16_ccitt.v rtl/hap2_frame_check.v rtl/hap2_field_parse.v \
+          rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
+          tb/tb_hap2_rx.v
+
+echo "-----------------------------------------"
+"$BUILD_DIR/obj/hap2_rx_sim"
