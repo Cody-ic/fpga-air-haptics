@@ -17,7 +17,7 @@ module tb_hap2_rx;
     localparam integer BAUD         = 115200;
     localparam integer CLKS_PER_BIT = (CLK_HZ + (BAUD / 2)) / BAUD;      // 434
     localparam real    CLK_NS       = 1000.0 / (CLK_HZ / 1000000.0);     // 20.0 ns
-    localparam integer ADDR_W       = 12;
+    localparam integer ADDR_W       = 13;   // 行缓冲 8192 字节
     localparam integer NCASE        = 7;
     localparam integer PKT_MAX      = 2048;
     localparam integer FNCASE       = 10;     // 字段级用例个数
@@ -184,6 +184,59 @@ module tb_hap2_rx;
     );
 
     // ---------------- 应答发送通路 ----------------
+    // ---------------- 多段草图解析器 ----------------
+    localparam integer SN          = 9;      // 草图解析用例个数
+    localparam integer BUF_BYTES   = 2048;
+
+    reg  [7:0]  strbuf [0:BUF_BYTES-1];      // 测试用的字符串缓冲（同步读）
+    reg  [7:0]  scan_pkt [0:4095];           // 各用例的字节
+    reg  [31:0] scan_plan [0:9*SN-1];
+
+    reg  [10:0] scan_off;                    // 字符串起点
+    reg  [11:0] scan_len;                    // 字符串长度
+    reg         scan_start;
+    wire [10:0] scan_rd_addr;
+    reg  [7:0]  scan_data;
+    wire        scan_busy;
+    wire        scan_ok;
+    wire        scan_bad;
+    wire [8:0]  scan_pts;
+    wire [5:0]  scan_stk;
+    reg  [7:0]  scan_pt_addr;
+    wire signed [20:0] scan_x;
+    wire signed [20:0] scan_y;
+    reg  [4:0]  scan_st_addr;
+    wire [8:0]  scan_st_start;
+    wire [8:0]  scan_st_len;
+
+    always @(posedge clk) scan_data <= strbuf[scan_rd_addr];
+
+    hap2_scan_parse #(
+        .ADDR_W  (11),          // 测试缓冲 2048 字节
+        .PT_BITS (21),
+        .MAX_PTS (256),
+        .MAX_STK (32)
+    ) dut_scan (
+        .clk          (clk),
+        .rst_n        (rst_n),
+        .start        (scan_start),
+        .src_off      (scan_off),
+        .src_len      (scan_len),
+        .rd_addr      (scan_rd_addr),
+        .rd_data      (scan_data),
+        .busy         (scan_busy),
+        .ok           (scan_ok),
+        .bad          (scan_bad),
+        .point_count  (scan_pts),
+        .stroke_count (scan_stk),
+        .pt_addr      (scan_pt_addr),
+        .pt_x         (scan_x),
+        .pt_y         (scan_y),
+        .st_addr      (scan_st_addr),
+        .st_start     (scan_st_start),
+        .st_len       (scan_st_len)
+    );
+
     // 看门狗：仿真里把超时缩到 200 毫秒，免得等真实的 3 秒（3 秒 = 1.5 亿拍）。
     // 注意不能缩得太小：一条应答加一份状态帧要发 67 毫秒，超时必须比它长。
     hap2_watchdog #(
@@ -305,6 +358,12 @@ module tb_hap2_rx;
         $readmemh("tb/vectors/cmd_plan.mem", cplan);
         $readmemh("tb/vectors/tx_expect.mem", txexp);
         $readmemh("tb/vectors/tx_expect_plan.mem", txplan);
+        $readmemh("tb/vectors/scan_packets.mem", scan_pkt);
+        $readmemh("tb/vectors/scan_plan.mem", scan_plan);
+        for (k = 0; k < BUF_BYTES; k = k + 1) strbuf[k] = scan_pkt[k];
+        scan_start = 1'b0;
+        scan_off   = 11'd0;
+        scan_len   = 12'd0;
         txlen = 0;
     end
 
@@ -554,6 +613,57 @@ module tb_hap2_rx;
     endtask
 
     // ---------------- 应答发送的检查 ----------------
+    // ---------------- 多段草图解析的检查 ----------------
+    always @(posedge clk) begin
+        if (scan_ok) begin
+            scan_result <= 1;
+            scan_npt    <= scan_pts;
+            scan_nst    <= scan_stk;
+        end
+        if (scan_bad) scan_result <= 0;
+    end
+
+    function integer sign16;      // 16 位补码 -> 有符号整数
+        input [31:0] v;
+        begin
+            sign16 = v[15] ? (v - 32'd65536) : v;
+        end
+    endfunction
+
+    task check_scan_case;
+        input integer idx;
+        input integer exp_ok;
+        input integer exp_pts;
+        input integer exp_stk;
+        input integer exp_x0;
+        input integer exp_y0;
+        input integer exp_x1;
+        input integer exp_y1;
+        begin
+            checks = checks + 1;
+            if (scan_result !== exp_ok) begin
+                $display("[草图 %0d] 结果不符：实测 %0d，期望 %0d  **失败**",
+                         idx, scan_result, exp_ok);
+                errors = errors + 1;
+            end else if (exp_ok == 0) begin
+                $display("[草图 %0d] 按预期拒绝  符合预期", idx);
+            end else if (scan_npt !== exp_pts || scan_nst !== exp_stk) begin
+                $display("[草图 %0d] 点数/段数不符：实测 %0d/%0d，期望 %0d/%0d  **失败**",
+                         idx, scan_npt, scan_nst, exp_pts, exp_stk);
+                errors = errors + 1;
+            end else if (scan_x0 !== exp_x0 || scan_y0 !== exp_y0
+                         || scan_x1 !== exp_x1 || scan_y1 !== exp_y1) begin
+                $display("[草图 %0d] 首末点不符：实测 (%0d,%0d)-(%0d,%0d)，期望 (%0d,%0d)-(%0d,%0d)  **失败**",
+                         idx, scan_x0, scan_y0, scan_x1, scan_y1,
+                         exp_x0, exp_y0, exp_x1, exp_y1);
+                errors = errors + 1;
+            end else begin
+                $display("[草图 %0d] 点数 %0d，段数 %0d，首点 (%0d,%0d)，末点 (%0d,%0d)  符合预期",
+                         idx, scan_npt, scan_nst, scan_x0, scan_y0, scan_x1, scan_y1);
+            end
+        end
+    endtask
+
     // 十六进制字符
     function [7:0] hex_of;
         input [15:0]  v;
@@ -838,6 +948,11 @@ module tb_hap2_rx;
     integer f_stop;
     integer k;
     integer frame_count;
+    integer scan_idx;
+    integer scan_result;      // 1 = 通过，0 = 拒绝
+    integer scan_x0, scan_y0, scan_x1, scan_y1;
+    integer scan_npt, scan_nst;
+    integer st0_start, st0_len, st1_start, st1_len;
 
     initial begin
         crc_bytes[0] = "1";
@@ -909,6 +1024,56 @@ module tb_hap2_rx;
             end
         end
         check_shape_enum;
+
+        // ---- 多段草图解析 ----
+        $display("-----------------------------------------");
+        for (scan_idx = 0; scan_idx < SN; scan_idx = scan_idx + 1) begin
+            scan_off    = scan_plan[9*scan_idx + 0];
+            scan_len    = scan_plan[9*scan_idx + 1];
+            scan_result = -1;
+            scan_start  = 1'b1;
+            @(negedge clk);
+            scan_start  = 1'b0;
+            timeout = 0;
+            while (scan_busy && timeout < 200000) begin
+                @(negedge clk);
+                timeout = timeout + 1;
+            end
+            repeat (6) @(negedge clk);
+            if (scan_result == 1) begin
+                scan_pt_addr = 8'd0;
+                @(negedge clk); @(negedge clk);
+                scan_x0 = scan_x; scan_y0 = scan_y;
+                scan_pt_addr = scan_pts - 1'b1;
+                @(negedge clk); @(negedge clk);
+                scan_x1 = scan_x; scan_y1 = scan_y;
+                scan_npt = scan_pts;
+                scan_nst = scan_stk;
+                // 段表抽查：只有两段那个用例，第一段 (起点 0, 长度 2)、第二段 (2, 2)
+                if (scan_idx == 1) begin
+                    scan_st_addr = 5'd0;
+                    @(negedge clk);
+                    st0_start = scan_st_start; st0_len = scan_st_len;
+                    scan_st_addr = 5'd1;
+                    @(negedge clk);
+                    st1_start = scan_st_start; st1_len = scan_st_len;
+                    checks = checks + 1;
+                    if (st0_start !== 0 || st0_len !== 2 || st1_start !== 2 || st1_len !== 2) begin
+                        $display("[草图-段表] 实测 (%0d,%0d)(%0d,%0d)，期望 (0,2)(2,2)  **失败**",
+                                 st0_start, st0_len, st1_start, st1_len);
+                        errors = errors + 1;
+                    end else begin
+                        $display("[草图-段表] 两段分别是 (起点 0 长度 2) 和 (起点 2 长度 2)  符合预期");
+                    end
+                end
+            end
+            check_scan_case(scan_idx,
+                            scan_plan[9*scan_idx + 2],
+                            scan_plan[9*scan_idx + 3],
+                            scan_plan[9*scan_idx + 4],
+                            sign16(scan_plan[9*scan_idx + 5]), sign16(scan_plan[9*scan_idx + 6]),
+                            sign16(scan_plan[9*scan_idx + 7]), sign16(scan_plan[9*scan_idx + 8]));
+        end
 
         // ---- 命令级用例：权限矩阵 ----
         $display("-----------------------------------------");

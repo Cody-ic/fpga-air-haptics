@@ -11,7 +11,7 @@
 // 读是同步读：这一拍给出 rd_addr，下一拍 rd_data 才有效。
 module hap2_line_rx #(
     parameter integer MAX_LINE = 4096,   // 一帧最多多少字节（含 CRC 与换行）
-    parameter integer ADDR_W   = 12      // 地址位宽；MAX_LINE 必须等于 2^ADDR_W
+    parameter integer ADDR_W   = 13      // 地址位宽；MAX_LINE 必须等于 2^ADDR_W（8192）
 ) (
     input  wire            clk,
     input  wire            rst_n,

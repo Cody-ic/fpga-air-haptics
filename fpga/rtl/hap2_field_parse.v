@@ -12,7 +12,7 @@
 // 读行缓冲和 hap2_frame_check 一样：rd_data 比 rd_addr 晚一拍，
 // 所以用 idx 记录「当前 rd_data 上是第几个字节」，rd_addr 始终是 idx+1。
 module hap2_field_parse #(
-    parameter integer ADDR_W = 12
+    parameter integer ADDR_W = 13      // 行缓冲 8192 字节，地址 13 位
 ) (
     input  wire              clk,
     input  wire              rst_n,

@@ -234,6 +234,35 @@ def build_tx_expect():
     ]
 
 
+def build_scan_cases():
+    """多段草图解析用例。
+
+    期望的坐标是 **0.5 微米单位**（点表就是这个单位，字符串里是微米）。
+    不通过的用例用 -1 表示"这项不检查"。
+    """
+    raw = [
+        ("one_stroke", "0:0,10:5,20:0", 1),
+        ("two_strokes", "0:0,100:0|0:50,100:50", 1),
+        ("negative", "-100:-200,300:-400", 1),
+        ("dup_point", "0:0,0:0", 0),
+        ("empty_stroke", "0:0||1:1", 0),
+        ("out_of_range", "0:0,400000:0", 0),
+        ("missing_y", "0:0,1", 0),
+        ("bad_char", "0:0,1;2", 0),
+        ("too_many_points", ",".join("%d:%d" % (i, i) for i in range(257)), 0),
+    ]
+    cases = []
+    for name, text, ok in raw:
+        if ok:
+            strokes = [s.split(",") for s in text.split("|")]
+            pts = [tuple(map(int, tok.split(":"))) for s in strokes for tok in s]
+            cases.append((name, text, 1, len(pts), len(strokes),
+                          pts[0][0] * 2, pts[0][1] * 2, pts[-1][0] * 2, pts[-1][1] * 2))
+        else:
+            cases.append((name, text, 0, 0, 0, 0, 0, 0, 0))
+    return cases
+
+
 def write_bytes(path: Path, blob: bytes):
     path.write_text("".join("%02X\n" % byte for byte in blob), encoding="ascii")
 
@@ -297,9 +326,30 @@ def main():
     for name, frame in build_tx_expect():
         print("  %-16s %3d 字节  %s" % (name, len(frame), frame.decode("ascii").rstrip()))
 
+    # ---- 多段草图解析 ----
+    sp = bytearray()
+    s_lines = []
+    scan_cases = build_scan_cases()
+    for name, text, ok, npt, nst, x0, y0, x1, y1 in scan_cases:
+        raw = text.encode("ascii")
+        offset = len(sp)
+        sp += raw
+        # 坐标写成 16 位补码十六进制（$readmemh 只认十六进制，负号不认）
+        s_lines.append("%03X %03X %X %03X %X %04X %04X %04X %04X"
+                       % (offset, len(raw), ok, npt, nst,
+                          x0 & 0xFFFF, y0 & 0xFFFF, x1 & 0xFFFF, y1 & 0xFFFF))
+    write_bytes(VECTOR_DIR / "scan_packets.mem", bytes(sp))
+    (VECTOR_DIR / "scan_plan.mem").write_text("\n".join(s_lines) + "\n", encoding="ascii")
+    print("多段草图：%d 个用例，%d 字节" % (len(s_lines), len(sp)))
+    for name, text, ok, npt, nst, x0, y0, x1, y1 in scan_cases:
+        shown = text if len(text) <= 46 else text[:42] + "..."
+        print("  %-16s %s  点数 %-4s 段数 %-3s  %s"
+              % (name, "通过" if ok else "拒绝", npt if ok else "-", nst if ok else "-", shown))
+
     summary = {"frame_cases": len(plan_lines), "field_cases": len(fplan_lines),
                "cmd_cases": len(cplan_lines),
                "tx_expect": len(tx_lines),
+               "scan_cases": len(s_lines),
                "field_order": ["offset", "bytes", "expect_ok", "expect_verb",
                                "expect_err", "expect_seen_mask"]}
     (VECTOR_DIR / "cases.json").write_text(

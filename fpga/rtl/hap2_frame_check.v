@@ -13,7 +13,7 @@
 // 时序：本模块每拍处理一个字节，读 RAM 有一拍延迟，所以用 idx 记录
 // “现在 rd_data 上是第几个字节”，而 rd_addr 始终保持在 idx+1，见下面的状态机。
 module hap2_frame_check #(
-    parameter integer ADDR_W = 12         // 与 hap2_line_rx 的地址位宽一致
+    parameter integer ADDR_W = 13         // 与 hap2_line_rx 的地址位宽一致
 ) (
     input  wire              clk,
     input  wire              rst_n,

@@ -28,6 +28,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/uart_rx.v rtl/uart_tx.v rtl/dec_ascii.v rtl/hap2_line_rx.v \
           rtl/crc16_ccitt.v rtl/hap2_frame_check.v rtl/hap2_field_parse.v \
           rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
+          rtl/hap2_scan_parse.v \
           tb/tb_hap2_rx.v
 
 echo "-----------------------------------------"

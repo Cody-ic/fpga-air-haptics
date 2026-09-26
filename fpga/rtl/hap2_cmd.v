@@ -20,7 +20,7 @@
 // 配置用「影子寄存器 + 一次性替换」：字段流先写进影子，全部检查通过才整体
 // 拷进生效寄存器。这样不会出现「换了一半」的中间状态。
 module hap2_cmd #(
-    parameter integer ADDR_W = 12
+    parameter integer ADDR_W = 13      // 行缓冲 8192 字节，地址 13 位
 ) (
     input  wire            clk,
     input  wire            rst_n,
