@@ -41,3 +41,12 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/fix_sqrt.v rtl/fix_div.v tb/tb_fix_units.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_fix/fix_units_sim"
+
+echo
+echo "=== 轨迹通路（节拍表 + 走步器）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_traj -o traj_sim -Mdir "$BUILD_DIR/obj_traj" \
+          rtl/fix_sqrt.v rtl/fix_div.v rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v \
+          tb/tb_traj.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_traj/traj_sim"

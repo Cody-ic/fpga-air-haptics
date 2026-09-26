@@ -4,6 +4,7 @@
   "cmd_cases": 18,
   "tx_expect": 3,
   "scan_cases": 9,
+  "traj_cases": 8,
   "field_order": [
     "offset",
     "bytes",

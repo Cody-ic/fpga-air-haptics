@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import binascii
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -27,7 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from desktop_app.demo import DemoDevice
-from desktop_app.model import ArraySpec, Config
+from desktop_app.model import ArraySpec, Config, trajectory_sample
 from desktop_app.protocol import encode
 
 HERE = Path(__file__).resolve().parent
@@ -267,6 +268,218 @@ def write_bytes(path: Path, blob: bytes):
     path.write_text("".join("%02X\n" % byte for byte in blob), encoding="ascii")
 
 
+# ============================================================================
+# 轨迹：节拍表（配置阶段）+ 走步器（运行阶段）
+# ============================================================================
+
+TRAJ_FRAC = 16                 # 步进的小数位
+LAPS_NUM = 100_000_000         # 一圈拍数 = 10^8 ÷ repeat_millihz（一拍 10 µs）
+TICK_US = 10                   # 一拍多少微秒
+MIN_WEIGHT = 200               # 协议里的 0.1 mm 最低权重（0.5 µm 单位）
+BLANK_BUDGET = 1_000_000_000   # 协议：blank_us × 笔数 × repeat_millihz 必须小于它
+PT_SLOTS = 256                 # 每个用例在点表向量里占多少行
+STK_SLOTS = 32                 # 每个用例在段表向量里占多少行
+
+# 名字、草图文本（微米）、重复频率（毫赫兹）、抬笔时长（微秒）、是否应当通过
+# 最后那个用例是一笔 100 mm 的直线接 200 个 1 µm 的小台阶：重复频率 200 Hz 时
+# 小台阶连一拍都分不到，应当整份拒绝（而不是偷偷把图形拉长）。
+_TOO_FINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 201))
+
+TRAJ_CASES = [
+    ("two_strokes",    "0:0,10000:0|0:5000,10000:5000",            40000, 2000, 1),
+    ("square",         "0:0,10000:0,10000:10000,0:10000,0:0",      40000, 2000, 1),
+    ("one_dot_stroke", "0:0,10000:0|5000:5000",                    40000, 2000, 1),
+    ("short_strokes",  "0:0,20:0|0:0,20:0",                        20000, 2000, 1),
+    ("many_segments",  "0:0,10000:0,10000:10000|0:0,5000:0,5000:5000,0:5000,0:0",
+                                                                   40000, 2000, 1),
+    # 拒绝：抬笔时间已经把一圈占满（协议里那条 10^9 的规则）
+    ("reject_blank",   "0:0,1000:0",                               200000, 100000, 0),
+    # 拒绝：算下来每个点分到的拍数不足 1（严格来说 T 必须大于 N×B）
+    ("reject_no_time", "0:0,1000:0",                                99999, 10000, 0),
+    # 拒绝：图形太碎、重复频率太快，1 µm 的小段连一拍都分不到
+    ("reject_too_fine", _TOO_FINE,                                 200000, 100, 0),
+]
+
+
+def _sign_step(delta, magnitude):
+    return magnitude if delta >= 0 else -magnitude
+
+
+def _round_div(num, den):
+    """四舍五入的整数除法（和 RTL 里「加半个除数」的做法一致）。"""
+    return (num + den // 2) // den
+
+
+def traj_plan_expect(scan_paths, repeat_millihz, blank_us):
+    """按 fpga/多段草图语义设计.md 的规则，算出 RTL 应当产出的节拍表。
+
+    返回 (ok, laps, blank_beats, moves)；moves 的每一项是
+    (拍数, x 步进, y 步进, 是否扫描, 第几笔)，步进是定点数、低 16 位是小数。
+    这份 Python 是照着**文档里的规则**写的（不是照抄 RTL），用来和 RTL 对拍。
+    """
+    paths = [[(2 * x, 2 * y) for x, y in path]      # 微米 -> 0.5 微米单位
+             for path in Config(shape="CUSTOM", scan_paths=scan_paths,
+                                repeat_millihz=repeat_millihz,
+                                blank_us=blank_us).strokes_um()]
+    laps = LAPS_NUM // repeat_millihz
+    blank_beats = blank_us // TICK_US
+    strokes = len(paths)
+    if strokes == 0 or laps == 0:
+        return False, laps, blank_beats, []
+    if blank_us * strokes * repeat_millihz >= BLANK_BUDGET:
+        return False, laps, blank_beats, []
+    if laps <= blank_beats * strokes:
+        return False, laps, blank_beats, []
+    active = laps - blank_beats * strokes
+
+    raw = []
+    for path in paths:
+        total = 0
+        for (x0, y0), (x1, y1) in zip(path, path[1:]):
+            total += math.isqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+        raw.append(total)
+    weights = [max(value, MIN_WEIGHT) for value in raw]     # 协议：不足 0.1 mm 按 0.1 mm
+    total_weight = sum(weights)
+
+    moves = []
+    rem = 0                                                  # 笔与笔之间带过去的余数
+    for index, path in enumerate(paths):
+        beats, rem = divmod(active * weights[index] + rem, total_weight)
+        if len(path) < 2:
+            if beats:                                        # 单点笔：原地停留
+                moves.append((beats, 0, 0, 1, index))
+        else:
+            rem_seg = 0                                      # 笔内段与段之间带过去的余数
+            for (x0, y0), (x1, y1) in zip(path, path[1:]):
+                dx, dy = x1 - x0, y1 - y0
+                length = math.isqrt(dx * dx + dy * dy)
+                seg, rem_seg = divmod(beats * length + rem_seg, raw[index])
+                if seg == 0:                                 # 连一拍都分不到：整份拒绝
+                    return False, laps, blank_beats, []
+                moves.append((seg,
+                              _sign_step(dx, _round_div(abs(dx) << TRAJ_FRAC, seg)),
+                              _sign_step(dy, _round_div(abs(dy) << TRAJ_FRAC, seg)),
+                              1, index))
+        # 抬笔跳转段：从这一笔末点直线走到下一笔（最后一笔回到第一笔）的首点
+        last = path[-1]
+        following = paths[(index + 1) % strokes][0]
+        dx, dy = following[0] - last[0], following[1] - last[1]
+        moves.append((blank_beats,
+                      _sign_step(dx, _round_div(abs(dx) << TRAJ_FRAC, blank_beats)),
+                      _sign_step(dy, _round_div(abs(dy) << TRAJ_FRAC, blank_beats)),
+                      0, index))
+    assert sum(move[0] for move in moves) == laps, "一圈的拍数必须正好"
+    return True, laps, blank_beats, moves
+
+
+def _speed(move):
+    """这一行每拍大概走多远（两轴相加，单位 0.5 µm），用来定比对容差。"""
+    return (abs(move[1]) + abs(move[2])) >> TRAJ_FRAC
+
+
+def traj_samples(scan_paths, repeat_millihz, blank_us, laps, moves):
+    """每一拍应当在哪：时间线由节拍表给出，位置由参考实现（model.py）给出。
+
+    每个样本是 (拍号, x, y, 是否扫描, 第几笔, 容差, 是否严格)。
+    坐标单位 0.5 µm。容差 = 拍数取整造成的偏差上限（最多差一拍的路程）。
+    """
+    cfg = Config(shape="CUSTOM", scan_paths=scan_paths,
+                 repeat_millihz=repeat_millihz, blank_us=blank_us)
+    bounds = []                       # 每一行的起止拍号
+    cumulative = 0
+    for move in moves:
+        bounds.append((cumulative, cumulative + move[0]))
+        cumulative += move[0]
+
+    # 采样：每 13 拍一个，外加每个换行点前后各 2 拍，以及开头和结尾几拍
+    wanted = set(range(1, laps + 1, 13))
+    wanted |= set(range(1, min(laps, 6) + 1))
+    for _, end in bounds:
+        for offset in range(-2, 3):
+            if 1 <= end + offset <= laps:
+                wanted.add(end + offset)
+    for offset in range(3):
+        if laps - offset >= 1:
+            wanted.add(laps - offset)
+
+    samples = []
+    for beat in sorted(wanted):
+        row = 0
+        while row + 1 < len(bounds) and beat >= bounds[row][1]:
+            row += 1
+        speed = max(_speed(moves[i]) for i in (row - 1, row, row + 1)
+                    if 0 <= i < len(moves))
+        ((x, y, _), scan, stroke) = trajectory_sample(cfg, beat * TICK_US * 1e-6)
+        near = any(abs(beat - end) <= 3 for _, end in bounds)
+        # 参考实现返回的是毫米，先换成微米（×1000），再换成 0.5 微米单位（×2）
+        samples.append((beat, int(round(x * 2000)), int(round(y * 2000)),
+                        scan, stroke, 3 + speed, 0 if near else 1))
+    assert all(samples[i][0] < samples[i + 1][0] for i in range(len(samples) - 1))
+    return samples
+
+
+def build_traj_vectors():
+    """写出轨迹用例的向量文件，返回给人看的清单。"""
+    hdr0_lines, hdr1_lines = [], []
+    ptx_lines, pty_lines = [], []
+    stks_lines, stkl_lines = [], []
+    mv_lines, gd_lines, gd2_lines = [], [], []
+    listing = []
+    mv_off = 0
+    gd_off = 0
+    for name, text, repeat, blank_us, expect_ok in TRAJ_CASES:
+        paths = Config(shape="CUSTOM", scan_paths=text, repeat_millihz=repeat,
+                       blank_us=blank_us).strokes_um()
+        points = [point for path in paths for point in path]
+        ok, laps, blank_beats, moves = traj_plan_expect(text, repeat, blank_us)
+        assert ok == bool(expect_ok), f"{name} 的通过/拒绝和预期不一致"
+        samples = traj_samples(text, repeat, blank_us, laps, moves) if ok else []
+
+        for i in range(PT_SLOTS):                      # 点表：这一路占 PT_SLOTS 行
+            if i < len(points):
+                ptx_lines.append("%06X" % (2 * points[i][0] & 0x1FFFFF))
+                pty_lines.append("%06X" % (2 * points[i][1] & 0x1FFFFF))
+            else:
+                ptx_lines.append("000000")
+                pty_lines.append("000000")
+        for i in range(STK_SLOTS):                     # 段表：这一路占 STK_SLOTS 行
+            if i < len(paths):
+                stks_lines.append("%03X" % sum(len(p) for p in paths[:i]))
+                stkl_lines.append("%03X" % len(paths[i]))
+            else:
+                stks_lines.append("000")
+                stkl_lines.append("000")
+
+        # 节拍表：每行 24 个十六进制位 = 拍数(24) 步进x(32) 步进y(32) 扫描(1) 笔号(6)
+        for beats, step_x, step_y, scan, stroke in moves:
+            mv_lines.append("%06X%08X%08X%02X"
+                            % (beats & 0xFFFFFF, step_x & 0xFFFFFFFF,
+                               step_y & 0xFFFFFFFF, (scan << 6) | stroke))
+        for beat, x, y, scan, stroke, tol, strict in samples:
+            gd_lines.append("%04X%06X%06X" % (beat, x & 0xFFFFFF, y & 0xFFFFFF))
+            gd2_lines.append("%04X%02X"
+                             % (tol & 0xFFFF, (strict << 7) | (scan << 6) | stroke))
+
+        listing.append((name, ok, len(points), len(paths), len(moves),
+                        laps, blank_beats, len(samples)))
+        # 表头：8 个 16 位字段 = 段数 点数 抬笔拍数 行数 样本数 表偏移 样本偏移 是否通过
+        hdr0_lines.append("%04X%04X%04X%04X%04X%04X%04X%04X"
+                          % (len(paths), len(points), blank_beats, len(moves),
+                             len(samples), mv_off, gd_off, 1 if ok else 0))
+        # 另一张表头：重复频率、抬笔时长、一圈拍数（都是 32 位）
+        hdr1_lines.append("%08X%08X%08X" % (repeat, blank_us, laps))
+        mv_off += len(moves)
+        gd_off += len(samples)
+
+    for filename, lines in (("traj_hdr0.mem", hdr0_lines), ("traj_hdr1.mem", hdr1_lines),
+                            ("traj_ptx.mem", ptx_lines), ("traj_pty.mem", pty_lines),
+                            ("traj_stks.mem", stks_lines), ("traj_stkl.mem", stkl_lines),
+                            ("traj_moves.mem", mv_lines), ("traj_gold.mem", gd_lines),
+                            ("traj_gold2.mem", gd2_lines)):
+        (VECTOR_DIR / filename).write_text("\n".join(lines) + "\n", encoding="ascii")
+    return listing
+
+
 def main():
     VECTOR_DIR.mkdir(parents=True, exist_ok=True)
     device = DemoDevice(array=ArraySpec(4, 4, 10000, "ROW_MAJOR_XY"))
@@ -346,10 +559,18 @@ def main():
         print("  %-16s %s  点数 %-4s 段数 %-3s  %s"
               % (name, "通过" if ok else "拒绝", npt if ok else "-", nst if ok else "-", shown))
 
+    # ---- 轨迹（节拍表 + 走步器）----
+    traj_list = build_traj_vectors()
+    print("轨迹：%d 个用例" % len(traj_list))
+    for name, ok, npt, nst, nmv, laps, blank, nsmp in traj_list:
+        print("  %-16s %s  点 %-3d 笔 %-2d 行 %-3d 一圈 %-6d 拍  抬笔 %-4d 拍  样本 %d"
+              % (name, "通过" if ok else "拒绝", npt, nst, nmv, laps, blank, nsmp))
+
     summary = {"frame_cases": len(plan_lines), "field_cases": len(fplan_lines),
                "cmd_cases": len(cplan_lines),
                "tx_expect": len(tx_lines),
                "scan_cases": len(s_lines),
+               "traj_cases": len(traj_list),
                "field_order": ["offset", "bytes", "expect_ok", "expect_verb",
                                "expect_err", "expect_seen_mask"]}
     (VECTOR_DIR / "cases.json").write_text(
