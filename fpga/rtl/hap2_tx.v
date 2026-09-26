@@ -56,6 +56,7 @@ module hap2_tx #(
     input  wire [31:0] cfg_level,
     input  wire [2:0]  cfg_shape,
     input  wire [31:0] cfg_path_closed,
+    input  wire [31:0] cfg_blank_us,
     input  wire [31:0] fx_um,
     input  wire [31:0] fy_um,
     input  wire [31:0] fz_um,
@@ -68,12 +69,12 @@ module hap2_tx #(
     // ---------------- 报文明细 ----------------
     // 字符串宽度必须和字符数完全相等：Verilog 里字符串是右对齐的，
     // 宽度写错会整体错位。这里每个模板都以换行结尾，发到换行就算一帧结束。
-    localparam [8*292-1:0] T_HELLO =
-        "HAP2 ACK @ HELLO proto=2 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY max_rows=@ max_cols=@ max_channels=@ max_nodes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
-    localparam [8*31-1:0]  T_ACK   = "HAP2 ACK @ ~ applied=1 rev=@*#\n";
-    localparam [8*22-1:0]  T_ERR   = "HAP2 ERR @ ~ code=^*#\n";
-    localparam [8*320-1:0] T_STATE =
-        "HAP2 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
+    localparam [8*314-1:0] T_HELLO =
+        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
+    localparam [8*31-1:0]  T_ACK   = "HAP3 ACK @ ~ applied=1 rev=@*#\n";
+    localparam [8*22-1:0]  T_ERR   = "HAP3 ERR @ ~ code=^*#\n";
+    localparam [8*372-1:0] T_STATE =
+        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=1 stroke_index=0 simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=NONE blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
 
     // 设备声明的固定能力（这些目前是定值，将来由板级配置决定）
     localparam [31:0] HB_MS         = 32'd3000;
@@ -81,6 +82,8 @@ module hap2_tx #(
     localparam [31:0] MAX_COLS      = 32'd16;
     localparam [31:0] MAX_CHANNELS  = 32'd256;
     localparam [31:0] MAX_NODES     = 32'd64;
+    localparam [31:0] MAX_SCAN_PTS  = 32'd256;
+    localparam [31:0] MAX_STROKES   = 32'd32;
     localparam [31:0] WS_X_MIN      = -32'sd100000;
     localparam [31:0] WS_X_MAX      =  32'sd100000;
     localparam [31:0] WS_Y_MIN      = -32'sd100000;
@@ -170,10 +173,10 @@ module hap2_tx #(
             // 字符串在向量里靠高位存放：第 0 个字符在最高字节，
             // 所以要从最高位往下数，用「-:」而不是「+:」。
             case (sel)
-                F_HELLO: tmpl_byte = T_HELLO[8*292-1 - 8*pos -: 8];
+                F_HELLO: tmpl_byte = T_HELLO[8*314-1 - 8*pos -: 8];
                 F_ACK:   tmpl_byte = T_ACK  [8*31 -1 - 8*pos -: 8];
                 F_ERR:   tmpl_byte = T_ERR  [8*22 -1 - 8*pos -: 8];
-                default: tmpl_byte = T_STATE[8*320-1 - 8*pos -: 8];
+                default: tmpl_byte = T_STATE[8*372-1 - 8*pos -: 8];
             endcase
         end
     endfunction
@@ -191,14 +194,16 @@ module hap2_tx #(
                         5'd3:  value_at = MAX_COLS;
                         5'd4:  value_at = MAX_CHANNELS;
                         5'd5:  value_at = MAX_NODES;
-                        5'd6:  value_at = {24'h0, hw_rows};
-                        5'd7:  value_at = {24'h0, hw_cols};
-                        5'd8:  value_at = hw_pitch_um;
-                        5'd9:  value_at = WS_X_MIN;
-                        5'd10: value_at = WS_X_MAX;
-                        5'd11: value_at = WS_Y_MIN;
-                        5'd12: value_at = WS_Y_MAX;
-                        5'd13: value_at = WS_Z_MIN;
+                        5'd6:  value_at = MAX_SCAN_PTS;     // HAP3 新增：草图点数上限
+                        5'd7:  value_at = MAX_STROKES;      // HAP3 新增：段数上限
+                        5'd8:  value_at = {24'h0, hw_rows};
+                        5'd9:  value_at = {24'h0, hw_cols};
+                        5'd10: value_at = hw_pitch_um;
+                        5'd11: value_at = WS_X_MIN;
+                        5'd12: value_at = WS_X_MAX;
+                        5'd13: value_at = WS_Y_MIN;
+                        5'd14: value_at = WS_Y_MAX;
+                        5'd15: value_at = WS_Z_MIN;
                         default: value_at = WS_Z_MAX;
                     endcase
                 end
@@ -218,11 +223,12 @@ module hap2_tx #(
                         5'd11: value_at = cfg_mod_hz;
                         5'd12: value_at = cfg_level;
                         5'd13: value_at = cfg_path_closed;
-                        5'd14: value_at = {24'h0, hw_rows};
-                        5'd15: value_at = {24'h0, hw_cols};
-                        5'd16: value_at = hw_pitch_um;
-                        5'd17: value_at = fx_um;
-                        5'd18: value_at = fy_um;
+                        5'd14: value_at = cfg_blank_us;     // HAP3 新增：段间跳转时长
+                        5'd15: value_at = {24'h0, hw_rows};
+                        5'd16: value_at = {24'h0, hw_cols};
+                        5'd17: value_at = hw_pitch_um;
+                        5'd18: value_at = fx_um;
+                        5'd19: value_at = fy_um;
                         default: value_at = fz_um;
                     endcase
                 end

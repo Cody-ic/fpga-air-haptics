@@ -37,7 +37,7 @@ module hap2_field_parse #(
     output reg  [2:0]        field_enum,  // 图形名/映射名/控制模式的编号
     output reg  [ADDR_W:0]   field_off,   // 字符串类字段在行缓冲里的起点
     output reg  [ADDR_W:0]   field_size,  // 字符串类字段的长度
-    output reg  [16:0]       seen_mask    // 已经出现过的字段，按编号置位（共 17 个）
+    output reg  [18:0]       seen_mask    // 已经出现过的字段，按编号置位（共 19 个）
 );
 
     // ---------------- 错误分类 ----------------
@@ -70,9 +70,11 @@ module hap2_field_parse #(
     localparam [3:0] F_HW_PITCH    = 4'd14;
     localparam [3:0] F_MAPPING     = 4'd15;
     localparam [4:0] F_VALUE       = 5'd16;   // MODE 命令的参数 value=LOCAL/REMOTE
+    localparam [4:0] F_SCAN_PATHS  = 5'd17;   // HAP3：多段草图，竖线分隔
+    localparam [4:0] F_BLANK_US    = 5'd18;   // HAP3：段间关输出的跳转时长
 
-    // CONFIG 必须带齐的 16 个字段（value 不属于 CONFIG，不参与这个判断）
-    localparam [15:0] ALL_FIELDS = 16'hFFFF;
+    // CONFIG 必须带齐的 18 个字段；第 16 位是 MODE 的 value，不属于 CONFIG
+    localparam [18:0] CONFIG_MASK = {3'b110, 16'hFFFF};
 
     // ---------------- 命令编号 ----------------
     localparam [3:0] V_NONE   = 4'hF;
@@ -107,7 +109,7 @@ module hap2_field_parse #(
     localparam [7:0] CH_M0 = "H";
     localparam [7:0] CH_M1 = "A";
     localparam [7:0] CH_M2 = "P";
-    localparam [7:0] CH_M3 = "2";
+    localparam [7:0] CH_M3 = "3";   // HAP3 的魔数末位
 
     // ---------------- 键名表 ----------------
     // 每个常量 128 位：键名靠**低位**放，左边补零。解析时每来一个字符就整体
@@ -131,6 +133,9 @@ module hap2_field_parse #(
     localparam [127:0] K_HW_PITCH    = {40'h0, "hw_pitch_um"};
     localparam [127:0] K_MAPPING     = {72'h0, "mapping"};
     localparam [127:0] K_VALUE       = {88'h0, "value"};      // MODE 命令的参数
+    // 补零位数 = (16 - 字符数) 字节："scan_paths" 10 字符补 6 字节，"blank_us" 8 字符补 8 字节
+    localparam [127:0] K_SCAN_PATHS  = {48'h0, "scan_paths"}; // HAP3 多段草图
+    localparam [127:0] K_BLANK_US    = {64'h0, "blank_us"};   // HAP3 段间跳转时长
 
     // ---------------- 命令动词表（64 位）----------------
     localparam [63:0] W_HELLO  = {24'h0, "HELLO"};
@@ -194,7 +199,8 @@ module hap2_field_parse #(
         begin
             is_value_char = is_lower(ch) || is_upper(ch) || is_digit(ch)
                          || (ch == "_") || (ch == ",") || (ch == ".")
-                         || (ch == "?") || (ch == ":") || (ch == "+") || (ch == "-");
+                         || (ch == "?") || (ch == ":") || (ch == "+") || (ch == "-")
+                         || (ch == "|");   // HAP3 用竖线分隔多段草图
         end
     endfunction
 
@@ -205,6 +211,7 @@ module hap2_field_parse #(
                 F_SHAPE:   type_of = T_SHAPE;
                 F_MAPPING: type_of = T_MAPPING;
                 F_PATH_XY: type_of = T_PATH;
+                F_SCAN_PATHS: type_of = T_PATH;   // 多段草图也是字符串，同样只记位置和长度
                 F_VALUE:   type_of = T_MODE;
                 default:   type_of = T_NUMBER;
             endcase
@@ -232,6 +239,7 @@ module hap2_field_parse #(
                 F_HW_ROWS:     in_range = !neg && (mag >= 32'd1) && (mag <= 32'd16);
                 F_HW_COLS:     in_range = !neg && (mag >= 32'd1) && (mag <= 32'd16);
                 F_HW_PITCH:    in_range = !neg && (mag >= 32'd1000) && (mag <= 32'd30000);
+                F_BLANK_US:    in_range = !neg && (mag >= 32'd100) && (mag <= 32'd100000);
                 default:       in_range = 1'b1;
             endcase
         end
@@ -272,7 +280,7 @@ module hap2_field_parse #(
     reg [3:0]      acc_digits;
     reg [ADDR_W:0] val_start;
 
-    wire [16:0] key_hit;
+    wire [18:0] key_hit;
     wire        hit_any;
     wire [4:0]  hit_id;
 
@@ -303,6 +311,8 @@ module hap2_field_parse #(
 
     // 键名查表
     assign key_hit = {
+        (key_buf == K_BLANK_US),
+        (key_buf == K_SCAN_PATHS),
         (key_buf == K_VALUE),
         (key_buf == K_MAPPING),
         (key_buf == K_HW_PITCH),
@@ -339,6 +349,8 @@ module hap2_field_parse #(
                    : key_hit[14] ? F_HW_PITCH
                    : key_hit[15] ? F_MAPPING
                    : key_hit[16] ? F_VALUE
+                   : key_hit[17] ? F_SCAN_PATHS
+                   : key_hit[18] ? F_BLANK_US
                    : 5'h1F;
 
     always @(posedge clk) begin
@@ -363,7 +375,7 @@ module hap2_field_parse #(
             field_enum    <= 3'd0;
             field_off     <= 0;
             field_size    <= 0;
-            seen_mask     <= 17'h00000;
+            seen_mask     <= 19'h00000;
             fail_flag     <= 1'b0;
             magic_cnt     <= 2'd0;
             kind_buf      <= 24'h0;
@@ -398,7 +410,7 @@ module hap2_field_parse #(
                         err_code     <= E_NONE;
                         bad_field    <= 5'h1F;
                         header_ok    <= 1'b0;
-                        seen_mask    <= 17'h00000;
+                        seen_mask    <= 19'h00000;
                         magic_cnt    <= 2'd0;
                         kind_buf     <= 24'h0;
                         kind_cnt     <= 2'd0;
@@ -674,8 +686,9 @@ module hap2_field_parse #(
                     busy <= 1'b0;
                     if (fail_flag) begin
                         parse_bad <= 1'b1;
-                    end else if (verb == V_CONFIG && seen_mask[15:0] != ALL_FIELDS) begin
-                        err_code  <= E_MISSING;      // CONFIG 必须带齐所有字段
+                    end else if (verb == V_CONFIG
+                                 && (seen_mask & CONFIG_MASK) != CONFIG_MASK) begin
+                        err_code  <= E_MISSING;      // CONFIG 必须带齐 18 个字段
                         bad_field <= 5'h1F;
                         parse_bad <= 1'b1;
                     end else begin

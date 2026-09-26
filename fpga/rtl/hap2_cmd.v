@@ -39,7 +39,7 @@ module hap2_cmd #(
     input  wire [2:0]      field_enum,
     input  wire [ADDR_W:0] field_off,
     input  wire [ADDR_W:0] field_size,
-    input  wire [16:0]     seen_mask,
+    input  wire [18:0]     seen_mask,
 
     // ---- 板子实际阵列（握手时声明，用于核对 CONFIG）----
     input  wire [31:0]     array_rows,
@@ -77,7 +77,10 @@ module hap2_cmd #(
     output reg  [2:0]      cfg_shape,
     output reg  [31:0]     cfg_path_closed,
     output reg  [ADDR_W:0] cfg_path_off,   // 自定义路径在行缓冲里的位置与长度
-    output reg  [ADDR_W:0] cfg_path_size
+    output reg  [ADDR_W:0] cfg_path_size,
+    output reg  [ADDR_W:0] cfg_scan_off,   // HAP3 多段草图的字符串位置与长度
+    output reg  [ADDR_W:0] cfg_scan_size,
+    output reg  [31:0]     cfg_blank_us    // HAP3 段间跳转时长（微秒）
 );
 
     // ---------------- 命令编号（与 hap2_field_parse.v 一致）----------------
@@ -108,6 +111,8 @@ module hap2_cmd #(
     localparam [4:0] F_HW_PITCH    = 5'd14;
     localparam [4:0] F_MAPPING     = 5'd15;
     localparam [4:0] F_VALUE       = 5'd16;
+    localparam [4:0] F_SCAN_PATHS  = 5'd17;
+    localparam [4:0] F_BLANK_US    = 5'd18;
 
     // ---------------- 错误码（协议第 4 节）----------------
     localparam [3:0] C_NONE             = 4'd0;
@@ -151,6 +156,9 @@ module hap2_cmd #(
     reg [31:0]     sh_path_closed;
     reg [ADDR_W:0] sh_path_off;
     reg [ADDR_W:0] sh_path_size;
+    reg [ADDR_W:0] sh_scan_off;
+    reg [ADDR_W:0] sh_scan_size;
+    reg [31:0]     sh_blank_us;
 
     // ---------------- 组合判定 ----------------
     reg [3:0] dec_err;
@@ -268,6 +276,9 @@ module hap2_cmd #(
             cfg_path_closed    <= 32'd1;
             cfg_path_off       <= 0;
             cfg_path_size      <= 0;
+            cfg_scan_off       <= 0;
+            cfg_scan_size      <= 0;
+            cfg_blank_us       <= 32'd2000;
             sh_carrier_hz      <= 32'd40000;
             sh_phase_steps     <= 32'd64;
             sh_cx_um           <= 32'd0;
@@ -281,6 +292,9 @@ module hap2_cmd #(
             sh_path_closed     <= 32'd1;
             sh_path_off        <= 0;
             sh_path_size       <= 0;
+            sh_scan_off        <= 0;
+            sh_scan_size       <= 0;
+            sh_blank_us        <= 32'd2000;
         end else begin
             reply_valid    <= 1'b0;
             config_changed <= 1'b0;
@@ -310,6 +324,11 @@ module hap2_cmd #(
                             sh_path_off  <= field_off;   // 记下位置和长度，坐标串之后再解析
                             sh_path_size <= field_size;
                         end
+                        F_SCAN_PATHS: begin
+                            sh_scan_off  <= field_off;   // 多段草图同样先只记位置和长度
+                            sh_scan_size <= field_size;
+                        end
+                        F_BLANK_US:    sh_blank_us  <= field_value;
                         default: ;                   // hw_* 与 mapping 只用于核对，不进配置
                     endcase
                 end
@@ -347,6 +366,9 @@ module hap2_cmd #(
                         cfg_path_closed    <= sh_path_closed;
                         cfg_path_off       <= sh_path_off;
                         cfg_path_size      <= sh_path_size;
+                        cfg_scan_off       <= sh_scan_off;
+                        cfg_scan_size      <= sh_scan_size;
+                        cfg_blank_us       <= sh_blank_us;
                         revision           <= revision + 1'b1;
                         config_changed     <= 1'b1;
                     end

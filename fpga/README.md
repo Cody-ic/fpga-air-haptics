@@ -2,7 +2,9 @@
 
 更新日期：2026-09-25。
 
-本目录存放 FPGA 侧的 RTL（Register Transfer Level，寄存器传输级，即用代码描述电路）。**收发两侧都通了**：把电脑发来的 HAP2 报文收进来、校验 CRC（Cyclic Redundancy Check，循环冗余校验）、解析字段、裁决命令，再把应答（ACK / ERR / 状态快照）组装成 ASCII 文本发回去。相位计算和输出级还没有。
+本目录存放 FPGA 侧的 RTL（Register Transfer Level，寄存器传输级，即用代码描述电路）。**收发两侧都通了**：把电脑发来的 HAP3 报文收进来、校验 CRC（Cyclic Redundancy Check，循环冗余校验）、解析字段、裁决命令，再把应答（ACK / ERR / 状态快照）组装成 ASCII 文本发回去。相位计算、轨迹输出和多段草图还没有。
+
+> 文件名里的 `hap2_` 是历史命名，内容已经升级到 HAP3。改名是纯机械操作，等接口稳定后再一起做。
 
 协议规格见 [desktop_app/PROTOCOL.md](../desktop_app/PROTOCOL.md)，第 7 节是固件侧实现要点。
 
@@ -75,11 +77,22 @@ bash tb/run_verilator.sh
 | 应答报文组装与串口发送（ACK / ERR / STATE） | 已完成，仿真通过 |
 | 主机心跳看门狗（失联自动停机） | 已完成，仿真通过 |
 | 应答队列（板子忙时不丢命令） | 已完成，仿真通过 |
-| `path_xy_um` 的坐标串解析（目前只记录位置和长度） | 未开始 |
+| HAP3 协议升级（魔数、18 个配置字段、`scan_on`／`stroke_index`） | 已完成，仿真通过 |
+| `path_xy_um` 与 `scan_paths` 的坐标串解析（目前只记位置和长度） | 未开始 |
+| 多段草图的轨迹语义（段间关输出的跳转、段号与扫描开关） | 未开始 |
+| `blank_us × 段数 × 重复频率 < 1 秒` 的配置约束检查 | 未开始 |
 | 轨迹包围盒与设备工作空间的核对（错误码 `OUT_OF_WORKSPACE`） | 未开始 |
 | 启动标识 `boot` 每次复位变化（目前由上层给固定值） | 未开始 |
-| 相位计算、轨迹发生器、双缓冲统一更新、输出级 | 未开始 |
+| 相位计算、双缓冲统一更新、输出级 | 未开始 |
 | 上板：引脚约束、时钟配置、与真实串口联调 | 未开始 |
+
+## HAP3 声明了哪些能力
+
+固件在 HELLO 应答里声明 `caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE`，**暂时不含 `CUSTOM_XY` 和 `SCAN_PATHS`**。
+
+这是刻意的：上位机会按能力声明决定发什么——`controller.py` 里对 `scan_paths != NONE` 的配置会先查 `SCAN_PATHS` 这个能力，没声明就不发。上位机联调计划里也写着「不得声明未实现的路径能力」。多段草图的轨迹语义做完之前不声明 `SCAN_PATHS`，避免收了配置却做不出对应输出。
+
+容量字段仍然照常声明（`max_nodes=64`、`max_scan_points=256`、`max_strokes=32`），它们只表示「假如支持，能收多少」。
 
 ## 应答是怎么组装出来的
 

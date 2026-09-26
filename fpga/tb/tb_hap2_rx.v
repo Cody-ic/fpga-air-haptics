@@ -51,7 +51,7 @@ module tb_hap2_rx;
     wire [1:0]      kind;
     wire [15:0]     seq;
     wire [3:0]      verb;
-    wire [16:0]     seen_mask;
+    wire [18:0]     seen_mask;
     wire            verb_unknown;
     wire            header_ok;
     wire            field_valid;
@@ -79,7 +79,7 @@ module tb_hap2_rx;
     hap2_rx #(
         .CLK_HZ   (CLK_HZ),
         .BAUD     (BAUD),
-        .MAX_LINE (4096),
+        .MAX_LINE (8192),
         .ADDR_W   (ADDR_W)
     ) dut (
         .clk          (clk),
@@ -134,6 +134,7 @@ module tb_hap2_rx;
     wire [31:0]     cfg_level;
     wire [2:0]      cfg_shape;
     wire [31:0]     cfg_path_closed;
+    wire [31:0]     cfg_blank_us;
 
     hap2_cmd #(
         .ADDR_W (ADDR_W)
@@ -178,7 +179,8 @@ module tb_hap2_rx;
         .cfg_mod_hz       (cfg_mod_hz),
         .cfg_level        (cfg_level),
         .cfg_shape        (cfg_shape),
-        .cfg_path_closed  (cfg_path_closed)
+        .cfg_path_closed  (cfg_path_closed),
+        .cfg_blank_us     (cfg_blank_us)
     );
 
     // ---------------- 应答发送通路 ----------------
@@ -236,6 +238,7 @@ module tb_hap2_rx;
         .cfg_level        (cfg_level),
         .cfg_shape        (cfg_shape),
         .cfg_path_closed  (cfg_path_closed),
+        .cfg_blank_us     (cfg_blank_us),
         .fx_um            (32'd0),
         .fy_um            (32'd0),
         .fz_um            (32'd150000),
@@ -313,7 +316,7 @@ module tb_hap2_rx;
     reg [ADDR_W:0] got_len;
     reg [3:0]      got_verb;   // 整帧结论出来时的命令编号
     reg [3:0]      got_err;    // 整帧结论出来时的错误分类
-    reg [15:0]     got_seen;   // 整帧结论出来时的字段表
+    reg [18:0]     got_seen;   // 整帧结论出来时的字段表（19 个字段）
 
     // 字段寄存器组：模拟下一个模块会怎么收字段流
     reg [31:0]     fval  [0:16];   // 数值类字段的值（编号 0~16）
@@ -366,7 +369,7 @@ module tb_hap2_rx;
             got_len  = 0;
             got_verb = 4'hF;
             got_err  = 4'hF;
-            got_seen = 16'h0000;
+            got_seen = 19'h00000;
         end
     endtask
 
@@ -508,7 +511,7 @@ module tb_hap2_rx;
                 $display("[字段 %0d] 错误分类不符：实测 %0d，期望 %0d  **失败**",
                          idx, got_err, expect_err);
                 errors = errors + 1;
-            end else if (got_seen !== expect_seen[15:0]) begin
+            end else if (got_seen !== expect_seen[18:0]) begin
                 $display("[字段 %0d] 字段表不符：实测 %04X，期望 %04X  **失败**",
                          idx, got_seen, expect_seen);
                 errors = errors + 1;
@@ -957,8 +960,8 @@ module tb_hap2_rx;
                 frame_range(1, f_start, f_stop);       // 第二条就是状态帧
                 check_frame_crc(f_start, f_stop);
                 checks = checks + 1;
-                if (!found({"HAP2 TEL 0 STATE", 64'h0}, 16)) begin
-                    $display("[状态帧] 开头不是 HAP2 TEL 0 STATE  **失败**");
+                if (!found({"HAP3 TEL 0 STATE", 64'h0}, 16)) begin
+                    $display("[状态帧] 开头不是 HAP3 TEL 0 STATE  **失败**");
                     errors = errors + 1;
                 end else begin
                     $display("[状态帧] 开头正确，共 %0d 字节", f_stop - f_start);

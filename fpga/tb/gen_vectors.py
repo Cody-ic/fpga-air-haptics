@@ -1,6 +1,6 @@
 """生成串口接收模块的仿真向量。
 
-复用 `desktop_app.protocol` 生成真实的 HAP2 报文，避免手抄字节出错。
+复用 `desktop_app.protocol` 生成真实的 HAP3 报文，避免手抄字节出错。
 有些用例（重复字段、非法字符）用参考编码器造不出来，就用 craft() 手工拼
 正文再补上正确的 CRC，这样测的仍是「CRC 正确、内容有问题」的真实场景。
 
@@ -39,7 +39,8 @@ MODE_FRAGMENTED = 1
 F_CARRIER_HZ = 0
 F_LEVEL = 8
 F_SHAPE = 9
-ALL_FIELDS = 0xFFFF
+# CONFIG 必须带齐的 18 个字段（第 16 位是 MODE 的 value，不算）
+CONFIG_FIELDS = 0x6FFFF
 
 # 命令编号（必须与 hap2_field_parse.v 里的 V_* 一致）
 V_HELLO, V_PING, V_CONFIG, V_NONE = 0, 1, 2, 0xF
@@ -85,7 +86,7 @@ def config_pairs(device):
 
 
 def make_body(seq: int, verb: str, pairs) -> str:
-    parts = ["HAP2", "CMD", str(seq), verb] + [f"{key}={value}" for key, value in pairs]
+    parts = ["HAP3", "CMD", str(seq), verb] + [f"{key}={value}" for key, value in pairs]
     return " ".join(parts)
 
 
@@ -95,8 +96,8 @@ def build_frame_cases(device):
     ping = encode("CMD", 2, "PING")
     bad_crc = bytearray(ping)
     bad_crc[-2] = ord("0") if ping[-2] != ord("0") else ord("1")
-    no_star = b"HAP2 CMD 4 PING\n"
-    short_hex = b"HAP2 CMD 5 X*AB\n"
+    no_star = b"HAP3 CMD 4 PING\n"
+    short_hex = b"HAP3 CMD 5 X*AB\n"
     config = encode("CMD", 6, "CONFIG",
                     **dict(**Config(shape="CIRCLE", radius_um=20000).wire(),
                            **device.array.wire()))
@@ -106,7 +107,7 @@ def build_frame_cases(device):
         ("bad_crc", bytes(bad_crc), 0, MODE_CONTINUOUS, 0x14, "校验码被改坏，应判错"),
         ("no_star", no_star, 0, MODE_CONTINUOUS, 0x0F, "整行没有星号，应判错"),
         ("short_hex", short_hex, 0, MODE_CONTINUOUS, 0x0F, "星号后只有 2 位校验码，应判错"),
-        ("config", config, 1, MODE_CONTINUOUS, 0xEF, "真实的配置命令（240 字节），应通过"),
+        ("config", config, 1, MODE_CONTINUOUS, 269, "真实的配置命令（HAP3 是 270 字节），应通过"),
         ("fragmented", hello, 1, MODE_FRAGMENTED, 0x15, "同一个握手命令，字节之间带空档"),
     ]
 
@@ -120,10 +121,10 @@ def build_field_cases(device):
         cases.append((name, frame, expect_ok, expect_verb, expect_err, expect_seen, note))
 
     # 基准：与参考编码器逐字节一致（下面会断言）
-    add("field_config_ok", 6, "CONFIG", base, 1, V_CONFIG, E_NONE, ALL_FIELDS,
+    add("field_config_ok", 6, "CONFIG", base, 1, V_CONFIG, E_NONE, CONFIG_FIELDS,
         "标准配置命令，应通过且 16 个字段齐全")
     add("field_dup_key", 7, "CONFIG", base + [("level", "30")], 0, V_CONFIG, E_DUP,
-        ALL_FIELDS, "level 出现了两次，应报重复字段")
+        CONFIG_FIELDS, "level 出现了两次，应报重复字段")
     add("field_range", 8, "CONFIG",
         [("carrier_hz", "90000")] + [p for p in base if p[0] != "carrier_hz"],
         0, V_CONFIG, E_RANGE, 0x0001, "载波 90000 Hz 超出 20000~80000，应报越界")
@@ -132,10 +133,10 @@ def build_field_cases(device):
         0, V_CONFIG, E_CHAR, 0x01FF, "level 的值里出现百分号，应报非法字符")
     add("field_missing", 10, "CONFIG",
         [p for p in base if p[0] != "level"],
-        0, V_CONFIG, E_MISSING, ALL_FIELDS & ~(1 << F_LEVEL),
+        0, V_CONFIG, E_MISSING, CONFIG_FIELDS & ~(1 << F_LEVEL),
         "缺少 level 字段，应报字段不全")
     add("field_unknown_key", 11, "CONFIG", base + [("foo", "1")],
-        1, V_CONFIG, E_NONE, ALL_FIELDS, "多了一个不认识的键，应忽略且仍然通过")
+        1, V_CONFIG, E_NONE, CONFIG_FIELDS, "多了一个不认识的键，应忽略且仍然通过")
     add("field_unknown_verb", 12, "REBOOT", [],
         1, V_NONE, E_NONE, 0x0000, "不认识的命令，结构上仍然合法")
     add("field_hello", 13, "HELLO", [],
@@ -144,7 +145,7 @@ def build_field_cases(device):
         1, V_PING, E_NONE, 0x0000, "探活命令不带字段")
     add("field_triangle", 15, "CONFIG",
         [(k, "TRIANGLE" if k == "shape" else v) for k, v in base],
-        1, V_CONFIG, E_NONE, ALL_FIELDS, "三角形预设，图形名应被认出")
+        1, V_CONFIG, E_NONE, CONFIG_FIELDS, "三角形预设，图形名应被认出")
 
     # 自检：手工拼出来的基准报文必须和参考编码器完全一致
     assert cases[0][1] == encode("CMD", 6, "CONFIG", **dict(base)), "基准报文与参考编码器不一致"
@@ -206,18 +207,19 @@ def build_cmd_cases(device):
 
 
 def expected_ack(seq, verb, rev):
-    return craft("HAP2 ACK %d %s applied=1 rev=%d" % (seq, verb, rev))
+    return craft("HAP3 ACK %d %s applied=1 rev=%d" % (seq, verb, rev))
 
 
 def expected_err(seq, verb, code):
-    return craft("HAP2 ERR %d %s code=%s" % (seq, verb, code))
+    return craft("HAP3 ERR %d %s code=%s" % (seq, verb, code))
 
 
 def expected_hello_ack(seq, boot_hex="A1B2C3D4"):
     return craft(
-        "HAP2 ACK %d HELLO proto=2 device=FPGA boot=%s simulated=0 hb_ms=3000 "
-        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY "
+        "HAP3 ACK %d HELLO proto=3 device=FPGA boot=%s simulated=0 hb_ms=3000 "
+        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE "
         "max_rows=16 max_cols=16 max_channels=256 max_nodes=64 "
+        "max_scan_points=256 max_strokes=32 "
         "hw_rows=4 hw_cols=4 hw_pitch_um=10000 mapping=ROW_MAJOR_XY "
         "x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000 "
         "z_min_um=20000 z_max_um=300000" % (seq, boot_hex))
@@ -258,7 +260,7 @@ def main():
     for name, frame, ok, verb, err, seen, note in build_field_cases(device):
         offset = len(fpackets)
         fpackets += frame
-        fplan_lines.append("%03X %03X %X %X %X %04X"
+        fplan_lines.append("%03X %03X %X %X %X %05X"
                            % (offset, len(frame), ok, verb, err, seen))
     write_bytes(VECTOR_DIR / "field_packets.mem", bytes(fpackets))
     (VECTOR_DIR / "field_plan.mem").write_text("\n".join(fplan_lines) + "\n", encoding="ascii")
