@@ -33,3 +33,11 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
 
 echo "-----------------------------------------"
 "$BUILD_DIR/obj/hap2_rx_sim"
+
+echo
+echo "=== 算术单元（开方 + 除法）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_fix_units -o fix_units_sim -Mdir "$BUILD_DIR/obj_fix" \
+          rtl/fix_sqrt.v rtl/fix_div.v tb/tb_fix_units.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_fix/fix_units_sim"
