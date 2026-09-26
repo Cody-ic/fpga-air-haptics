@@ -31,6 +31,7 @@ module hap2_top #(
     // 0 表示关掉（测试台用 0，免得打乱「这一条命令该回几帧」的核对）。
     parameter integer        STATE_MS     = 500,
     parameter integer        PH_PIPE      = 4,         // 相位并行几条开方流水线
+    parameter integer        OUT_DEAD_CYC = 0,         // 互补输出的死区拍数（单端驱动填 0）
     parameter integer        TICK_CYC     = 500        // 50 MHz 下 10 µs = 500 拍
 ) (
     input  wire clk,
@@ -44,7 +45,11 @@ module hap2_top #(
     output wire [5:0]         stroke_index,
     output wire               output_on,
     output wire               beat_pulse,
-    output wire               walk_running
+    output wire               walk_running,
+    // ---- 送给驱动电路的 16 路方波 ----
+    // 半桥驱动要互补输入时用 array_neg（带死区）；单端驱动只用 array_pos
+    output wire [HW_ROWS*HW_COLS-1:0] array_pos,
+    output wire [HW_ROWS*HW_COLS-1:0] array_neg
 );
 
     // ---------------- 接收通路 ----------------
@@ -274,6 +279,7 @@ module hap2_top #(
     /* verilator lint_on UNUSEDSIGNAL */
     wire        ph_pub_sel;
     wire [7:0]  ph_rd_addr, ph_rd_data;
+    wire [7:0]  ph_rd2_addr, ph_rd2_data;   // 第二个读口：给输出级拿相位码
     wire signed [20:0] ph_pub_fx, ph_pub_fy;
     wire [31:0] ph_pub_fz_um;
 
@@ -296,12 +302,34 @@ module hap2_top #(
         .rd_sel             (snap_sel),
         .rd_addr            (ph_rd_addr),
         .rd_data            (ph_rd_data),
+        .rd2_addr           (ph_rd2_addr),
+        .rd2_data           (ph_rd2_data),
         .pub_fx             (ph_pub_fx),
         .pub_fy             (ph_pub_fy),
         .pub_fz_um          (ph_pub_fz_um)
     );
 
     // ---------------- 状态快照 ----------------
+    // ---------------- 输出级 ----------------
+    // 用相位表里那张表生成 16 路方波。enable 就是「运行中 + 等级>0 + 正在扫描」，
+    // 不满足时 16 路全部拉低——跳转、暂停、停止、上电复位时换能器都不能被驱动。
+    hap2_out #(
+        .ROWS (HW_ROWS), .COLS (HW_COLS), .CLK_HZ (CLK_HZ),
+        .ACC_BITS (32), .DEAD_CYC (OUT_DEAD_CYC)
+    ) u_out (
+        .clk                (clk),
+        .rst_n              (rst_n),
+        .cfg_carrier_hz     (cfg_carrier_hz),
+        .cfg_phase_steps    (cfg_phase_steps),
+        .cfg_change         (config_changed),
+        .enable             (output_on),
+        .tbl_new            (ph_done),
+        .tbl_addr           (ph_rd2_addr),
+        .tbl_data           (ph_rd2_data),
+        .out_pos            (array_pos),
+        .out_neg            (array_neg)
+    );
+
     // 一帧 STATE 要发几十毫秒，期间焦点一直在动、配置也可能被换掉。协议要求这一帧里
     // 的配置、坐标、相位表来自同一瞬间，所以发送模块一开始拼 STATE，就把它们锁存下来，
     // 相位表再复制一份；复制时把「读哪一半」钉住，这边翻指针也不会读串。

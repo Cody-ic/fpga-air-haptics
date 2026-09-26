@@ -58,6 +58,9 @@ module hap2_phase #(
     input  wire                      rd_sel,
     input  wire [7:0]                rd_addr,
     output reg  [7:0]                rd_data,
+    // 第二个读口：输出级要拿同一张表去发方波，两个读口才不用抢
+    input  wire [7:0]                rd2_addr,
+    output reg  [7:0]                rd2_data,
     // ---- 已经发布出去的那份相位表是对着哪个焦点算的 ----
     // 状态帧里的焦点和相位表要来自同一次计算，这里把那次用的坐标暴露出来
     output reg  signed [PT_BITS-1:0] pub_fx,
@@ -205,6 +208,7 @@ module hap2_phase #(
         if (wr_en) ram[{~pub_sel, wr_addr[7:0]}] <= wr_data;
         // 读哪一半由调用方钉住（rd_sel），这样快照复制到一半、这边翻指针也不会读串
         rd_data <= ram[{rd_sel, rd_addr}];
+        rd2_data <= ram[{pub_sel, rd2_addr}];
     end
 
     // ---------------- 状态机 ----------------

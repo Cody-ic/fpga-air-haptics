@@ -29,6 +29,7 @@ module tb_hap2_top;
     wire signed [PT_BITS-1:0] focus_x, focus_y;
     wire scan_on, output_on, walk_running, beat_pulse;
     wire [5:0] stroke_index;
+    wire [15:0] array_pos, array_neg;
 
     hap2_top #(
         .CLK_HZ  (CLK_HZ),
@@ -50,8 +51,14 @@ module tb_hap2_top;
         .stroke_index(stroke_index),
         .output_on   (output_on),
         .beat_pulse  (beat_pulse),
-        .walk_running(walk_running)
+        .walk_running(walk_running),
+        .array_pos   (array_pos),
+        .array_neg   (array_neg)
     );
+
+    // 数 16 路输出上出现的上升沿（用来核对「跑起来方波在动、停下来不动」）
+    integer drive_edges = 0;
+    always @(posedge array_pos[0]) drive_edges = drive_edges + 1;
 
     // ---------------- 板子发出来的字节 ----------------
     wire [7:0] board_byte;
@@ -358,6 +365,31 @@ module tb_hap2_top;
         end
     endtask
 
+    // 盯住 16 路驱动输出：跑起来方波要在动，停下来必须彻底不动
+    integer drv_before, drv_after;
+    task check_drive;
+        input integer want_edges;    // 1 = 这段时间里必须有上升沿，0 = 一个都不许有
+        begin
+            drv_before = drive_edges;
+            // 窗口取 6 毫秒：抬笔最长 2 毫秒，所以这段时间里一定包含扫描段，
+            // 40 kHz 的方波一定在动
+            repeat (300000) @(negedge clk);
+            drv_after  = drive_edges;
+            checks = checks + 1;
+            if (want_edges && drv_after == drv_before) begin
+                $display("[用例 %0d] 16 路驱动输出没有方波  **失败**", case_i);
+                errors = errors + 1;
+            end else if (!want_edges && drv_after != drv_before) begin
+                $display("[用例 %0d] 本该没有输出，却出现了 %0d 个上升沿  **失败**",
+                         case_i, drv_after - drv_before);
+                errors = errors + 1;
+            end else begin
+                $display("  驱动输出：这段时间上升沿 %0d 个（%0s）",
+                         drv_after - drv_before, want_edges ? "应当有" : "应当没有");
+            end
+        end
+    endtask
+
     initial begin
         $readmemh("tb/vectors/top_packets.mem", pkt);
         $readmemh("tb/vectors/top_plan.mem",    tplan);
@@ -407,6 +439,7 @@ module tb_hap2_top;
         // 足够看到「扫描 → 抬笔 → 第二笔」
         absent("phases=0,0,0,0,0,0");     // 跑起来相位不该全是 0
         watch_trajectory(1200000);
+        check_drive(1);                   // 跑起来 16 路驱动输出必须在动
 
         // ---- 4. 暂停：位置冻住、输出关掉 ----
         case_i = 3;
@@ -419,7 +452,7 @@ module tb_hap2_top;
             $display("[用例 %0d] 暂停之后输出没关  **失败**", case_i);
             errors = errors + 1;
         end
-        st = focus_x;
+        st = focus_x;                     // 暂停时的位置（后面核对「接着走」）
         repeat (60000) @(negedge clk);     // 60 万拍 = 12 毫秒，早就该冻住了
         checks = checks + 1;
         if (focus_x !== st) begin
@@ -431,15 +464,17 @@ module tb_hap2_top;
         case_i = 4;
         clear_rx;
         send_case(4);
-        wait_frames(2);
-        found("state=RUNNING");
+        // 命令刚发完就来看位置：恢复的语义是「解开冻结」，位置寄存器一动不动，
+        // 所以这一刻应当还在暂停的地方（顶多走了一两拍），而不是跳回起点。
+        repeat (500) @(negedge clk);
         checks = checks + 1;
-        // 起点是 (2000,4000)（0.5 µm 单位）。恢复之后如果正好在起点，
-        // 说明它是从头开始而不是接着走。
-        if (focus_x === 21'sd2000 && focus_y === 21'sd4000) begin
-            $display("[用例 %0d] 恢复之后回到了起点，像是重新开始了  **失败**", case_i);
+        if (focus_x - st > 200 || st - focus_x > 200) begin
+            $display("[用例 %0d] 恢复瞬间位置跳了：暂停在 %0d，恢复后 %0d  **失败**",
+                     case_i, st, focus_x);
             errors = errors + 1;
         end
+        wait_frames(2);
+        found("state=RUNNING");
         repeat (60000) @(negedge clk);
 
         // ---- 6. 停止：回到起点 ----
@@ -460,6 +495,7 @@ module tb_hap2_top;
             $display("[用例 %0d] 停止后输出没关  **失败**", case_i);
             errors = errors + 1;
         end
+        check_drive(0);                   // 停下来之后驱动输出必须彻底安静
 
         // ---- 7. 一份碎到做不出节拍表的配置：整份拒绝 ----
         case_i = 6;

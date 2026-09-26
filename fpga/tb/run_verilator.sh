@@ -60,6 +60,14 @@ echo "-----------------------------------------"
 "$BUILD_DIR/obj_phase/phase_sim"
 
 echo
+echo "=== 输出级（相位码 → 引脚上的方波，量频率和相位）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_out -o out_sim -Mdir "$BUILD_DIR/obj_out" \
+          rtl/fix_sqrt.v rtl/fix_div.v rtl/hap2_phase.v rtl/hap2_out.v tb/tb_out.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_out/out_sim"
+
+echo
 echo "=== 端到端（整条通路，对着串口线）==="
 verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           --top-module tb_hap2_top -o hap2_top_sim -Mdir "$BUILD_DIR/obj_top" \
@@ -68,7 +76,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
-          rtl/hap2_traj_scan.v rtl/hap2_phase.v \
+          rtl/hap2_traj_scan.v rtl/hap2_phase.v rtl/hap2_out.v \
           rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"
