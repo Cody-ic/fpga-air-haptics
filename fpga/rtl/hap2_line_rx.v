@@ -23,7 +23,10 @@ module hap2_line_rx #(
     output reg  [ADDR_W:0] line_len,     // 行长（不含 LF，也不含被剥掉的 CR）
     output reg             line_dropped, // 单拍脉冲：本行超长，已整行丢弃
     // 下游读缓冲的端口
+    /* verilator lint_off UNUSEDSIGNAL */
+    // 使用方的行长上限可能小于 2^ADDR_W，这时地址高位用不上，属正常
     input  wire [ADDR_W-1:0] rd_addr,
+    /* verilator lint_on UNUSEDSIGNAL */
     output reg  [7:0]        rd_data
 );
 

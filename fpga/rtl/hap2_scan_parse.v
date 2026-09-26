@@ -17,6 +17,10 @@
 //   - 总点数 ≤ 256，段数 ≤ 32
 //   - 同一段里相邻的两个点不能重合
 //   - 每段至少一个点（出现空段就拒绝）
+//   - 原文长度 ≤ MAX_TXT（4 KB，上位机的草图字符串上限）
+//
+// 协议里「这一段没有多段草图」写作 `scan_paths=NONE`，所以这里专门认一下这四个
+// 字符：通过、点数和段数都是 0，并把 is_none 拉高告诉上层「没有草图」。
 //
 // 点表是简单双口 RAM：写口在本模块，读口给轨迹发生器（同步读，一拍出数据）。
 //
@@ -26,7 +30,8 @@ module hap2_scan_parse #(
     parameter integer ADDR_W  = 13,    // 行缓冲地址位宽（8192 字节）
     parameter integer PT_BITS = 21,    // 单个坐标的位宽
     parameter integer MAX_PTS = 256,
-    parameter integer MAX_STK = 32
+    parameter integer MAX_STK = 32,
+    parameter integer MAX_TXT = 4096   // 草图原文最长多少字节
 ) (
     input  wire                      clk,
     input  wire                      rst_n,
@@ -40,6 +45,7 @@ module hap2_scan_parse #(
     output reg                       bad,       // 单拍脉冲：解析失败
     output reg  [8:0]                point_count,
     output reg  [5:0]                stroke_count,
+    output reg                       is_none,   // 原文就是 NONE（没有草图）
     // ---- 给轨迹发生器读的表 ----
     input  wire [7:0]                pt_addr,
     output reg  signed [PT_BITS-1:0] pt_x,
@@ -58,6 +64,7 @@ module hap2_scan_parse #(
     localparam [2:0] S_STORE_PT = 3'd3;   // 把攒好的点写进点表
     localparam [2:0] S_STORE_ST = 3'd4;   // 把刚刚结束的一段写进段表
     localparam [2:0] S_DONE     = 3'd5;
+    localparam [2:0] S_NONE     = 3'd6;   // 认一下 NONE 这四个字符
 
     reg signed [PT_BITS-1:0] pt_xram [0:MAX_PTS-1];
     reg signed [PT_BITS-1:0] pt_yram [0:MAX_PTS-1];
@@ -84,6 +91,8 @@ module hap2_scan_parse #(
     reg [8:0]      pt_idx;             // 下一个点写到哪
     reg [5:0]      st_idx;             // 下一段写到哪
     reg [8:0]      st_pt_start;
+    reg [1:0]      none_i;             // NONE 认到第几个字符
+    reg            none_ph;            // 0 = 等数据；1 = 数据有效可以看
 
     assign st_start = st_startram[st_addr];
     assign st_len   = st_lenram[st_addr];
@@ -98,6 +107,19 @@ module hap2_scan_parse #(
         input [7:0] ch;
         begin
             is_digit = (ch >= "0") && (ch <= "9");
+        end
+    endfunction
+
+    // NONE 的第 i 个字符
+    function [7:0] none_char;
+        input [1:0] i;
+        begin
+            case (i)
+                2'd0:    none_char = "N";
+                2'd1:    none_char = "O";
+                2'd2:    none_char = "N";
+                default: none_char = "E";
+            endcase
         end
     endfunction
 
@@ -138,6 +160,9 @@ module hap2_scan_parse #(
             pt_idx       <= 9'd0;
             st_idx       <= 6'd0;
             st_pt_start  <= 9'd0;
+            is_none      <= 1'b0;
+            none_i       <= 2'd0;
+            none_ph      <= 1'b0;
         end else begin
             ok  <= 1'b0;
             bad <= 1'b0;
@@ -150,6 +175,7 @@ module hap2_scan_parse #(
                         idx         <= 0;
                         rd_addr     <= src_off;
                         fail_flag   <= 1'b0;
+                        is_none     <= 1'b0;
                         acc         <= 0;
                         digits      <= 3'd0;
                         neg         <= 1'b0;
@@ -160,7 +186,37 @@ module hap2_scan_parse #(
                         pt_idx      <= 9'd0;
                         st_idx      <= 6'd0;
                         st_pt_start <= 9'd0;
-                        state       <= S_PRIME;
+                        none_i      <= 2'd0;
+                        none_ph     <= 1'b0;
+                        if (src_len == 0 || src_len > MAX_TXT) begin
+                            fail_flag <= 1'b1;      // 空串或超出原文上限
+                            state     <= S_DONE;
+                        end else if (src_len == 4) begin
+                            state <= S_NONE;        // 可能是 NONE，也可能是别的 4 字符
+                        end else begin
+                            state <= S_PRIME;
+                        end
+                    end
+                end
+
+                // -------- 辨认 NONE --------
+                // 点表是同步读：地址在上一拍发出，数据要到「再下一拍」才有效，
+                // 所以每认一个字符要两拍（一拍等数据，一拍比对）。
+                S_NONE: begin
+                    if (!none_ph) begin
+                        none_ph <= 1'b1;
+                    end else if (rd_data !== none_char(none_i)) begin
+                        fail_flag <= 1'b1;
+                        state     <= S_DONE;
+                    end else if (none_i == 2'd3) begin
+                        point_count  <= 9'd0;
+                        stroke_count <= 6'd0;
+                        is_none      <= 1'b1;
+                        state        <= S_DONE;
+                    end else begin
+                        none_i  <= none_i + 2'd1;
+                        rd_addr <= rd_addr + 1'b1;
+                        none_ph <= 1'b0;
                     end
                 end
 

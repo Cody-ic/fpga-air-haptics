@@ -49,6 +49,25 @@ module hap2_cmd #(
     // ---- 心跳看门狗 ----
     input  wire            heartbeat_lost, // 单拍脉冲：主机失联
 
+    // ---- 轨迹子系统（多段草图 → 节拍表 → 走步器）----
+    output reg             traj_parse_start,    // 单拍：解析草图文本
+    output reg             traj_plan_start,     // 单拍：编译节拍表
+    output reg             traj_txt_commit,     // 单拍：配置被接受，原文可以对外公布
+    output reg             traj_txt_none,       // 这份配置没有草图（预设图形或 NONE）
+    input  wire            traj_parse_ok,       // 单拍：原文解析通过
+    input  wire            traj_parse_bad,      // 单拍：原文不是合法草图
+    input  wire            traj_none,           // 这次解析的对象是 NONE（没有草图）
+    input  wire            traj_plan_done,      // 单拍：节拍表算好了
+    input  wire            traj_plan_fault,     // 单拍：这份图形／配置做不出节拍表
+    output wire [ADDR_W:0] traj_src_off,        // 解析用的起点与长度（影子配置里存的）
+    output wire [ADDR_W:0] traj_src_len,
+    output wire [31:0]     traj_repeat_millihz, // 编译用的是影子配置（编译发生在生效之前）
+    output wire [31:0]     traj_blank_us,
+    output reg             walk_start,          // 单拍：从轨迹起点开始走
+    output wire            walk_hold,           // 电平：暂停（位置冻结）
+    output reg             walk_stop,           // 单拍：停下并回到起点
+    output reg             traj_ready,          // 当前配置有一份可用的节拍表
+
     // ---- 应答 ----
     output reg             reply_valid,    // 单拍脉冲：有一条应答要发
     output reg  [1:0]      reply_kind,     // 0=ACK 1=ERR
@@ -63,6 +82,7 @@ module hap2_cmd #(
     output reg  [2:0]      reason,         // 0=NONE 1=HEARTBEAT_TIMEOUT
     output reg  [15:0]     revision,
     output reg             config_changed, // 单拍脉冲：配置刚被原子替换
+    output wire            connected_out,  // 已经握过手（顶层据此决定要不要主动上报状态）
 
     // ---- 已生效的配置 ----
     output reg  [31:0]     cfg_carrier_hz,
@@ -138,9 +158,22 @@ module hap2_cmd #(
     localparam [2:0] REASON_NONE = 3'd0;
     localparam [2:0] REASON_HB   = 3'd1;
 
+    // 多段草图的形状编号（和字段解析、应答里的图形名一致）
+    localparam [2:0] SH_CUSTOM = 3'd7;
+
+    // 待办配置的三步：解析原文 → 编译节拍表 → 才回 ACK、才把配置换上去。
+    // 之所以要「等」，是因为协议里 ACK applied=1 的意思就是「这份配置已经生效」，
+    // 而能不能生效要等节拍表算出来才知道（算不出来必须回 BAD_CONFIG）。
+    localparam [1:0] P_IDLE  = 2'd0;
+    localparam [1:0] P_PARSE = 2'd1;
+    localparam [1:0] P_PLAN  = 2'd2;
+
     reg connected;          // 是否已完成握手
     reg array_bad;          // CONFIG 帧里阵列字段与实际不符
     reg [1:0] mode_value;   // MODE 命令的 value 解出来的模式
+    reg [1:0] pending;      // 见 P_*
+    reg [3:0] lat_verb;     // 待办配置的应答要用的命令名与序号
+    reg [15:0] lat_seq;
 
     // ---------------- 影子配置寄存器 ----------------
     reg [31:0]     sh_carrier_hz;
@@ -169,6 +202,71 @@ module hap2_cmd #(
     reg       dec_run;
     reg [1:0] dec_run_state;
     reg       dec_commit;
+
+    // 轨迹子系统要用的都是「影子配置」：编译发生在配置生效之前
+    assign traj_src_off        = sh_scan_off;
+    assign traj_src_len        = sh_scan_size;
+    assign traj_repeat_millihz = sh_repeat_millihz;
+    assign traj_blank_us       = sh_blank_us;
+    // 暂停 = 冻结走步器（启动阶段就一直在数节拍）；没有节拍表就没什么可冻结的
+    assign walk_hold           = traj_ready && (run_state == R_PAUSED);
+    assign connected_out       = connected;
+
+    // 把影子配置整体换上去，并回一条 ACK（+ STATE）。只有解析和编译都过了才调用。
+    // ready = 这份配置有没有可用的节拍表（预设图形的轨迹还没做，所以是 0）。
+    // rseq / rverb 是这条应答要对上的序号与命令名：立即生效时就是当前帧的，
+    // 等编译时是暂存下来的（因为编译要花一毫秒，那时当前帧早过去了）。
+    task accept_config;
+        input ready;
+        input [15:0] rseq;
+        input [3:0]  rverb;
+        begin
+            cfg_carrier_hz     <= sh_carrier_hz;
+            cfg_phase_steps    <= sh_phase_steps;
+            cfg_cx_um          <= sh_cx_um;
+            cfg_cy_um          <= sh_cy_um;
+            cfg_z_um           <= sh_z_um;
+            cfg_radius_um      <= sh_radius_um;
+            cfg_repeat_millihz <= sh_repeat_millihz;
+            cfg_mod_hz         <= sh_mod_hz;
+            cfg_level          <= sh_level;
+            cfg_shape          <= sh_shape;
+            cfg_path_closed    <= sh_path_closed;
+            cfg_path_off       <= sh_path_off;
+            cfg_path_size      <= sh_path_size;
+            cfg_scan_off       <= sh_scan_off;
+            cfg_scan_size      <= sh_scan_size;
+            cfg_blank_us       <= sh_blank_us;
+            revision           <= revision + 1'b1;
+            config_changed     <= 1'b1;
+            traj_ready         <= ready;
+            traj_txt_commit    <= 1'b1;    // 原文可以对外公布了（STATE 要回传）
+            traj_txt_none      <= (sh_shape != SH_CUSTOM) || traj_none;
+            walk_stop          <= 1'b1;        // 新图形一律从起点重新开始
+            reply_valid        <= 1'b1;
+            reply_kind         <= 2'd0;
+            reply_verb         <= rverb;
+            reply_seq          <= rseq;
+            reply_code         <= C_NONE;
+            reply_want_state   <= 1'b1;
+        end
+    endtask
+
+    // 这份配置不能用：回 ERR，配置一个字都不动，版本号也不动
+    task reject_config;
+        input [15:0] rseq;
+        input [3:0]  rverb;
+        begin
+            traj_ready   <= 1'b0;
+            walk_stop    <= 1'b1;
+            reply_valid  <= 1'b1;
+            reply_kind   <= 2'd1;
+            reply_verb   <= rverb;
+            reply_seq    <= rseq;
+            reply_code   <= C_BAD_CONFIG;
+            reply_want_state <= 1'b0;
+        end
+    endtask
 
     always @* begin
         dec_err        = C_NONE;
@@ -252,6 +350,16 @@ module hap2_cmd #(
             connected      <= 1'b0;
             array_bad      <= 1'b0;
             mode_value     <= M_REMOTE;
+            pending        <= P_IDLE;
+            lat_verb       <= 4'd0;
+            lat_seq        <= 16'd0;
+            traj_ready     <= 1'b0;
+            traj_parse_start <= 1'b0;
+            traj_plan_start  <= 1'b0;
+            traj_txt_commit  <= 1'b0;
+            traj_txt_none    <= 1'b0;
+            walk_start       <= 1'b0;
+            walk_stop        <= 1'b0;
             mode           <= M_REMOTE;    // 上电默认听电脑的，但不握手不接受命令
             run_state      <= R_IDLE;      // 上电必须保持输出关闭
             reason         <= REASON_NONE;
@@ -298,6 +406,12 @@ module hap2_cmd #(
         end else begin
             reply_valid    <= 1'b0;
             config_changed <= 1'b0;
+            traj_parse_start <= 1'b0;
+            traj_plan_start  <= 1'b0;
+            traj_txt_commit  <= 1'b0;
+            traj_txt_none    <= 1'b0;
+            walk_start       <= 1'b0;
+            walk_stop        <= 1'b0;
 
             // ---- 1. 收集字段 ----
             if (field_valid) begin
@@ -337,41 +451,54 @@ module hap2_cmd #(
             // ---- 2. 帧结束：出结论 ----
             // 只认电脑发来的 CMD；其它帧型（理论上不会收到）一律不回话
             if ((frame_ok || frame_bad) && header_ok && kind == 2'd0) begin
-                reply_valid      <= 1'b1;
-                reply_kind       <= (dec_err == C_NONE) ? 2'd0 : 2'd1;
-                reply_verb       <= verb;
-                reply_seq        <= seq;
-                reply_code       <= dec_err;
-                // 判错时只回一条 ERR，不带 STATE；PING 成功也只回 ACK
-                reply_want_state <= (dec_err == C_NONE) ? dec_want_state : 1'b0;
+                lat_verb <= verb;                // 待办配置回话时要用的命令名与序号
+                lat_seq  <= seq;
+                if (pending != P_IDLE) begin
+                    // 上一份 CONFIG 还在解析／编译节拍表。电脑正常只会发探活，
+                    // 探活照常回；别的命令先回「忙」，这一次编译照旧走完。
+                    reply_valid      <= 1'b1;
+                    reply_kind       <= (verb == V_PING && dec_err == C_NONE) ? 2'd0 : 2'd1;
+                    reply_verb       <= verb;
+                    reply_seq        <= seq;
+                    reply_code       <= (verb == V_PING && dec_err == C_NONE)
+                                        ? C_NONE : C_BUSY;
+                    reply_want_state <= 1'b0;
+                end else if (dec_err != C_NONE) begin
+                    // 结构层或权限层否掉了这一帧：只回一条 ERR，什么都不改
+                    reply_valid      <= 1'b1;
+                    reply_kind       <= 2'd1;
+                    reply_verb       <= verb;
+                    reply_seq        <= seq;
+                    reply_code       <= dec_err;
+                    reply_want_state <= 1'b0;
+                end else if (dec_commit && sh_shape == SH_CUSTOM) begin
+                    // 这份配置带多段草图：先解析原文，再编译节拍表，
+                    // 两步都过了才回 ACK（见 P_PARSE / P_PLAN）
+                    pending          <= P_PARSE;
+                    traj_parse_start <= 1'b1;
+                end else begin
+                    reply_valid      <= 1'b1;
+                    reply_kind       <= 2'd0;
+                    reply_verb       <= verb;
+                    reply_seq        <= seq;
+                    reply_code       <= C_NONE;
+                    reply_want_state <= dec_want_state;
 
-                if (dec_err == C_NONE) begin
                     if (dec_hello)    connected <= 1'b1;
                     if (dec_mode_set) mode      <= dec_mode;
                     if (dec_run) begin
                         run_state <= dec_run_state;
                         reason    <= REASON_NONE;
+                        // 走步器跟着运行状态走：停止要归零，从待机启动要回到起点
+                        if (dec_run_state == R_IDLE) walk_stop <= 1'b1;
+                        else if (dec_run_state == R_RUNNING && run_state == R_IDLE
+                                 && traj_ready)
+                            // 没有节拍表（比如预设图形）就没什么可走的：状态照旧变
+                            // RUNNING，但扫描开关保持 0、输出保持关闭
+                            walk_start <= 1'b1;
                     end
-                    if (dec_commit) begin            // 一次性整体替换，不许换一半
-                        cfg_carrier_hz     <= sh_carrier_hz;
-                        cfg_phase_steps    <= sh_phase_steps;
-                        cfg_cx_um          <= sh_cx_um;
-                        cfg_cy_um          <= sh_cy_um;
-                        cfg_z_um           <= sh_z_um;
-                        cfg_radius_um      <= sh_radius_um;
-                        cfg_repeat_millihz <= sh_repeat_millihz;
-                        cfg_mod_hz         <= sh_mod_hz;
-                        cfg_level          <= sh_level;
-                        cfg_shape          <= sh_shape;
-                        cfg_path_closed    <= sh_path_closed;
-                        cfg_path_off       <= sh_path_off;
-                        cfg_path_size      <= sh_path_size;
-                        cfg_scan_off       <= sh_scan_off;
-                        cfg_scan_size      <= sh_scan_size;
-                        cfg_blank_us       <= sh_blank_us;
-                        revision           <= revision + 1'b1;
-                        config_changed     <= 1'b1;
-                    end
+                    // 预设图形的轨迹还没做，这份配置没有可用的节拍表
+                    if (dec_commit) accept_config(1'b0, seq, verb);
                 end
             end
 
@@ -380,10 +507,43 @@ module hap2_cmd #(
                 array_bad <= 1'b0;
             end
 
+            // ---- 2.5 待办配置：解析原文 → 编译节拍表 ----
+            case (pending)
+                P_PARSE: begin
+                    if (traj_parse_bad) begin
+                        reject_config(lat_seq, lat_verb);   // 原文不是合法草图
+                        pending <= P_IDLE;
+                    end else if (traj_parse_ok) begin
+                        if (traj_none) begin
+                            // 这份配置没有草图（scan_paths=NONE）：不需要节拍表，
+                            // 直接生效，轨迹标记清掉
+                            accept_config(1'b0, lat_seq, lat_verb);
+                            pending <= P_IDLE;
+                        end else begin
+                            traj_plan_start <= 1'b1;
+                            pending         <= P_PLAN;
+                        end
+                    end
+                end
+
+                P_PLAN: begin
+                    if (traj_plan_fault) begin
+                        reject_config(lat_seq, lat_verb);   // 图形／配置做不出节拍表
+                        pending <= P_IDLE;
+                    end else if (traj_plan_done) begin
+                        accept_config(1'b1, lat_seq, lat_verb);   // 算好了，才真的生效
+                        pending <= P_IDLE;
+                    end
+                end
+
+                default: ;
+            endcase
+
             // ---- 3. 心跳超时：REMOTE 下必须关输出回到待机 ----
             if (heartbeat_lost && mode == M_REMOTE) begin
                 run_state <= R_IDLE;
                 reason    <= REASON_HB;
+                walk_stop <= 1'b1;
             end
         end
     end

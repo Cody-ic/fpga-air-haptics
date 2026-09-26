@@ -19,6 +19,11 @@ module hap2_rx #(
     input  wire            clk,
     input  wire            rst_n,
     input  wire            uart_rx_pin,
+    // ---- 额外的行缓冲读口（给多段草图解析用）----
+    // 三段检查／解析是串行的，草图解析排在最后，所以谁在跑就把读口让给谁。
+    input  wire [ADDR_W-1:0] ext_rd_addr,
+    input  wire              ext_rd_busy,
+    output wire [7:0]        buf_data_out,
     // 行就绪
     output reg             line_ready,     // 单拍脉冲：收到一整行
     output reg  [ADDR_W:0] line_len,       // 行长（不含 LF 与 CR）
@@ -81,7 +86,9 @@ module hap2_rx #(
 
     // 读口让给正在读的那一个
     wire [ADDR_W-1:0] buf_addr;
-    assign buf_addr = parse_busy ? parse_addr : check_addr;
+    assign buf_addr = ext_rd_busy ? ext_rd_addr
+                                  : (parse_busy ? parse_addr : check_addr);
+    assign buf_data_out = buf_data;
 
     assign rx_valid = byte_valid;
     assign rx_error = byte_error;

@@ -85,6 +85,11 @@ module tb_hap2_rx;
         .clk          (clk),
         .rst_n        (rst_n),
         .uart_rx_pin  (uart_line),
+        // 这个测试台里草图解析器读的是测试自己的字符串缓冲（下面的 dut_scan），
+        // 不走行缓冲，所以把额外的读口挂空。
+        .ext_rd_addr  ({ADDR_W{1'b0}}),
+        .ext_rd_busy  (1'b0),
+        .buf_data_out (dummy_buf_data),
         .line_ready   (line_ready),
         .line_len     (line_len),
         .line_dropped (line_dropped),
@@ -135,6 +140,14 @@ module tb_hap2_rx;
     wire [2:0]      cfg_shape;
     wire [31:0]     cfg_path_closed;
     wire [31:0]     cfg_blank_us;
+    /* verilator lint_off UNUSEDSIGNAL */
+    // 轨迹子系统的接口在这个测试台里挂着不动（草图子系统由 tb_hap2_top 端到端测）
+    wire            traj_parse_start, traj_plan_start, walk_hold;
+    wire            walk_start, walk_stop, traj_ready;
+    wire [ADDR_W:0] traj_src_off, traj_src_len;
+    wire [31:0]     traj_repeat_millihz, traj_blank_us_w;
+    wire [7:0]      dummy_buf_data;
+    /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_cmd #(
         .ADDR_W (ADDR_W)
@@ -159,6 +172,22 @@ module tb_hap2_rx;
         .array_cols       (32'd4),
         .array_pitch_um   (32'd10000),
         .heartbeat_lost   (heartbeat_lost),
+        // 这个测试台只测收报文和命令裁决，草图子系统不接（由 tb_hap2_top 端到端测）
+        .traj_parse_start (traj_parse_start),
+        .traj_plan_start  (traj_plan_start),
+        .traj_parse_ok    (1'b0),
+        .traj_parse_bad   (1'b0),
+        .traj_none        (1'b0),
+        .traj_plan_done   (1'b0),
+        .traj_plan_fault  (1'b0),
+        .traj_src_off     (traj_src_off),
+        .traj_src_len     (traj_src_len),
+        .traj_repeat_millihz (traj_repeat_millihz),
+        .traj_blank_us    (traj_blank_us_w),
+        .walk_start       (walk_start),
+        .walk_hold        (walk_hold),
+        .walk_stop        (walk_stop),
+        .traj_ready       (traj_ready),
         .reply_valid      (reply_valid),
         .reply_kind       (reply_kind),
         .reply_seq        (reply_seq),
@@ -202,6 +231,9 @@ module tb_hap2_rx;
     wire        scan_bad;
     wire [8:0]  scan_pts;
     wire [5:0]  scan_stk;
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire        scan_is_none;      // 草图子系统由 tb_hap2_top 端到端测，这里只接出来看
+    /* verilator lint_on UNUSEDSIGNAL */
     reg  [7:0]  scan_pt_addr;
     wire signed [20:0] scan_x;
     wire signed [20:0] scan_y;
@@ -229,6 +261,7 @@ module tb_hap2_rx;
         .bad          (scan_bad),
         .point_count  (scan_pts),
         .stroke_count (scan_stk),
+        .is_none      (scan_is_none),
         .pt_addr      (scan_pt_addr),
         .pt_x         (scan_x),
         .pt_y         (scan_y),
@@ -255,6 +288,9 @@ module tb_hap2_rx;
     wire        tx_busy;
     wire [7:0]  phase_addr;
     reg  [7:0]  phase_data;
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [11:0] tx_txt_addr;       // 同上：只接出来，不参与判断
+    /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_tx #(
         .CLK_HZ (CLK_HZ),
@@ -292,6 +328,13 @@ module tb_hap2_rx;
         .cfg_shape        (cfg_shape),
         .cfg_path_closed  (cfg_path_closed),
         .cfg_blank_us     (cfg_blank_us),
+        // 走步器／相位表在这条测试里都是空的：扫描开关恒 0，相位回全 0，原文回 NONE
+        .scan_on          (1'b0),
+        .stroke_index     (6'd0),
+        .txt_addr         (tx_txt_addr),
+        .txt_data         (8'd0),
+        .txt_len          (13'd4),
+        .txt_valid        (1'b0),
         .fx_um            (32'd0),
         .fy_um            (32'd0),
         .fz_um            (32'd150000),

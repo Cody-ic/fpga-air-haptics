@@ -50,3 +50,16 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           tb/tb_traj.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_traj/traj_sim"
+
+echo
+echo "=== 端到端（整条通路，对着串口线）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_hap2_top -o hap2_top_sim -Mdir "$BUILD_DIR/obj_top" \
+          rtl/uart_rx.v rtl/uart_tx.v rtl/dec_ascii.v rtl/crc16_ccitt.v \
+          rtl/hap2_line_rx.v rtl/hap2_frame_check.v rtl/hap2_field_parse.v \
+          rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
+          rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
+          rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj_scan.v \
+          rtl/hap2_top.v tb/tb_hap2_top.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_top/hap2_top_sim"

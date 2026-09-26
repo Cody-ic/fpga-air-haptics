@@ -218,7 +218,7 @@ def expected_err(seq, verb, code):
 def expected_hello_ack(seq, boot_hex="A1B2C3D4"):
     return craft(
         "HAP3 ACK %d HELLO proto=3 device=FPGA boot=%s simulated=0 hb_ms=3000 "
-        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE "
+        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS "
         "max_rows=16 max_cols=16 max_channels=256 max_nodes=64 "
         "max_scan_points=256 max_strokes=32 "
         "hw_rows=4 hw_cols=4 hw_pitch_um=10000 mapping=ROW_MAJOR_XY "
@@ -418,6 +418,46 @@ def traj_samples(scan_paths, repeat_millihz, blank_us, laps, moves):
     return samples
 
 
+# 端到端用例（tb_hap2_top 用）：一条一条真实报文，按顺序发给板子
+TOP_SKETCH  = "1000:2000,11000:2000|1000:7000,11000:7000"
+TOP_TOOFINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 61))
+
+
+def build_top_cases(device):
+    """端到端测试要发的报文（真实 CRC）。返回 [(名字, 报文, 说明)]。"""
+    dev = dict(device.array.wire())
+
+    def cfg(seq, **over):
+        fields = dict(Config(**over).wire())
+        fields.update(dev)
+        return encode("CMD", seq, "CONFIG", **fields)
+
+    return [
+        ("hello", encode("CMD", 1, "HELLO"),
+         "握手：应答里应当声明 SCAN_PATHS"),
+        ("config_sketch", cfg(2, shape="CUSTOM", scan_paths=TOP_SKETCH,
+                              repeat_millihz=40000, blank_us=2000, level=30),
+         "带两笔草图的配置：解析 + 编译节拍表，都过了才回 ACK"),
+        ("start", encode("CMD", 3, "START"), "启动：走步器开始走"),
+        ("pause", encode("CMD", 4, "PAUSE"), "暂停：位置冻住，输出关掉"),
+        ("resume", encode("CMD", 5, "START"), "从暂停恢复：接着走，不回到起点"),
+        ("stop", encode("CMD", 6, "STOP"), "停止：回到起点"),
+        ("config_toofine", cfg(7, shape="CUSTOM", scan_paths=TOP_TOOFINE,
+                               repeat_millihz=200000, blank_us=100),
+         "碎到分不到一拍的图形：整份拒绝，版本号不动"),
+        ("snap", encode("CMD", 8, "SNAP"), "要一份状态快照"),
+        # 预设图形（CIRCLE 等）的轨迹还没做：配置接受，但没有节拍表，
+        # 启动之后焦点原地不动、扫描开关保持 0。这一条就是把现状钉住，
+        # 等相位那一轮做完再改期望值。
+        ("config_circle", cfg(9, shape="CIRCLE", radius_um=20000,
+                              repeat_millihz=40000, level=30),
+         "预设图形：配置通过，轨迹暂不可用"),
+        ("start_preset", encode("CMD", 10, "START"), "启动预设图形：焦点原地不动"),
+        ("stop_preset", encode("CMD", 11, "STOP"), "停止"),
+        ("ping", encode("CMD", 12, "PING"), "探活：只回 ACK"),
+    ]
+
+
 def build_traj_vectors():
     """写出轨迹用例的向量文件，返回给人看的清单。"""
     hdr0_lines, hdr1_lines = [], []
@@ -566,11 +606,26 @@ def main():
         print("  %-16s %s  点 %-3d 笔 %-2d 行 %-3d 一圈 %-6d 拍  抬笔 %-4d 拍  样本 %d"
               % (name, "通过" if ok else "拒绝", npt, nst, nmv, laps, blank, nsmp))
 
+    # ---- 端到端（整条通路，对着串口线）----
+    tp = bytearray()
+    t_lines = []
+    top_cases = build_top_cases(device)
+    for name, frame, note in top_cases:
+        offset = len(tp)
+        tp += frame
+        t_lines.append("%03X %03X" % (offset, len(frame)))
+    write_bytes(VECTOR_DIR / "top_packets.mem", bytes(tp))
+    (VECTOR_DIR / "top_plan.mem").write_text("\n".join(t_lines) + "\n", encoding="ascii")
+    print("端到端：%d 条报文，%d 字节" % (len(t_lines), len(tp)))
+    for name, frame, note in top_cases:
+        print("  %-16s %3d 字节  %s" % (name, len(frame), note))
+
     summary = {"frame_cases": len(plan_lines), "field_cases": len(fplan_lines),
                "cmd_cases": len(cplan_lines),
                "tx_expect": len(tx_lines),
                "scan_cases": len(s_lines),
                "traj_cases": len(traj_list),
+               "top_cases": len(t_lines),
                "field_order": ["offset", "bytes", "expect_ok", "expect_verb",
                                "expect_err", "expect_seen_mask"]}
     (VECTOR_DIR / "cases.json").write_text(

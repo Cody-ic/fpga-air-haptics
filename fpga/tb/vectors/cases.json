@@ -5,6 +5,7 @@
   "tx_expect": 3,
   "scan_cases": 9,
   "traj_cases": 8,
+  "top_cases": 12,
   "field_order": [
     "offset",
     "bytes",

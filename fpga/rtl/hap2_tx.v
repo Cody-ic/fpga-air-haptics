@@ -34,6 +34,9 @@ module hap2_tx #(
     input  wire [15:0] reply_seq,
     input  wire [3:0]  reply_code,
     input  wire        reply_want_state,
+    // 既不是 ACK 也不是 ERR，只是一份「主动上报」的 STATE（没人下命令也要回，
+    // 上位机靠它刷新界面，超过 2.5 秒收不到就会判状态过期）
+    input  wire        state_push,
 
     // ---- 设备状态（状态帧用）----
     input  wire [31:0] boot_id,
@@ -60,21 +63,29 @@ module hap2_tx #(
     input  wire [31:0] fx_um,
     input  wire [31:0] fy_um,
     input  wire [31:0] fz_um,
+    input  wire        scan_on,        // 这一刻是否在扫描（协议要求原样回传）
+    input  wire [5:0]  stroke_index,   // 当前第几笔
 
     // ---- 相位表读口（同步读，一拍出数据）----
     output reg  [7:0]  phase_addr,
-    input  wire [7:0]  phase_data
+    input  wire [7:0]  phase_data,
+
+    // ---- 草图原文读口（同步读）：STATE 里的 scan_paths 要原样回传 ----
+    output reg  [11:0] txt_addr,
+    input  wire [7:0]  txt_data,
+    input  wire [12:0] txt_len,        // 原文长度
+    input  wire        txt_valid       // 0 = 还没收到过配置，按 NONE 回
 );
 
     // ---------------- 报文明细 ----------------
     // 字符串宽度必须和字符数完全相等：Verilog 里字符串是右对齐的，
     // 宽度写错会整体错位。这里每个模板都以换行结尾，发到换行就算一帧结束。
-    localparam [8*314-1:0] T_HELLO =
-        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
+    localparam [8*325-1:0] T_HELLO =
+        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
     localparam [8*31-1:0]  T_ACK   = "HAP3 ACK @ ~ applied=1 rev=@*#\n";
     localparam [8*22-1:0]  T_ERR   = "HAP3 ERR @ ~ code=^*#\n";
-    localparam [8*372-1:0] T_STATE =
-        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=1 stroke_index=0 simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=NONE blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
+    localparam [8*369-1:0] T_STATE =
+        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
 
     // 设备声明的固定能力（这些目前是定值，将来由板级配置决定）
     localparam [31:0] HB_MS         = 32'd3000;
@@ -136,6 +147,9 @@ module hap2_tx #(
     localparam [1:0] F_ACK   = 2'd1;
     localparam [1:0] F_ERR   = 2'd2;
     localparam [1:0] F_STATE = 2'd3;
+    localparam [1:0] K_ACK   = 2'd0;
+    localparam [1:0] K_ERR   = 2'd1;
+    localparam [1:0] K_STATE = 2'd2;    // 只发一份状态，不带应答
 
     // 状态机
     localparam [3:0] S_IDLE     = 4'd0;
@@ -164,6 +178,7 @@ module hap2_tx #(
     localparam [7:0] P_SHAPE = "$";
     localparam [7:0] P_REASON= "!";
     localparam [7:0] P_PHASE = "|";
+    localparam [7:0] P_TXT   = "?";        // 草图原文（scan_paths）整串插入
 
     // ---------------- 模板与取值表 ----------------
     function [7:0] tmpl_byte;
@@ -173,10 +188,10 @@ module hap2_tx #(
             // 字符串在向量里靠高位存放：第 0 个字符在最高字节，
             // 所以要从最高位往下数，用「-:」而不是「+:」。
             case (sel)
-                F_HELLO: tmpl_byte = T_HELLO[8*314-1 - 8*pos -: 8];
+                F_HELLO: tmpl_byte = T_HELLO[8*325-1 - 8*pos -: 8];
                 F_ACK:   tmpl_byte = T_ACK  [8*31 -1 - 8*pos -: 8];
                 F_ERR:   tmpl_byte = T_ERR  [8*22 -1 - 8*pos -: 8];
-                default: tmpl_byte = T_STATE[8*372-1 - 8*pos -: 8];
+                default: tmpl_byte = T_STATE[8*369-1 - 8*pos -: 8];
             endcase
         end
     endfunction
@@ -213,22 +228,24 @@ module hap2_tx #(
                         5'd1:  value_at = uptime_ms;
                         5'd2:  value_at = {16'h0, revision};
                         5'd3:  value_at = output_on ? 32'd1 : 32'd0;
-                        5'd4:  value_at = cfg_carrier_hz;
-                        5'd5:  value_at = cfg_phase_steps;
-                        5'd6:  value_at = cfg_cx_um;
-                        5'd7:  value_at = cfg_cy_um;
-                        5'd8:  value_at = cfg_z_um;
-                        5'd9:  value_at = cfg_radius_um;
-                        5'd10: value_at = cfg_repeat_millihz;
-                        5'd11: value_at = cfg_mod_hz;
-                        5'd12: value_at = cfg_level;
-                        5'd13: value_at = cfg_path_closed;
-                        5'd14: value_at = cfg_blank_us;     // HAP3 新增：段间跳转时长
-                        5'd15: value_at = {24'h0, hw_rows};
-                        5'd16: value_at = {24'h0, hw_cols};
-                        5'd17: value_at = hw_pitch_um;
-                        5'd18: value_at = fx_um;
-                        5'd19: value_at = fy_um;
+                        5'd4:  value_at = scan_on ? 32'd1 : 32'd0;
+                        5'd5:  value_at = {26'h0, stroke_index};
+                        5'd6:  value_at = cfg_carrier_hz;
+                        5'd7:  value_at = cfg_phase_steps;
+                        5'd8:  value_at = cfg_cx_um;
+                        5'd9:  value_at = cfg_cy_um;
+                        5'd10: value_at = cfg_z_um;
+                        5'd11: value_at = cfg_radius_um;
+                        5'd12: value_at = cfg_repeat_millihz;
+                        5'd13: value_at = cfg_mod_hz;
+                        5'd14: value_at = cfg_level;
+                        5'd15: value_at = cfg_path_closed;
+                        5'd16: value_at = cfg_blank_us;     // HAP3 新增：段间跳转时长
+                        5'd17: value_at = {24'h0, hw_rows};
+                        5'd18: value_at = {24'h0, hw_cols};
+                        5'd19: value_at = hw_pitch_um;
+                        5'd20: value_at = fx_um;
+                        5'd21: value_at = fy_um;
                         default: value_at = fz_um;
                     endcase
                 end
@@ -321,7 +338,10 @@ module hap2_tx #(
 
     wire        q_full  = (qcount == QDEPTH);
     wire        q_empty = (qcount == 3'd0);
-    wire [26:0] new_reply = {reply_want_state, reply_code, reply_seq, reply_verb, reply_kind};
+    // state_push 是「只发状态」的入队请求，优先级低于真正的应答
+    wire [1:0]  push_kind = reply_valid ? reply_kind : K_STATE;
+    wire        push_want = reply_valid ? reply_want_state : 1'b0;
+    wire [26:0] new_reply = {push_want, reply_code, reply_seq, reply_verb, push_kind};
     wire [26:0] cur_reply = qmem[rd_ptr];
 
     wire [1:0]  cur_kind = cur_reply[1:0];
@@ -330,7 +350,7 @@ module hap2_tx #(
     wire [3:0]  cur_code = cur_reply[25:22];
     wire        cur_want = cur_reply[26];
 
-    wire        q_push = reply_valid && !q_full;
+    wire        q_push = (reply_valid || state_push) && !q_full;
     wire        q_pop  = (state == S_IDLE) && !q_empty;
 
     reg [9:0]  pos;            // 模板读到第几个字符
@@ -362,6 +382,23 @@ module hap2_tx #(
     reg        num_neg;
 
     reg [8:0]  ph_idx;         // 相位表当前发到第几个通道
+    reg [12:0] tx_idx;         // 草图原文当前发到第几个字节
+    reg        stream_txt;     // 1 = 这一轮「流水插入」的是草图原文，不是相位表
+
+    // 还没收到过配置时，STATE 里的 scan_paths 按 NONE 回
+    function [7:0] none_char;
+        input [3:0] i;
+        begin
+            case (i)
+                4'd0:    none_char = "N";
+                4'd1:    none_char = "O";
+                4'd2:    none_char = "N";
+                default: none_char = "E";
+            endcase
+        end
+    endfunction
+
+    wire [12:0] txt_total = txt_valid ? txt_len : 13'd4;
 
     // 组合取值：模板当前字符、名字表当前字符
     wire [7:0] c  = tmpl_byte(frame_sel, pos);
@@ -450,6 +487,8 @@ module hap2_tx #(
             num_after   <= S_NEXT;
             num_neg     <= 1'b0;
             ph_idx      <= 9'd0;
+            tx_idx      <= 13'd0;
+            stream_txt  <= 1'b0;
             sample      <= 16'd0;
             tx_start    <= 1'b0;
             tx_data     <= 8'h00;
@@ -459,6 +498,7 @@ module hap2_tx #(
             crc_valid   <= 1'b0;
             crc_data    <= 8'h00;
             phase_addr  <= 8'd0;
+            txt_addr    <= 12'd0;
         end else begin
             tx_start  <= 1'b0;
             dec_start <= 1'b0;
@@ -493,10 +533,13 @@ module hap2_tx #(
                         verb_lat   <= cur_verb;
                         code_lat   <= cur_code;
                         want_state <= cur_want;
-                        if (cur_kind == 2'd0) begin
+                        if (cur_kind == K_ACK) begin
                             frame_sel <= (cur_verb == 4'd0) ? F_HELLO : F_ACK;
-                        end else begin
+                        end else if (cur_kind == K_ERR) begin
                             frame_sel <= F_ERR;
+                        end else begin
+                            frame_sel <= F_STATE;      // 主动上报：直接开始一份状态快照
+                            sample    <= sample + 1'b1;
                         end
                         pos       <= 10'd0;
                         num_idx   <= 5'd0;
@@ -556,6 +599,12 @@ module hap2_tx #(
                         end
                         P_PHASE: begin
                             ph_idx <= 9'd0;
+                            stream_txt <= 1'b0;
+                            state  <= S_PH_LOAD;
+                        end
+                        P_TXT: begin
+                            tx_idx <= 13'd0;
+                            stream_txt <= 1'b1;
                             state  <= S_PH_LOAD;
                         end
                         default: begin
@@ -654,19 +703,28 @@ module hap2_tx #(
 
                 // -------- 相位表 --------
                 S_PH_LOAD: begin
-                    phase_addr <= ph_idx[7:0];
+                    // 同一套「流水插入」的机器，既发相位表也发草图原文
+                    if (stream_txt) txt_addr   <= tx_idx[11:0];
+                    else            phase_addr <= ph_idx[7:0];
                     state      <= S_PH_READ;
                 end
 
                 S_PH_READ: begin
-                    // 相位表是同步读：这一拍只是等数据到位，下一拍 phase_data 才有效
+                    // 同步读：这一拍只是等数据到位，下一拍数据才有效
                     state <= S_PH_CONV;
                 end
 
                 S_PH_CONV: begin
-                    dec_value <= {24'h0, phase_data};
-                    dec_start <= 1'b1;
-                    state     <= S_PH_WAIT;
+                    if (stream_txt) begin
+                        // 草图原文是原样的 ASCII，直接发；没收到过配置就回 NONE
+                        lit       <= txt_valid ? txt_data : none_char(tx_idx[3:0]);
+                        ret_state <= S_PH_AFTER;
+                        state     <= S_LIT;
+                    end else begin
+                        dec_value <= {24'h0, phase_data};
+                        dec_start <= 1'b1;
+                        state     <= S_PH_WAIT;
+                    end
                 end
 
                 S_PH_WAIT: begin
@@ -681,7 +739,15 @@ module hap2_tx #(
                 end
 
                 S_PH_AFTER: begin
-                    if (ph_idx + 1'b1 >= phase_count) begin
+                    if (stream_txt) begin
+                        if (tx_idx + 1'b1 >= txt_total) begin
+                            stream_txt <= 1'b0;
+                            state      <= S_NEXT;   // 原文发完，继续模板
+                        end else begin
+                            tx_idx <= tx_idx + 1'b1;
+                            state  <= S_PH_LOAD;
+                        end
+                    end else if (ph_idx + 1'b1 >= phase_count) begin
                         state <= S_NEXT;          // 相位表发完，继续模板
                     end else begin
                         ph_idx    <= ph_idx + 1'b1;
