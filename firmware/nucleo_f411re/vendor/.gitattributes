@@ -1,0 +1,3 @@
+# Preserve unmodified upstream bytes and their published hashes.
+*.h -text -whitespace
+LICENSE* -text

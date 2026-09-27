@@ -669,7 +669,7 @@ class App:
             messagebox.showinfo("选择蓝牙设备", "请先扫描，再选择你们的蓝牙模块。", parent=self.root)
             return
         if not demo and not ble and not self.port_choice.get().strip():
-            messagebox.showinfo("选择串口", "请先选择或输入 FPGA 的 COM 端口。", parent=self.root)
+            messagebox.showinfo("选择串口", "请先选择或输入设备的 COM 端口。", parent=self.root)
             return
         baud = 115200  # Demo has no physical UART and does not use this field.
         if not demo and not ble:
@@ -801,7 +801,7 @@ class App:
 
     def plot_actual(self):
         state = self.state
-        source = "Demo 模拟回读" if state.simulated else "FPGA 数字回读"
+        source = "Demo 模拟回读" if state.simulated else "设备数字回读"
         self._queue_plot("actual", state.config, state.phases, state.focus_mm, state.output,
                          f"{source} · 相位快照 #{state.sample} → 理论声场（非实测）", state.array)
 
@@ -999,7 +999,7 @@ class App:
             if fresh:
                 if self.debug_mode.get():
                     self.source_line.set("DEMO 模拟设备 · 数字状态为模拟值，声场为理论预测" if state.simulated else
-                                         "真实 FPGA 回读 · 仅确认数字输出寄存器状态，不代表换能器实测")
+                                         "设备回读 · 仅确认数字输出状态，不代表换能器实测")
                 else:
                     mode = "设备按键控制" if state.mode == "LOCAL" else "电脑控制"
                     self.source_line.set(f"{'Demo 路径演示' if state.simulated else '设备已连接'} · {status} · {mode}")
@@ -1151,7 +1151,7 @@ class App:
                 writer.writerow(["source","boot","sample","config_rev","state","output","age_s","channel","x_mm","y_mm","phase_code","phase_steps"])
                 age=time.monotonic()-self.received
                 for channel,(xyz,phase) in enumerate(zip(array_coordinates(state.array),state.phases)):
-                    writer.writerow(["DEMO" if state.simulated else "FPGA_DIGITAL_READBACK",state.boot,state.sample,state.revision,
+                    writer.writerow(["DEMO" if state.simulated else "DEVICE_DIGITAL_READBACK",state.boot,state.sample,state.revision,
                                      state.state,int(state.output),round(age,3),channel,xyz[0],xyz[1],phase,state.config.phase_steps])
         except OSError as error:
             messagebox.showerror("导出失败",str(error),parent=self.root)

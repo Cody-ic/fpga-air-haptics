@@ -1,6 +1,8 @@
 # HAP3 设备协议草案（串口／BLE）
 
-更新日期：2026-09-25。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的上位机侧草案，尚未与 FPGA 端共同定稿。客户端与 Demo 已实现，真实固件尚未实现和联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
+更新日期：2026-09-27。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的草案，尚未与 FPGA 端共同定稿。已有 [NUCLEO-F411RE 串口验证固件](../firmware/nucleo_f411re/README.md)，完成编译及宿主机交叉测试，尚未实板联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
+
+F411RE 实现固定 4×4、11 mm、40 kHz、64 级相位；不支持的参数整包拒绝。它要求每次 REMOTE 握手后重新 CONFIG，才允许 START；新增错误码 `CONFIG_REQUIRED`、`SCAN_TOO_FAST`、`DMA_UNDERRUN` 等及可选 `drive_on` 状态字段，具体时序量化与限制见固件说明。上位机保持对其他合法 HAP3 设备的兼容。
 
 HAP3 在实际坐标基础上增加多段路径和关闭输出的跳转，拒绝 HAP1／HAP2 固件，避免旧设备将断开轮廓连起来。旧 JSON 文件可迁移；串口不自动降级。
 

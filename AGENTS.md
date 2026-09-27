@@ -4,7 +4,7 @@
 
 This repository prepares the 2026 FPGA haptic graphics project. `README.md` is the entry point; `设计思路.md` records current architecture; `FPGA赛道选题建议(1).md` preserves historical research. `CLAUDE.md` provides project context.
 
-`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, `ble_transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`; BLE mapping and pending decisions belong in `desktop_app/BLE.md`. HAP3 is a host-side draft, not yet agreed with FPGA firmware. No HDL, PCB, or hardware measurements exist yet.
+`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, `ble_transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`; BLE mapping and pending decisions belong in `desktop_app/BLE.md`. HAP3 remains a draft for FPGA firmware. `hardware/Haptics_4x4_R5_12VDC/` holds the PCB prototype package; `firmware/nucleo_f411re/` implements the STM32 serial/array prototype. No HDL or hardware measurements exist yet.
 
 ## Build, Test, and Development Commands
 
@@ -18,6 +18,8 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
 - `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
 - `rg --files --hidden`: inspect workspace files.
+- `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.
+- `python firmware/nucleo_f411re/tests/test_firmware.py`: native C/Python cross-checks using a host GCC compiler.
 - In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
 - `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
 
