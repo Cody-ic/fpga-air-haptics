@@ -1,4 +1,5 @@
 #include "board.h"
+#include "receiver.h"
 #include "stm32f411xe.h"
 #include <stdio.h>
 
@@ -287,7 +288,11 @@ void board_init(char boot[48])
     IWDG->KR = 0xcccc; IWDG->KR = 0xaaaa;
 }
 
-Hardware board_hardware(void) { return (Hardware){output_start,output_stop,output_readback,uart_send,board_service}; }
+Hardware board_hardware(void)
+{
+    return (Hardware){output_start,output_stop,output_readback,uart_send,board_service,
+                      receiver_start,receiver_poll,receiver_cancel};
+}
 
 void Default_Handler(void)
 {

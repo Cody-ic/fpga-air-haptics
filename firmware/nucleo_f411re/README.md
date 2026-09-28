@@ -1,12 +1,13 @@
 # NUCLEO-F411RE：4×4 阵列验证固件
 
-更新日期：2026-09-28。用 STM32F411RE 暂代 FPGA，连接现有 R5 发射板及电脑上位机。已完成源码、CubeIDE / 命令行编译和软件交叉测试，**尚未烧录实机，未验证声压、温升或触觉效果**。此版本不包含接收板 ADC 采集、BLE 或 FPGA RTL。
+更新日期：2026-09-28。用 STM32F411RE 暂代 FPGA，连接现有 R5 发射板、模拟接收板及电脑上位机。已完成源码、CubeIDE / 命令行编译和软件交叉测试，**尚未烧录实机，未验证声压、温升或触觉效果**。此版本包含接收 ADC 短窗口采集，不包含声场闭环、BLE 或 FPGA RTL。
 
 ## 1. 功能与边界
 
 - 16 路逻辑输出，固定 40 kHz、64 级相位；MCU 根据坐标计算相位并执行扫描。
 - 点、直线、圆、方形、三角形、箭头；支持旧版 64 点路径及最多 32 段、256 点草图。
 - HAP3 双向串口：握手、完整配置、启动、暂停、停止、心跳、状态和相位回读。
+- 接收板 PA0 ADC：400 kS/s、12 位，每次 200 点；上位机显示电压波形与 40 kHz 分量并导出 CSV。
 - 上电关闭输出；配置不完整或不匹配时整包拒绝；远程心跳超时、DMA 错误、供数超时或串口接收错误时关闭输出。
 - 本机声明实际阵列 **4×4、11 mm 间距**。握手后上位机自动采用此几何，不接受伪装成 8×8 的配置。
 
@@ -79,6 +80,26 @@ R5 的 CN1-2、19、20 留空。R5 从 XT30 单独输入限流 12 V；Nucleo 从
 
 PC0/PC1 使用默认模拟脚路由：SB51/SB56 接通，SB46/SB52 断开；若板子以前改过 I²C 焊桥，应先恢复。PB3/SWO、PA13/PA14/SWD 均未占用。本工程未使用 F411RE 封装没有引出的 PB11。
 
+### 4.1 接收板 → Nucleo
+
+适配 2026-09-28 的 MA40S4R / TLV9064 接收前端。保持 R13=2.4 kΩ、R17=1 kΩ，软件默认按 **3.4 倍**还原末级分压前的等效交流幅值。
+
+| 接收板 | Nucleo | 说明 |
+|---|---|---|
+| U4-2，ADCV_P | A0 / PA0，CN8-1 | ADC1_IN0；不与 16 路发射输出冲突 |
+| U4-3 或 U4-4，GND | GND，例如 CN6-6 | 信号共地，短线连接 |
+| CN1 电源 | 独立限流 5 V | 不能接发射板 12 V |
+
+先确认接收板电压，再连接 PA0；ADC 输入应在 GND～VDDA 内。按标称 3.3 V 供电计算，静态 ADCV_P≈0.485 V，理想输出上限≈0.971 V。Nucleo ADC 参考取自身 VDDA，电脑端默认 3300 mV，可按实测电压修改。
+
+电脑选真实串口 115200，打开 **调试模式 → 实测数据 → 接收波形**，点击“采集一次”或“连续查看”。未发送图形也能采集静态电压和噪声；旧固件不支持时按钮置灰。无板时可用 Demo 体验相同流程，波形明确标为合成数据。
+
+TIM2 TRGO 触发 ADC，DMA2 Stream0/Channel0 单次搬运 400 B；发射仍用 TIM1 和 DMA2 Stream1/5。ADC 时钟 16 MHz，采样 15 周期，加 12 位转换共 27 周期，低于 2.5 µs 触发间隔。DDS=0 限制 DMA 请求数，完成后前台读取固定缓存。两者仍共享 DMA 总线，须实板确认并发供数余量。
+
+每帧只有 0.5 ms（标称 40 kHz 的 20 周期），GUI 每秒最多请求两次，帧间未采样。去直流后用 40 kHz 正交投影估计该频点幅值，不代表整个图形的时间平均声压。`tx_running` 仅为窗口开始时的运行状态，不保证整个窗口都在发射；门控、段间空白或停止会改变波形。初测用固定点、无调制，先低等级确认不削顶，再逐步增加输出。
+
+软件不能恢复未利用的 ADC 量程、前级削顶或带外混叠，不能将电压直接标成 Pa / dB SPL。采样失败会报告错误，原有发射故障停机逻辑继续有效。
+
 ## 5. 本地按键
 
 - B1（蓝色 USER/PC13）：短按停止，所有模式有效；按住约一秒，在停止状态切换 LOCAL/REMOTE。
@@ -109,18 +130,23 @@ python -m unittest discover -s desktop_app/tests -v
 
 首次烧录先不接 12 V：检查握手、配置确认、16 个 MCU 引脚的频率/相位，以及 STOP、暂停、B1 和拔线后停止。再接限流供电的 R5，检查各 OUT 的电压和波形。尤其检查两组 GPIO 的偏差、最大路径时是否出现供数超时，再进行声学测试。
 
+接收链路先采集接地输入和已知直流，再输入带正偏置的已知幅度 40 kHz 小信号，和示波器比较。接入接收板后确认静态电压，并检查 U6/STAGE1、U7/STAGE2 是否削顶；最大路径播放并连续采样时检查 `render_max_cycles`、STOP 和断线响应。分压后没有触及 ADC 电源轨，不能证明分压前未饱和。
+
+ADC 软件测试包含寄存器替身检查、采样超时/错误、停止优先和完整 C 协议的 115200 回传带宽测试；不模拟真实总线时序。
+
 ## 8. 文件组织
 
 - `src/haptics.c`：HAP3 帧、原子配置、状态机与回传。
 - `src/geometry.c`：轨迹、相位计算、门控和 DMA 数据生成。
 - `src/board.c`：时钟、USART2、双路 DMA、启动序号、按键和看门狗。
+- `src/receiver.c`：PA0 ADC、TIM2 触发与 DMA2 Stream0 有限窗口采集。
 - `src/startup.S`、`stm32f411re.ld`：启动向量、内存布局；`src/main.c`：前台调度。
 - `.project`、`.cproject`、`haptics_f411re Debug.launch`：CubeIDE 工程和板载 ST-LINK 调试配置。
 - `tests/`：仅宿主机测试，不编入 MCU；`build/`、`Debug/`、`.runtime/` 不提交 Git。
 
 ## 9. 技术资料
 
-资料核对日期：2026-09-27。
+资料核对日期：2026-09-28。
 
 - [ST UM1724 Rev 17（2025-09）](https://www.st.com/resource/en/user_manual/um1724-stm32-nucleo64-boards-mb1136-stmicroelectronics.pdf)：板载 ST-LINK/VCP、焊桥、Table 29 Morpho 引脚。
 - [ST RM0383](https://www.st.com/resource/en/reference_manual/dm00119316-stm32f411xce-advanced-armbased-32bit-mcus-stmicroelectronics.pdf)：RCC、TIM1、DMA2 请求映射、GPIO、USART 和 Flash 控制器。
@@ -128,4 +154,5 @@ python -m unittest discover -s desktop_app/tests -v
 - [ST MB1136 C04 原理图](https://www.st.com/resource/en/schematic_pack/mb1136-default-c04_schematic.pdf)：供电、B1、ST-LINK 与目标 MCU 的连接。
 - [本仓库 R5 板](../../hardware/Haptics_4x4_R5_12VDC/README.md)及其 EPRO：11 mm 阵列间距、CN1 与 OUT 空间顺序。
 - [HAP3 草案](../../desktop_app/PROTOCOL.md)：上位机应用层协议；FPGA 端仍待实现与共同定稿。
+- [接收板调整建议与资料](../../hardware/receiver/PCB调整建议.md)：原板分压、接口、封装核验和仍需硬件处理的问题。
 - [第三方源码清单](vendor/SOURCES.md)：CMSIS 固定版本、来源和许可证。

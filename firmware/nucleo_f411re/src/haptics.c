@@ -249,9 +249,13 @@ static void process(Device *d)
         /* A new handshake is a new control session, never an implicit resume. */
         if (!d->local) stop(d,"NONE");
         d->configured = false; d->connected = true; d->last_ping_ms = d->now_ms;
+        if (d->capture_seq && d->hw.capture_cancel) d->hw.capture_cancel();
+        d->capture_seq = 0;
         begin("ACK",(unsigned)seq,verb);
         append(" proto=3 device=NUCLEO-F411RE boot=%s simulated=0 hb_ms=3000 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS max_rows=4 max_cols=4 max_channels=16 max_nodes=64 max_scan_points=256 max_strokes=32",d->boot);
         array_fields();
+        if (d->hw.capture_start && d->hw.capture_poll && d->hw.capture_cancel)
+            append(" adc_capture=1");
         append(" x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000 z_min_um=20000 z_max_um=300000 carrier_hz=40000 phase_steps=64 focus_hz=4000");
         send_frame(d); snapshot(d); return;
     }
@@ -272,6 +276,21 @@ static void process(Device *d)
         else if (n != 1 || !v || (strcmp(v,"LOCAL") && strcmp(v,"REMOTE"))) error = "BAD_MODE";
         else { d->local = !strcmp(v,"LOCAL"); d->last_ping_ms = d->now_ms; }
     } else if (n) error = "BAD_FIELDS";
+    else if (!strcmp(verb,"CAPTURE")) {
+        if (!d->hw.capture_start || !d->hw.capture_poll || !d->hw.capture_cancel)
+            error = "UNSUPPORTED";
+        else if (d->capture_seq) error = "ADC_BUSY";
+        else if (d->capture_ever && d->now_ms-d->capture_last_ms < 200)
+            error = "ADC_RATE_LIMIT";
+        else if (!d->hw.capture_start()) error = "ADC_START_FAILED";
+        else {
+            d->capture_seq = (uint16_t)seq; d->capture_started_ms = d->now_ms;
+            d->capture_last_ms = d->now_ms; d->capture_ever = true;
+            d->capture_revision = d->revision; d->capture_tx_running = d->state == RUNNING;
+            d->capture_data = NULL; d->capture_error = NULL; d->capture_done = false;
+            return; /* Reply only after the complete DMA window; never block control. */
+        }
+    }
     else if (!strcmp(verb,"PING")) d->last_ping_ms = d->now_ms;
     else if (!strcmp(verb,"STOP")) stop(d,"NONE");
     else if (!strcmp(verb,"START")) {
@@ -311,6 +330,27 @@ void hap_poll(Device *d, uint64_t now_ms, bool allow_telemetry)
     d->now_ms = now_ms;
     if (!d->local && (d->state == RUNNING || d->state == PAUSED) && now_ms-d->last_ping_ms >= 3000)
         stop(d,"HEARTBEAT_TIMEOUT");
+    if (d->capture_seq && !d->capture_done) {
+        int result = d->hw.capture_poll(&d->capture_data);
+        if (result < 0) d->capture_error = "ADC_ERROR";
+        else if (!result && now_ms-d->capture_started_ms >= 20) {
+            d->hw.capture_cancel(); d->capture_error = "ADC_TIMEOUT";
+        }
+        if (result || d->capture_error) d->capture_done = true;
+    }
+    if (allow_telemetry && d->capture_seq && d->capture_done) {
+        if (d->capture_error) {
+            begin("ERR",d->capture_seq,"CAPTURE"); append(" code=%s",d->capture_error);
+        } else {
+            begin("ACK",d->capture_seq,"CAPTURE");
+            append(" boot=%s rev=%lu uptime_ms=%llu simulated=0 tx_running=%u pin=PA0 fs_hz=%u bits=12 n=%u raw=",
+                   d->boot,(unsigned long)d->capture_revision,(unsigned long long)d->capture_started_ms,
+                   d->capture_tx_running,HAP_ADC_HZ,HAP_ADC_SAMPLES);
+            for (unsigned i=0; i<HAP_ADC_SAMPLES; ++i) append("%s%u",i?",":"",d->capture_data[i]);
+        }
+        send_frame(d); d->capture_seq = 0;
+        return; /* One outbound frame per idle opportunity; state gets the next one. */
+    }
     if (allow_telemetry && d->connected && now_ms-d->last_state_ms >= telemetry_interval_ms)
         snapshot(d);
 }

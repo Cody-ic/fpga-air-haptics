@@ -16,6 +16,7 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python -m desktop_app --demo`: connect a simulated device, initially idle.
 - `python -m unittest discover -s desktop_app/tests -v`: run automated checks.
 - `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
+- `python -m desktop_app.tests.receiver_gui_smoke`: check the debug ADC waveform panel, Demo source labels and CSV export; `receiver.py` analyzes voltage windows and `receiver_panel.py` owns this UI.
 - `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
 - `rg --files --hidden`: inspect workspace files.
 - `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.

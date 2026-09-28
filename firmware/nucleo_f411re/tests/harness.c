@@ -1,6 +1,7 @@
 /* Host-only test adapter. Not linked into the MCU image. */
 #include "haptics.h"
 #include <string.h>
+#include <math.h>
 #ifdef _WIN32
 #define API __declspec(dllexport)
 #else
@@ -12,6 +13,26 @@ static char sent[65536];
 static size_t sent_size;
 static bool active, start_ok;
 static uint64_t started, resume_us;
+static uint16_t captured[HAP_ADC_SAMPLES];
+static bool capturing;
+static int capture_mode;
+static bool capture_start(void)
+{
+    if (capturing || capture_mode == -2) return false;
+    capturing = true;
+    for (unsigned i=0;i<HAP_ADC_SAMPLES;++i)
+        captured[i]=(uint16_t)lroundf(602+100*sinf(6.28318530718f*i/10));
+    return true;
+}
+static int capture_poll(const uint16_t **out)
+{
+    if (!capture_mode) return 0;
+    capturing = false; *out = captured;
+    return capture_mode < 0 ? -1 : 1;
+}
+static void capture_cancel(void) { capturing = false; }
+API void test_capture_mode(int mode) { capture_mode = mode; }
+API int test_capturing(void) { return capturing; }
 
 static bool start(const Config *c, uint64_t us)
 {
@@ -36,7 +57,8 @@ static void send(const char *p, size_t n)
 API void test_init(void)
 {
     sent_size = 0; sent[0] = 0; start_ok = true;
-    hap_init(&device,(Hardware){start,stop,readback,send,NULL},"test-boot-1");
+    capturing = false; capture_mode = 1;
+    hap_init(&device,(Hardware){start,stop,readback,send,NULL,capture_start,capture_poll,capture_cancel},"test-boot-1");
 }
 API const char *test_take(void) { sent[sent_size]=0; sent_size=0; return sent; }
 API void test_feed(const uint8_t *data, size_t n, uint64_t now)

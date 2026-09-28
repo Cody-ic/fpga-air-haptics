@@ -18,6 +18,7 @@ sys.path.insert(0, str(REPO))
 from desktop_app.model import ArraySpec, Config, focus_phases, trajectory_sample
 from desktop_app.protocol import Snapshot, decode, encode
 from desktop_app.controller import Session
+from desktop_app.receiver import Capture
 
 
 class Sample(ct.Structure):
@@ -38,6 +39,7 @@ class FirmwareTests(unittest.TestCase):
             compiler = "D:/STEdgeAI/4.0/Utilities/windows/mingw64/bin/gcc.exe"
         if not compiler or not Path(compiler).exists():
             raise RuntimeError("Set HOST_CC to a native GCC compiler (not arm-none-eabi-gcc)")
+        cls.compiler = compiler
         output = ROOT / "build"
         output.mkdir(exist_ok=True)
         library = output / ("test_core.dll" if os.name == "nt" else "test_core.so")
@@ -115,6 +117,62 @@ class FirmwareTests(unittest.TestCase):
         self.assertEqual(self.command("CONFIG", **missing)[0].kind, "ERR")
         self.command("START")
         self.assertEqual(self.command("CONFIG", **base)[0].fields["code"], "BUSY")
+
+    def test_adc_capture_roundtrip_and_control_priority(self):
+        self.assertEqual(self.command("HELLO")[0].fields["adc_capture"], "1")
+        self.configure()
+        self.command("START")
+        self.assertEqual(self.command("CAPTURE"), [])
+        request_seq = self.seq
+        self.assertEqual(self.command("CAPTURE")[0].fields["code"], "ADC_BUSY")
+        self.assertTrue(self.dll.test_active())
+        self.command("STOP")
+        self.assertFalse(self.dll.test_active())
+        self.dll.test_poll(1)
+        frame = decode(self.dll.test_take())
+        self.assertEqual((frame.kind, frame.seq, frame.verb), ("ACK", request_seq, "CAPTURE"))
+        window = Capture.parse(frame.fields)
+        self.assertTrue(window.tx_running)  # State at capture start, not after STOP.
+        self.assertFalse(window.simulated)
+        self.assertEqual(len(window.raw), 200)
+        self.assertAlmostEqual(window.analyze()["mean_mv"], 602*3300/4095, places=4)
+        self.assertAlmostEqual(window.analyze()["peak40_mv"], 100*3300/4095, delta=.5)
+        self.assertEqual(self.command("CAPTURE")[0].fields["code"], "ADC_RATE_LIMIT")
+        self.now=250
+        self.assertEqual(self.command("CAPTURE", bad=1)[0].fields["code"], "BAD_FIELDS")
+        self.assertEqual(self.command("CAPTURE"), [])
+
+    def test_adc_failures_and_new_handshake_cancel(self):
+        self.command("HELLO")
+        self.dll.test_capture_mode(-2)
+        self.assertEqual(self.command("CAPTURE")[0].fields["code"], "ADC_START_FAILED")
+        self.dll.test_capture_mode(0)
+        self.command("CAPTURE")
+        self.dll.test_poll(20)
+        frames=[decode(line) for line in self.dll.test_take().splitlines()]
+        self.assertEqual(frames[0].fields["code"], "ADC_TIMEOUT")
+        self.assertFalse(self.dll.test_capturing())
+        self.now=250
+        self.dll.test_capture_mode(-1)
+        self.command("CAPTURE")
+        self.dll.test_poll(251)
+        self.assertEqual(decode(self.dll.test_take()).fields["code"], "ADC_ERROR")
+        self.now=500
+        self.dll.test_capture_mode(0)
+        self.command("CAPTURE")
+        self.assertTrue(self.dll.test_capturing())
+        self.command("HELLO")
+        self.assertFalse(self.dll.test_capturing())
+        self.dll.test_poll(521)
+        self.assertNotIn(b"CAPTURE", self.dll.test_take())
+
+    def test_receiver_driver_registers(self):
+        executable = "build/receiver_register_test" + (".exe" if os.name == "nt" else "")
+        subprocess.run([self.compiler,"-std=c11","-Wall","-Wextra","-Werror",
+                        "-Wno-int-to-pointer-cast","-DRECEIVER_REGISTER_TEST","-Iinclude",
+                        "-Ivendor","-Itests","src/receiver.c","tests/receiver_register_test.c",
+                        "-o",executable],cwd=ROOT,check=True)
+        subprocess.run([str(ROOT/executable)],cwd=ROOT,check=True)
 
     def test_crc_corruption_oversize_and_fragmentation(self):
         self.configure()
@@ -320,6 +378,14 @@ class FirmwareTests(unittest.TestCase):
             state = event(lambda e:e['kind']=='state' and e['state'].revision==1)['state']
             self.assertEqual(state.config,config)
             session.command('START')
+            event(lambda e:e['kind']=='state' and e['state'].state=='RUNNING')
+            self.assertIn('ADC_CAPTURE', ready['capabilities'])
+            session.command('CAPTURE')
+            capture = event(lambda e:e['kind']=='capture')['capture']
+            self.assertFalse(capture.simulated)
+            self.assertTrue(capture.tx_running)
+            self.assertEqual(capture.revision, 1)
+            self.assertEqual(len(capture.raw), 200)
             event(lambda e:e['kind']=='state' and e['state'].state=='RUNNING')
             session.command('PAUSE')
             event(lambda e:e['kind']=='state' and e['state'].state=='PAUSED')

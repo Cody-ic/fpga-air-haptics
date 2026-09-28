@@ -14,6 +14,8 @@
 #define HAP_WORDS (HAP_CYCLES * HAP_STEPS)
 #define HAP_MASK_B 0x01f7u
 #define HAP_MASK_C 0x00ffu
+#define HAP_ADC_SAMPLES 200
+#define HAP_ADC_HZ 400000
 
 typedef enum { POINT, LINE_X, LINE_Y, CIRCLE, SQUARE, TRIANGLE, ARROW, CUSTOM } Shape;
 typedef enum { IDLE, RUNNING, PAUSED, FAULT } State;
@@ -48,6 +50,9 @@ typedef struct {
     bool (*readback)(Sample *);
     void (*send)(const char *, size_t);
     void (*service)(void); /* Maintain DMA during long CRC/serialization work. */
+    bool (*capture_start)(void);
+    int (*capture_poll)(const uint16_t **); /* 0 pending, 1 complete, -1 failed. */
+    void (*capture_cancel)(void);
 } Hardware;
 
 typedef struct {
@@ -63,6 +68,12 @@ typedef struct {
     char line[HAP_LINE + 1];
     size_t used;
     bool dropping;
+    uint16_t capture_seq;
+    uint32_t capture_revision;
+    uint64_t capture_started_ms, capture_last_ms;
+    const uint16_t *capture_data;
+    const char *capture_error;
+    bool capture_tx_running, capture_done, capture_ever;
 } Device;
 
 void config_default(Config *);

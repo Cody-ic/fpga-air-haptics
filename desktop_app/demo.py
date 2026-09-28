@@ -3,6 +3,7 @@
 from dataclasses import replace
 import time
 import uuid
+import math
 
 from .model import (ArraySpec, Config, Workspace, SHAPES, MAX_PATH_POINTS,
                     MAX_SCAN_POINTS, MAX_STROKES, focus_phases, trajectory_sample)
@@ -27,6 +28,7 @@ class DemoDevice:
         self.elapsed = 0.0
         self.started = self.birth
         self.connected = False
+        self.last_capture = -1.0
 
     def _play_time(self):
         return self.elapsed + (self.clock() - self.started if self.state == "RUNNING" else 0)
@@ -58,13 +60,28 @@ class DemoDevice:
                 self.connected = True
                 self.last_ping = self.clock()
                 return [encode("ACK", frame.seq, verb, proto=VERSION, device="DEMO-FPGA",
-                               boot=self.boot, simulated=1, hb_ms=3000,
+                               boot=self.boot, simulated=1, hb_ms=3000, adc_capture=1,
                                caps="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS",
                                max_rows=16, max_cols=16, max_channels=256, max_nodes=MAX_PATH_POINTS,
                                max_scan_points=MAX_SCAN_POINTS, max_strokes=MAX_STROKES,
                                **self.array.wire(), **self.workspace.wire()), self.snapshot()]
             if not self.connected:
                 raise ValueError("HANDSHAKE_REQUIRED")
+            if verb == "CAPTURE":
+                if fields:
+                    raise ValueError("BAD_FIELDS")
+                now = self.clock()
+                if now-self.last_capture < .2:
+                    raise ValueError("ADC_RATE_LIMIT")
+                self.last_capture = now
+                # Illustrative signal only; not an acoustic simulation or measurement.
+                amplitude = (180*self.config.level/100 if self.state == "RUNNING" else 0)
+                raw = [round(602+amplitude*math.sin(2*math.pi*i/10)+2*math.sin(i*1.7))
+                       for i in range(200)]
+                return [encode("ACK", frame.seq, verb, boot=self.boot, rev=self.revision,
+                               uptime_ms=int((now-self.birth)*1000), simulated=1,
+                               tx_running=int(self.state == "RUNNING"), pin="PA0", fs_hz=400000,
+                               bits=12, n=200, raw=",".join(map(str, raw)))]
             if verb == "PING":
                 self.last_ping = self.clock()
             elif verb == "STOP":
