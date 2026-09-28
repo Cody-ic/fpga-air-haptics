@@ -29,6 +29,7 @@ from .sketch_editor import SketchEditor
 from .sketch import Sketch
 from .playback import PlaybackPanel
 from .presets import PresetPreview
+from .receiver_panel import ReceiverPanel
 from .transport import available_ports
 
 if sys.platform == "win32":
@@ -499,6 +500,14 @@ class App:
         ttk.Label(self.device_details, textvariable=self.workspace_line, wraplength=650, style="Muted.TLabel").pack(anchor="w")
 
     def _measurement_tab(self, parent):
+        self.measured_tab = parent
+        self.measurement_tabs = ttk.Notebook(parent)
+        self.measurement_tabs.pack(fill="both", expand=True)
+        self.receiver_panel = ReceiverPanel(self.measurement_tabs, self.request_capture)
+        scan_tab = ttk.Frame(self.measurement_tabs)
+        self.measurement_tabs.add(self.receiver_panel, text="接收波形")
+        self.measurement_tabs.add(scan_tab, text="空间扫描 CSV")
+        parent = scan_tab
         top = ttk.Frame(parent, padding=10)
         top.pack(fill="x")
         ttk.Button(top, text="导入扫描 CSV", command=self.import_measurement).pack(side="left")
@@ -513,6 +522,10 @@ class App:
         self.measurement_canvas = FigureCanvasTkAgg(self.measurement_figure, parent)
         self.measurement_canvas.get_tk_widget().pack(fill="both",expand=True)
         self.measurement_colorbar = None
+
+    def request_capture(self):
+        return bool(self.ready and self.session and "ADC_CAPTURE" in self.capabilities
+                    and self.session.command("CAPTURE"))
 
     def set_config(self, config, document=None):
         config.validate()
@@ -669,7 +682,7 @@ class App:
             messagebox.showinfo("选择蓝牙设备", "请先扫描，再选择你们的蓝牙模块。", parent=self.root)
             return
         if not demo and not ble and not self.port_choice.get().strip():
-            messagebox.showinfo("选择串口", "请先选择或输入 FPGA 的 COM 端口。", parent=self.root)
+            messagebox.showinfo("选择串口", "请先选择或输入设备的 COM 端口。", parent=self.root)
             return
         baud = 115200  # Demo has no physical UART and does not use this field.
         if not demo and not ble:
@@ -687,6 +700,7 @@ class App:
         self.generation += 1
         self.state, self.received, self.ready, self.busy = None, 0.0, False, False
         self.hardware, self.workspace, self.capabilities = None, None, set()
+        self.receiver_panel.reset()
         self.await_revision, self.await_sample, self.pending_verb = None, None, None
         self.await_verb = self.pending_config = self.confirmed_config = None
         self.mute.set(False)
@@ -801,7 +815,7 @@ class App:
 
     def plot_actual(self):
         state = self.state
-        source = "Demo 模拟回读" if state.simulated else "FPGA 数字回读"
+        source = "Demo 模拟回读" if state.simulated else "设备数字回读"
         self._queue_plot("actual", state.config, state.phases, state.focus_mm, state.output,
                          f"{source} · 相位快照 #{state.sample} → 理论声场（非实测）", state.array)
 
@@ -876,8 +890,10 @@ class App:
                         self.await_verb = verb
                         self.await_sample = event["after_sample"]
                         self.await_revision = int(event["fields"]["rev"])
-                    if verb not in ("PING", "HELLO"):
+                    if verb not in ("PING", "HELLO", "CAPTURE"):
                         self.status_line.set("设备已接收，正在确认状态…")
+                elif kind == "capture":
+                    self.receiver_panel.accept(event["capture"], event["when"])
                 elif kind == "state":
                     self.state, self.received = event["state"], event["when"]
                     if (self.await_sample is not None and self.state.sample > self.await_sample
@@ -895,6 +911,8 @@ class App:
                                               "START": "设备已开始播放。", "PAUSE": "设备已暂停。",
                                               "STOP": "设备已停止。"}.get(completed, "设备已确认。"))
                 elif kind in ("error", "rejected"):
+                    if event.get("verb") == "CAPTURE":
+                        self.receiver_panel.reject(event.get("text", "采样失败"))
                     if kind == "error" or event.get("verb") == self.pending_verb:
                         self.busy = False
                         self.pending_verb = None
@@ -938,6 +956,10 @@ class App:
         self.update_file_line()
         alive = bool(self.session and self.session.is_alive())
         fresh = bool(self.ready and self.state and time.monotonic() - self.received < 1.6)
+        self.receiver_panel.tick(fresh, "ADC_CAPTURE" in self.capabilities,
+                                 self.debug_mode.get() and self.tabs.select() == str(self.measured_tab)
+                                 and self.measurement_tabs.select() == str(self.receiver_panel),
+                                 blocked=self.busy)
         remote = fresh and self.state.mode == "REMOTE"
         idle = fresh and self.state.state == "IDLE"
         free = not self.busy and self.await_revision is None
@@ -999,7 +1021,7 @@ class App:
             if fresh:
                 if self.debug_mode.get():
                     self.source_line.set("DEMO 模拟设备 · 数字状态为模拟值，声场为理论预测" if state.simulated else
-                                         "真实 FPGA 回读 · 仅确认数字输出寄存器状态，不代表换能器实测")
+                                         "设备回读 · 仅确认数字输出状态，不代表换能器实测")
                 else:
                     mode = "设备按键控制" if state.mode == "LOCAL" else "电脑控制"
                     self.source_line.set(f"{'Demo 路径演示' if state.simulated else '设备已连接'} · {status} · {mode}")
@@ -1151,7 +1173,7 @@ class App:
                 writer.writerow(["source","boot","sample","config_rev","state","output","age_s","channel","x_mm","y_mm","phase_code","phase_steps"])
                 age=time.monotonic()-self.received
                 for channel,(xyz,phase) in enumerate(zip(array_coordinates(state.array),state.phases)):
-                    writer.writerow(["DEMO" if state.simulated else "FPGA_DIGITAL_READBACK",state.boot,state.sample,state.revision,
+                    writer.writerow(["DEMO" if state.simulated else "DEVICE_DIGITAL_READBACK",state.boot,state.sample,state.revision,
                                      state.state,int(state.output),round(age,3),channel,xyz[0],xyz[1],phase,state.config.phase_steps])
         except OSError as error:
             messagebox.showerror("导出失败",str(error),parent=self.root)
