@@ -44,4 +44,6 @@ Use focused imperative messages, consistent with `docs: add system design plan`.
 
 ## Project Constraints
 
+Receiver hardware targets the final FPGA system; the F411 is a temporary validation platform. Preserve its divider and analog front end, adapting firmware and host software first. Do not redesign hardware merely to fill the MCU ADC range; justify any circuit change against measured problems and the final FPGA acquisition interface. Keep assembly and labeling checks separate from circuit redesign.
+
 Tang Mega 60K is selected; hardware starts at 4×4 then expands to 8×8. Drawings use arbitrary coordinates, never emitter-grid indices. Current software compiles sketches to at most 32 strokes and 256 coordinates, with one moving focus. Preserve legacy 64-point imports. Keep shared-edge subtraction and output-off transfers explicit; save original geometry, relations and dimensions separately from the wire plan. FPGA owns eventual high-speed scanning; Demo is a slow path demonstration. Preserve all coordinates when switching arrays. Distinguish simulated states, digital readback, theory, and measurements; prioritize single-focus validation before extensions.
