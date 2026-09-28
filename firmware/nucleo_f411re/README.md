@@ -1,6 +1,6 @@
 # NUCLEO-F411RE：4×4 阵列验证固件
 
-更新日期：2026-09-27。用 STM32F411RE 暂代 FPGA，连接现有 R5 发射板及电脑上位机。已完成源码、ARM 编译和软件交叉测试，**尚未烧录实机，未验证声压、温升或触觉效果**。此版本不包含接收板 ADC 采集、BLE 或 FPGA RTL。
+更新日期：2026-09-28。用 STM32F411RE 暂代 FPGA，连接现有 R5 发射板及电脑上位机。已完成源码、CubeIDE / 命令行编译和软件交叉测试，**尚未烧录实机，未验证声压、温升或触觉效果**。此版本不包含接收板 ADC 采集、BLE 或 FPGA RTL。
 
 ## 1. 功能与边界
 
@@ -14,6 +14,19 @@
 
 ## 2. 编译与烧录
 
+### STM32CubeIDE（推荐）
+
+1. 打开 STM32CubeIDE，选择 **File → Import → General → Existing Projects into Workspace**。
+2. 根目录选本文件所在的 `firmware/nucleo_f411re/`，勾选 `haptics_f411re`，不要勾选 Copy projects into workspace，完成导入。
+3. 点击锤子 **Build Project**；工程直接使用 IDE 自带的 Arm GCC，无须先运行 Python 或生成 CubeMX 代码。
+4. 板载 ST-LINK USB 接电脑，在 **Run → Debug Configurations → STM32 C/C++ Application** 选择随工程提供的 `haptics_f411re Debug`，点击 Debug。IDE 自动编译、下载 `Debug/haptics_f411re.elf`，停在 `main`；点击 Resume 运行。无需手工选择 HEX 或另开烧录软件。
+
+目标型号、SWD、ST-LINK、链接脚本和头文件路径已配置。JP5 使用 USB 供电位置，保留 ST-LINK 与目标 MCU 的 SWD 跳帽。调试配置不绑定某个 ST-LINK 序列号；若同时连接多块板，在 Debugger 页选择目标探针。
+
+这是手写 CMSIS 工程，没有 `.ioc`；直接修改 `src/`，不要让 CubeMX 覆盖启动代码或链接脚本。`Debug` 保留 `-O2 -g3`，与扫描性能所需优化一致；部分局部变量可能被优化，单步时也可能跳行。**断点暂停 CPU 不等于关闭 DMA 输出**，检查波形或单步前先停止播放并断开驱动板 12 V。
+
+### 命令行（可选）
+
 在仓库根目录执行：
 
 ```powershell
@@ -22,11 +35,11 @@ python firmware/nucleo_f411re/build.py
 
 脚本自动查找本机 STM32CubeIDE 内的 Arm GNU 工具链；其他环境可设置 `ARM_GCC` 或传入 `--gcc <arm-none-eabi-gcc完整路径>`。构建不需要联网或 CubeMX 生成代码，`vendor/` 已包含所需 CMSIS 头文件及许可证。
 
-产物位于 `build/`：`haptics_f411re.hex` 用于烧录，`.bin` 的加载地址为 `0x08000000`，`.elf` 用于调试；`build-info.json` 记录编译器和文件哈希。构建脚本不会自动烧录。
+产物位于 `build/`：`.elf` 包含调试信息，`.bin` 的加载地址为 `0x08000000`，`.hex` 保留作独立烧录工具的可选输入；`build-info.json` 记录编译器和文件哈希。构建脚本不会自动烧录。
 
-将板载 ST-LINK USB 接到电脑，在 STM32CubeProgrammer 中选择 ST-LINK、连接、下载 `.hex`、校验并复位。JP5 使用 USB 供电位置；保留板载 ST-LINK 与目标 MCU 的 SWD 跳帽。也可用 GNU Make 调用此目录的 `Makefile`。
+也可用 GNU Make 调用此目录的 `Makefile`。IDE 构建和命令行构建分别写入 `Debug/`、`build/`，互不覆盖。
 
-Flash 最后 128 KB（Sector 7，`0x08060000–0x0807FFFF`）专门保存启动序号，不能放置程序或其他参数。每次启动仅写一个 32 位记录，不主动擦除，最多 32768 次；写入失败或用尽会拒绝输出。日常下载 HEX 保留此扇区；全片擦除会重置启动序号，须先断开上位机会话再重新连接。
+Flash 最后 128 KB（Sector 7，`0x08060000–0x0807FFFF`）专门保存启动序号，不能放置程序或其他参数。每次启动仅写一个 32 位记录，不主动擦除，最多 32768 次；写入失败或用尽会拒绝输出。日常下载使用必要扇区擦除，保留此扇区；全片擦除会重置启动序号，须先断开上位机会话再重新连接。
 
 ## 3. 与上位机连接
 
@@ -102,7 +115,8 @@ python -m unittest discover -s desktop_app/tests -v
 - `src/geometry.c`：轨迹、相位计算、门控和 DMA 数据生成。
 - `src/board.c`：时钟、USART2、双路 DMA、启动序号、按键和看门狗。
 - `src/startup.S`、`stm32f411re.ld`：启动向量、内存布局；`src/main.c`：前台调度。
-- `tests/`：仅宿主机测试，不编入 MCU；`build/`、`.runtime/` 不提交 Git。
+- `.project`、`.cproject`、`haptics_f411re Debug.launch`：CubeIDE 工程和板载 ST-LINK 调试配置。
+- `tests/`：仅宿主机测试，不编入 MCU；`build/`、`Debug/`、`.runtime/` 不提交 Git。
 
 ## 9. 技术资料
 

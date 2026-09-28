@@ -2,6 +2,14 @@
 
 日期：2026-09-27。此记录不包含实板烧录或示波器测试。
 
+## CubeIDE 工程复验（2026-09-28）
+
+- 使用本机 STM32CubeIDE 2.1.0 的原生 headless builder，将 `.project` 导入独立临时工作区，编译 `haptics_f411re/Debug`：0 错误、0 警告。项目源码保留在仓库中文路径中。
+- IDE 直接管理 C / 汇编编译及链接，没有调用 Python 构建脚本。目标为 STM32F411RE、硬浮点、`-O2 -g3`，使用现有启动代码及保留 Sector 7 的链接脚本。
+- IDE 产物 `Debug/haptics_f411re.elf` 转为二进制后为 52,280 B，SHA-256 为 `e5a4056afefe27acad4ee5ad9a89816ff362ad83a3591581f459fd0823884bcb`，与既有命令行产物逐字节一致；Flash / RAM 占用相同。
+- 已提供板载 ST-LINK / SWD 的共享 Debug 配置，启动停在 `main`，未连接实板验证下载和断点。`.elf` 内的调试路径与命令行构建不同，不能用整个 ELF 的哈希判断固件机器码是否相同。
+- 本次只增加 IDE 配置和文档，固件 C / 汇编源码未变；沿用以下已完成的软件测试记录。
+
 ## 已执行
 
 - Arm GNU 14.3.1 编译通过，`-Wall -Wextra -Werror`，链接无警告。
