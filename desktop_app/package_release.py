@@ -32,6 +32,11 @@ def main():
         '接收板调试：打开调试模式→实测数据→接收波形，采集一次或连续查看。\n'
         'Demo 波形是合成数据。真实采样需新版 F411 固件，ADCV_P 接 A0/PA0 并共地。\n'
         '接收板只接 5 V 电源；默认分压还原倍数为 3.4，不能恢复前级削顶或换算声压。\n\n'
+        '阵列参数：调试模式→设备设置，可导入 array-profiles 中的坐标作预测或 Demo。\n'
+        '真实设备三维坐标由新版固件回传；球冠文件仅为软件示例，不是可打印的球冠夹具。\n'
+        '相位校准：调试模式→实测数据→相位校准；先固定接收器并填写位置。\n'
+        '校准完成保持停止，重新发送图形后播放。修正值断电丢失，可保存并重新导入。\n'
+        'Demo 校准文件不能用于真实设备；目前尚无声学实测验证。\n\n'
         '首次启动需要解包运行库，请稍等。程序无需管理员权限。\n'
         '请保留 THIRD_PARTY_LICENSES 中的依赖许可与 build-info.json。\n'
         '启动失败日志：%LOCALAPPDATA%\\TouchSee\\logs\\startup-error.log\n'
@@ -41,6 +46,9 @@ def main():
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
         for path in (executable, dist / 'build-info.json', dist / '使用说明.txt'):
             bundle.write(path, path.name)
+        for path in (app_dir.parent/'hardware/arrays').glob('*.json'):
+            bundle.write(path, 'array-profiles/'+path.name)
+        bundle.write(app_dir/'ARRAY_CALIBRATION.md', '阵列与校准说明.md')
         for distribution in metadata.distributions():
             name = distribution.metadata['Name']
             # Preserve full package metadata and shipped notices, including

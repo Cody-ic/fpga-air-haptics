@@ -1,4 +1,5 @@
 #include "haptics.h"
+#include "array_geometry.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +55,9 @@ static void send_frame(Device *d)
 
 static void array_fields(void)
 {
-    append(" hw_rows=4 hw_cols=4 hw_pitch_um=11000 mapping=ROW_MAJOR_XY");
+    append(" hw_rows=%u hw_cols=%u hw_pitch_um=%u mapping=%s", ARRAY_ROWS, ARRAY_COLS,
+           ARRAY_PITCH_UM, ARRAY_EXPLICIT ? "EXPLICIT_XYZ" : "ROW_MAJOR_XY");
+    if (ARRAY_EXPLICIT) append(" geometry_id=%s", ARRAY_ID);
 }
 
 static void sample_now(Device *d)
@@ -63,7 +66,7 @@ static void sample_now(Device *d)
     if (d->state != PAUSED && d->state != FAULT) {
         float remaining;
         geometry_sample(&d->config, d->elapsed_us, &d->latched, &remaining);
-        phase_solve(&d->latched);
+        phase_solve_config(&d->config, &d->latched);
     }
     d->latched.output = false; d->latched.drive_on = false;
 }
@@ -87,6 +90,8 @@ static void snapshot(Device *d)
     append(" drive_on=%u",d->state == RUNNING && s->drive_on);
     append(" fx_um=%ld fy_um=%ld fz_um=%ld phases=", (long)s->x_um, (long)s->y_um, (long)s->z_um);
     for (unsigned i = 0; i < 16; ++i) append("%s%u", i ? "," : "", s->phases[i]);
+    append(" channel_mask=%u phase_offsets=", c->channel_mask);
+    for (unsigned i = 0; i < 16; ++i) append("%s%u", i ? "," : "", c->phase_offsets[i]);
     send_frame(d);
     /* Leave half the 115200-baud link for commands/ACKs, including long paths. */
     telemetry_interval_ms = (uint32_t)((tx_used*20000u+115199u)/115200u);
@@ -110,6 +115,12 @@ static void stop(Device *d, const char *reason)
 {
     d->hw.stop(); d->state = IDLE; d->elapsed_us = 0; d->reason = reason;
     d->latched.output = false;
+    if (d->calibration_trial) {
+        memcpy(d->config.phase_offsets, d->saved_offsets, HAP_CHANNELS);
+        d->config.channel_mask = 0xffff;
+        d->calibration_trial = false; ++d->revision;
+        d->configured = false; /* Never resume a continuous test tone implicitly. */
+    }
 }
 
 void hap_fault(Device *d, const char *reason)
@@ -121,7 +132,7 @@ void hap_local_stop(Device *d) { stop(d, "LOCAL_STOP"); }
 
 void hap_toggle_mode(Device *d)
 {
-    if (d->state == IDLE) { d->local = !d->local; d->last_ping_ms = d->now_ms; }
+    if (d->state == IDLE && !d->calibration_trial) { d->local = !d->local; d->last_ping_ms = d->now_ms; }
 }
 
 void hap_local_button(Device *d, bool next)
@@ -170,8 +181,9 @@ static bool integer(const char *s, int32_t low, int32_t high, int32_t *out)
 
 static const char *parse_config(Field *f, unsigned n)
 {
-    if (n != 18) return "BAD_CONFIG";
+    if (n != 18u+ARRAY_EXPLICIT) return "BAD_CONFIG";
     memset(&candidate, 0, sizeof(candidate));
+    candidate.channel_mask = 0xffff;
 #define READ(name, lo, hi) if (!integer(get(f,n,#name),lo,hi,&candidate.name)) return "BAD_CONFIG"
     READ(carrier_hz,40000,40000); READ(phase_steps,64,64);
     READ(cx_um,-100000,100000); READ(cy_um,-100000,100000);
@@ -188,9 +200,11 @@ static const char *parse_config(Field *f, unsigned n)
     candidate.shape = (Shape)i;
     strcpy(candidate.path_xy_um,p); strcpy(candidate.scan_paths,paths);
     int32_t v;
-    if (!integer(get(f,n,"hw_rows"),4,4,&v) || !integer(get(f,n,"hw_cols"),4,4,&v) ||
-        !integer(get(f,n,"hw_pitch_um"),11000,11000,&v) || !get(f,n,"mapping") ||
-        strcmp(get(f,n,"mapping"),"ROW_MAJOR_XY")) return "HARDWARE_MISMATCH";
+    if (!integer(get(f,n,"hw_rows"),ARRAY_ROWS,ARRAY_ROWS,&v) || !integer(get(f,n,"hw_cols"),ARRAY_COLS,ARRAY_COLS,&v) ||
+        !integer(get(f,n,"hw_pitch_um"),ARRAY_PITCH_UM,ARRAY_PITCH_UM,&v) || !get(f,n,"mapping") ||
+        strcmp(get(f,n,"mapping"),ARRAY_EXPLICIT ? "EXPLICIT_XYZ" : "ROW_MAJOR_XY")) return "HARDWARE_MISMATCH";
+    if (ARRAY_EXPLICIT && (!get(f,n,"geometry_id") || strcmp(get(f,n,"geometry_id"),ARRAY_ID)))
+        return "HARDWARE_MISMATCH";
     return config_compile(&candidate);
 }
 
@@ -252,7 +266,7 @@ static void process(Device *d)
         if (d->capture_seq && d->hw.capture_cancel) d->hw.capture_cancel();
         d->capture_seq = 0;
         begin("ACK",(unsigned)seq,verb);
-        append(" proto=3 device=NUCLEO-F411RE boot=%s simulated=0 hb_ms=3000 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS max_rows=4 max_cols=4 max_channels=16 max_nodes=64 max_scan_points=256 max_strokes=32",d->boot);
+        append(" proto=3 device=NUCLEO-F411RE boot=%s simulated=0 hb_ms=3000 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION max_rows=16 max_cols=16 max_channels=16 max_nodes=64 max_scan_points=256 max_strokes=32",d->boot);
         array_fields();
         if (d->hw.capture_start && d->hw.capture_poll && d->hw.capture_cancel)
             append(" adc_capture=1");
@@ -260,19 +274,65 @@ static void process(Device *d)
         send_frame(d); snapshot(d); return;
     }
     if (!d->connected) error = "HANDSHAKE_REQUIRED";
+    else if (!strcmp(verb,"GEOMETRY")) {
+        int32_t start, count;
+        if (n != 2 || !integer(get(fields,n,"start"),0,15,&start) ||
+            !integer(get(fields,n,"count"),1,16,&count) || start+count > 16) error = "BAD_GEOMETRY_RANGE";
+        else {
+            begin("ACK",(unsigned)seq,verb);
+            append(" geometry_id=%s start=%ld count=%ld sound_speed_mm_s=%u elements=", ARRAY_ID,(long)start,(long)count,ARRAY_SOUND_MM_S);
+            for (int32_t i=start;i<start+count;++i)
+                for (unsigned j=0;j<6;++j) append("%s%ld",j ? "," : (i==start ? "" : "|"),(long)array_elements[i][j]);
+            send_frame(d); return;
+        }
+    }
+    else if (!strcmp(verb,"CALIBRATION")) {
+        int32_t mask;
+        const char *action=get(fields,n,"action"), *offsets=get(fields,n,"offsets"), *id=get(fields,n,"geometry_id");
+        uint8_t parsed[HAP_CHANNELS];
+        if (d->local) error="LOCAL_CONTROL";
+        else if (d->state!=IDLE || d->capture_seq) error="BUSY";
+        else if (n!=4 || !action || !offsets || !id || strcmp(id,ARRAY_ID) ||
+                 (strcmp(action,"trial") && strcmp(action,"store")) ||
+                 !integer(get(fields,n,"mask"),1,65535,&mask)) error="BAD_CALIBRATION";
+        else {
+            const char *p=offsets;
+            for (unsigned i=0;i<HAP_CHANNELS;++i) {
+                unsigned value=0, digits=0;
+                while (*p>='0' && *p<='9') {
+                    value=value*10u+(unsigned)(*p++-'0');
+                    if (++digits>2) break;
+                }
+                if (!digits || digits>2 || value>=64 || (i<15 ? *p!=',' : *p!=0)) { error="BAD_CALIBRATION"; break; }
+                parsed[i]=(uint8_t)value; if (i<15) ++p;
+            }
+            if (!error && !strcmp(action,"trial") && (d->config.shape!=POINT || d->config.mod_hz || d->config.level!=100))
+                error="STEADY_POINT_REQUIRED";
+            if (!error && !strcmp(action,"store") && mask!=65535) error="BAD_CALIBRATION";
+            if (!error) {
+                memcpy(d->config.phase_offsets,parsed,HAP_CHANNELS);
+                d->config.channel_mask=(uint16_t)mask;
+                d->calibration_trial=!strcmp(action,"trial");
+                if (!d->calibration_trial) memcpy(d->saved_offsets,parsed,HAP_CHANNELS);
+                d->configured=true; ++d->revision;
+            }
+        }
+    }
     else if (!strcmp(verb,"CONFIG")) {
         if (d->local) error = "LOCAL_CONTROL";
         else if (d->state != IDLE) error = "BUSY";
         else {
             error = parse_config(fields,n);
             if (!error) {
+                memcpy(candidate.phase_offsets,d->saved_offsets,HAP_CHANNELS);
                 d->config = candidate; ++d->revision; d->elapsed_us = 0;
+                d->calibration_trial=false;
                 d->configured = true; d->reason = "NONE";
             }
         }
     } else if (!strcmp(verb,"MODE")) {
         const char *v = get(fields,n,"value");
-        if (d->state != IDLE) error = "BUSY";
+        if (d->state != IDLE || d->calibration_trial) error = "BUSY";
         else if (n != 1 || !v || (strcmp(v,"LOCAL") && strcmp(v,"REMOTE"))) error = "BAD_MODE";
         else { d->local = !strcmp(v,"LOCAL"); d->last_ping_ms = d->now_ms; }
     } else if (n) error = "BAD_FIELDS";

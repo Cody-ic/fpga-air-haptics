@@ -30,6 +30,8 @@ from .sketch import Sketch
 from .playback import PlaybackPanel
 from .presets import PresetPreview
 from .receiver_panel import ReceiverPanel
+from .calibration_panel import CalibrationPanel
+from .array_geometry import Geometry
 from .transport import available_ports
 
 if sys.platform == "win32":
@@ -104,14 +106,27 @@ class PlotPanel(ttk.Frame):
         self.colorbar = self.figure.colorbar(image, ax=self.field, fraction=0.038, pad=0.03)
         self.colorbar.ax.tick_params(labelsize=8)
         self.colorbar.set_label("相对 |p|（非声压单位）", fontsize=8)
-        phase_grid = np.asarray(phases).reshape(array.rows, array.cols)
-        self.phase.imshow(phase_grid, origin="lower", cmap="twilight", vmin=0,
-                          vmax=config.phase_steps - 1, aspect="equal")
-        self.phase.set_title(f"{array.rows}×{array.cols} 阵列 · {array.count} 路相位", fontsize=10)
-        self.phase.set_xlabel("列 / +x", fontsize=8)
-        self.phase.set_ylabel("行 / +y", fontsize=8)
-        self.phase.set_xticks(sorted(set([0, array.cols - 1])))
-        self.phase.set_yticks(sorted(set([0, array.rows - 1])))
+        if array.mapping == 'EXPLICIT_XYZ':
+            coords = array_coordinates(array)
+            normals = np.asarray(array.resolved_geometry().normals)
+            vertical_axis = 1 if plane == 'XY' else 2
+            self.phase.scatter(coords[:, 0], coords[:, vertical_axis], c=phases, cmap='twilight',
+                               vmin=0, vmax=config.phase_steps-1, s=45)
+            self.phase.quiver(coords[:, 0], coords[:, vertical_axis], normals[:, 0]*5,
+                              normals[:, vertical_axis]*5, angles='xy', scale_units='xy', scale=1, alpha=.45)
+            self.phase.set_aspect('equal', adjustable='datalim')
+            self.phase.set_title(f'{plane} 阵元投影 · 颜色为相位 / 箭头为朝向', fontsize=8)
+            self.phase.set_xlabel('x / mm', fontsize=8)
+            self.phase.set_ylabel('y / mm' if plane == 'XY' else 'z / mm', fontsize=8)
+        else:
+            phase_grid = np.asarray(phases).reshape(array.rows, array.cols)
+            self.phase.imshow(phase_grid, origin="lower", cmap="twilight", vmin=0,
+                              vmax=config.phase_steps - 1, aspect="equal")
+            self.phase.set_title(f"{array.rows}×{array.cols} 阵列 · {array.count} 路相位", fontsize=10)
+            self.phase.set_xlabel("列 / +x", fontsize=8)
+            self.phase.set_ylabel("行 / +y", fontsize=8)
+            self.phase.set_xticks(sorted(set([0, array.cols - 1])))
+            self.phase.set_yticks(sorted(set([0, array.rows - 1])))
         path = trajectory_path(config)
         self.path.plot(path[:, 0], path[:, 1], color=BLUE, lw=1.5)
         self.path.scatter([focus[0]], [focus[1]], color=TEAL, s=35, zorder=3)
@@ -140,6 +155,7 @@ class App:
                          "axes.unicode_minus": False, "font.size": 9})
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="acoustic-model")
         self.session = None
+        self.geometry_profile = None
         self.state = None
         self.hardware = None
         self.workspace = None
@@ -492,6 +508,10 @@ class App:
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=14)
         self.device_details = ttk.Frame(content)
         ttk.Button(self.device_details, text="用此阵列更新电脑预测", command=self.preview).pack(anchor="w")
+        self.geometry_load_button = ttk.Button(self.device_details, text='导入阵列坐标（预测 / Demo）', command=self.load_geometry)
+        self.geometry_load_button.pack(anchor='w', pady=6)
+        ttk.Button(self.device_details, text='导出当前阵列坐标', command=self.export_geometry).pack(anchor='w')
+        ttk.Label(self.device_details, text='三维阵列采用文件中的逐路坐标；真实设备的坐标以固件回传为准。选择行列预设可恢复平面阵列。', wraplength=650).pack(anchor='w', pady=6)
         ttk.Label(self.device_details, text="Demo 默认 0.5 次/秒，仅演示扫描路径；运行时每 0.05 秒回传，其他状态每 0.5 秒回传。"
                   "本程序未模拟 FPGA 的高速更新时序，也未验证触觉效果。",
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
@@ -507,6 +527,8 @@ class App:
         scan_tab = ttk.Frame(self.measurement_tabs)
         self.measurement_tabs.add(self.receiver_panel, text="接收波形")
         self.measurement_tabs.add(scan_tab, text="空间扫描 CSV")
+        self.calibration_panel = CalibrationPanel(self.measurement_tabs, self)
+        self.measurement_tabs.add(self.calibration_panel, text='相位校准')
         parent = scan_tab
         top = ttk.Frame(parent, padding=10)
         top.pack(fill="x")
@@ -524,7 +546,7 @@ class App:
         self.measurement_colorbar = None
 
     def request_capture(self):
-        return bool(self.ready and self.session and "ADC_CAPTURE" in self.capabilities
+        return bool(not self.calibration_panel.busy and self.ready and self.session and "ADC_CAPTURE" in self.capabilities
                     and self.session.command("CAPTURE"))
 
     def set_config(self, config, document=None):
@@ -569,6 +591,7 @@ class App:
         self.size_label.set("正方形半边长 / mm" if self.vars["shape"].get() == SHAPES["SQUARE"] else "预设图形半径 / mm")
 
     def select_hardware(self, _event=None):
+        self.geometry_profile = None
         size = ARRAY_PRESETS[self.demo_array_choice.get()]
         if size is not None:
             self.hw_rows.set(str(size[0]))
@@ -578,10 +601,34 @@ class App:
     def preview_array(self):
         if self.ready and self.hardware is not None:
             return self.hardware
+        if self.geometry_profile is not None:
+            return ArraySpec.from_geometry(self.geometry_profile)
         pitch = float(self.hw_pitch.get()) * 1000
         if not np.isfinite(pitch) or abs(pitch - round(pitch)) > 1e-6:
             raise ValueError("阵元间距精度为 1 µm")
         return ArraySpec(int(self.hw_rows.get()), int(self.hw_cols.get()), round(pitch)).validate()
+
+    def load_geometry(self):
+        if self.session and self.session.is_alive():
+            return
+        path = filedialog.askopenfilename(parent=self.root, filetypes=[('阵列坐标', '*.json')])
+        if path:
+            try:
+                self.geometry_profile = Geometry.load(path)
+                self.hw_rows.set(str(self.geometry_profile.rows))
+                self.hw_cols.set(str(self.geometry_profile.cols))
+                self.hw_pitch.set(str(self.geometry_profile.pitch_um/1000))
+                self.status_line.set(f'已载入 {len(self.geometry_profile.elements)} 路三维坐标，可连接 Demo 或更新预测。')
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                messagebox.showerror('阵列文件无效', str(error), parent=self.root)
+
+    def export_geometry(self):
+        path = filedialog.asksaveasfilename(parent=self.root, defaultextension='.json', initialfile='array-geometry.json', filetypes=[('阵列坐标', '*.json')])
+        if path:
+            try:
+                self.preview_array().resolved_geometry().save(path)
+            except (OSError, ValueError) as error:
+                messagebox.showerror('导出失败', str(error), parent=self.root)
 
     def sync_editor(self):
         if self.syncing_geometry:
@@ -721,6 +768,7 @@ class App:
         self.update_controls()
 
     def disconnect(self):
+        self.calibration_panel.cancel()
         if self.session:
             self.confirmed_config = self.pending_config = None
             self.session.close()
@@ -729,6 +777,12 @@ class App:
             self.update_controls()
 
     def send(self, verb, **fields):
+        if self.calibration_panel.busy:
+            if verb == 'STOP':
+                self.calibration_panel.cancel()
+            else:
+                self.status_line.set('正在校准，请等待完成或取消。')
+            return
         if not self.session or not self.ready:
             return
         if verb == "START" and not self.can_play():
@@ -755,6 +809,8 @@ class App:
                     (self.state.boot, self.state.revision, self.state.config))
 
     def can_play(self):
+        if self.calibration_panel.busy:
+            return False
         if not (self.ready and self.state and time.monotonic()-self.received < 1.6
                 and not self.busy and self.await_revision is None and self.config_confirmed()
                 and self.state.mode == "REMOTE" and self.state.state in ("IDLE", "PAUSED")):
@@ -784,9 +840,9 @@ class App:
             except ValueError as error:
                 messagebox.showerror("无法载入编辑器", str(error), parent=self.root)
 
-    def _queue_plot(self, name, config, phases, focus, enabled, title, array=None):
+    def _queue_plot(self, name, config, phases, focus, enabled, title, array=None, channel_mask=None):
         array = array or self.preview_array()
-        self.wanted[name] = (self.generation, config, array, tuple(phases), tuple(focus), enabled, self.plane.get(), title)
+        self.wanted[name] = (self.generation, config, array, tuple(phases), tuple(focus), enabled, self.plane.get(), title, channel_mask)
 
     def preview(self):
         if not self.debug_mode.get():
@@ -817,12 +873,12 @@ class App:
         state = self.state
         source = "Demo 模拟回读" if state.simulated else "设备数字回读"
         self._queue_plot("actual", state.config, state.phases, state.focus_mm, state.output,
-                         f"{source} · 相位快照 #{state.sample} → 理论声场（非实测）", state.array)
+                         f"{source} · 启用 {state.channel_mask.bit_count()} 路 · 相位快照 #{state.sample} → 理论声场（非实测）", state.array, state.channel_mask)
 
     @staticmethod
     def _compute_plot(request):
-        generation, config, array, phases, focus, enabled, plane, title = request
-        x,y,values = field_slice(config, phases, focus, enabled=enabled, resolution=71, plane=plane, array=array)
+        generation, config, array, phases, focus, enabled, plane, title, mask = request
+        x,y,values = field_slice(config, phases, focus, enabled=enabled, resolution=71, plane=plane, array=array, channel_mask=mask)
         return generation, (config, array, phases, focus, enabled, plane, x,y,values,title)
 
     def _pump_plots(self):
@@ -880,7 +936,8 @@ class App:
                                             f"y [{self.workspace.y_min_um/1000:g}, {self.workspace.y_max_um/1000:g}] mm，"
                                             f"z [{self.workspace.z_min_um/1000:g}, {self.workspace.z_max_um/1000:g}] mm。触觉范围尚待实测。")
                     self.capabilities = set(event["capabilities"])
-                    self.hardware_line.set(f"设备报告：{self.hardware.rows}×{self.hardware.cols} · {self.hardware.count} 个阵元 · 间距 {self.hardware.pitch_um/1000:g} mm · 全阵列参与聚焦")
+                    geometry_label = '逐路三维坐标' if self.hardware.mapping == 'EXPLICIT_XYZ' else f'平面间距 {self.hardware.pitch_um/1000:g} mm'
+                    self.hardware_line.set(f"设备报告：{self.hardware.count} 个阵元 · {geometry_label}")
                     self.device_label.set("Demo 已连接" if event["demo"] else f"已连接：{event['device']}")
                     self.status_line.set("连接成功，发送图形后即可播放。")
                 elif kind == "ack":
@@ -890,7 +947,7 @@ class App:
                         self.await_verb = verb
                         self.await_sample = event["after_sample"]
                         self.await_revision = int(event["fields"]["rev"])
-                    if verb not in ("PING", "HELLO", "CAPTURE"):
+                    if verb not in ("PING", "HELLO", "CAPTURE", "GEOMETRY") and not self.calibration_panel.busy:
                         self.status_line.set("设备已接收，正在确认状态…")
                 elif kind == "capture":
                     self.receiver_panel.accept(event["capture"], event["when"])
@@ -956,13 +1013,17 @@ class App:
         self.update_file_line()
         alive = bool(self.session and self.session.is_alive())
         fresh = bool(self.ready and self.state and time.monotonic() - self.received < 1.6)
+        self.calibration_panel.tick(fresh and self.state.state == 'IDLE' and self.state.mode == 'REMOTE'
+                                    and not self.busy and self.await_revision is None
+                                    and {'ADC_CAPTURE', 'CALIBRATION'} <= self.capabilities)
+        calibrating = self.calibration_panel.busy
         self.receiver_panel.tick(fresh, "ADC_CAPTURE" in self.capabilities,
                                  self.debug_mode.get() and self.tabs.select() == str(self.measured_tab)
                                  and self.measurement_tabs.select() == str(self.receiver_panel),
-                                 blocked=self.busy)
+                                 blocked=self.busy or calibrating)
         remote = fresh and self.state.mode == "REMOTE"
         idle = fresh and self.state.state == "IDLE"
-        free = not self.busy and self.await_revision is None
+        free = not self.busy and self.await_revision is None and not calibrating
         scanning = self.ble_scan is not None
         for button, enabled in ((self.connect_button,not alive and not scanning), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
@@ -1004,13 +1065,14 @@ class App:
                                    text="取消扫描" if scanning else "扫描设备")
         self.ble_settings_button.configure(state="disabled" if alive or scanning else "normal")
         self.demo_array_picker.configure(state="readonly" if not alive and demo_selected else "disabled")
+        self.geometry_load_button.configure(state='disabled' if alive else 'normal')
         for entry in self.hw_entries:
-            entry.configure(state="normal" if not alive and demo_selected else "disabled")
+            entry.configure(state="normal" if not alive and demo_selected and self.geometry_profile is None else "disabled")
         self.editor.apply_button.configure(state="normal" if remote and idle and free and "SCAN_PATHS" in self.capabilities else "disabled")
         demo_live = self.ready and self.session and self.session.is_demo
         for button in self.demo_buttons:
-            button.configure(state="normal" if demo_live else "disabled")
-        self.mute_check.configure(state="normal" if demo_live else "disabled")
+            button.configure(state="normal" if demo_live and not calibrating else "disabled")
+        self.mute_check.configure(state="normal" if demo_live and not calibrating else "disabled")
         if self.state:
             age = time.monotonic()-self.received
             state = self.state
@@ -1222,6 +1284,7 @@ class App:
         if not self.confirm_replace_draft("关闭"):
             return
         self.closing=True
+        self.calibration_panel.cancel()
         self.root.after_cancel(self.tick_id)
         if self.ble_scan is not None:
             self.ble_scan.cancel()

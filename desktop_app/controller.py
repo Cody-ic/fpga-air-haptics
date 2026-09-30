@@ -1,6 +1,6 @@
 """Bidirectional session state: ACK is never substituted for actual telemetry."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import itertools
 import queue
 import threading
@@ -9,6 +9,7 @@ import time
 from .protocol import VERSION, Decoder, Snapshot, encode
 from .receiver import Capture
 from .model import ArraySpec, Config, Workspace
+from .array_geometry import Geometry
 from .transport import DemoTransport, SerialTransport
 from .ble_transport import BleTransport
 
@@ -46,9 +47,27 @@ class Session(threading.Thread):
         self.limits = {}
         self.array = None
         self.workspace = None
+        self.geometry_parts = []
+        self.hello_fields = None
+        self.observers = []
+
+    def subscribe(self):
+        observer = queue.Queue(maxsize=2000)
+        self.observers.append(observer)
+        return observer
+
+    def unsubscribe(self, observer):
+        if observer in self.observers:
+            self.observers.remove(observer)
 
     def emit(self, kind, **data):
         event = dict(kind=kind, when=time.monotonic(), **data)
+        for observer in tuple(self.observers):
+            try:
+                observer.put_nowait(event)
+            except queue.Full:
+                # An abandoned observer must never block STOP or heartbeat.
+                pass
         try:
             self.events.put_nowait(event)
         except queue.Full:
@@ -105,6 +124,8 @@ class Session(threading.Thread):
                 self.emit("rejected", verb=frame.verb, text=frame.fields.get("code", "UNKNOWN"))
                 if frame.verb == "HELLO":
                     raise RuntimeError("设备拒绝握手")
+                if frame.verb == 'GEOMETRY' and not self.ready:
+                    raise RuntimeError('无法读取设备阵列坐标')
                 return
             if frame.verb == "HELLO":
                 if frame.fields.get("proto") != str(VERSION) or not frame.fields.get("boot"):
@@ -131,9 +152,29 @@ class Session(threading.Thread):
                         or self.array.count > self.limits["max_channels"]):
                     raise RuntimeError("实际阵列超过设备声明的容量")
                 self.boot = frame.fields["boot"]
-                self.ready = True
-                self.emit("ready", device=frame.fields.get("device", "FPGA"), demo=self.is_demo,
-                          limits=self.limits, capabilities=sorted(capabilities), array=self.array, workspace=self.workspace)
+                self.hello_fields = frame.fields
+                if self.array.mapping == 'EXPLICIT_XYZ':
+                    if 'GEOMETRY' not in capabilities:
+                        raise RuntimeError('设备未提供三维阵列坐标读取能力')
+                    self.command('GEOMETRY', start=0, count=min(16, self.array.count))
+                else:
+                    self._geometry_ready()
+            elif frame.verb == 'GEOMETRY' and not self.ready:
+                f = frame.fields
+                start, count = int(f['start']), int(f['count'])
+                parts = tuple(tuple(int(v) for v in row.split(',')) for row in f['elements'].split('|'))
+                if (f['geometry_id'] != self.array.geometry_id or start != len(self.geometry_parts)
+                        or count != min(16, self.array.count-start) or len(parts) != count):
+                    raise RuntimeError('阵列分块坐标不完整或顺序错误')
+                self.geometry_parts.extend(parts)
+                if len(self.geometry_parts) == self.array.count:
+                    geometry = Geometry(self.array.rows, self.array.cols, self.array.pitch_um,
+                                        tuple(self.geometry_parts), int(f['sound_speed_mm_s'])).validate()
+                    self.array = replace(self.array, geometry=geometry).validate()
+                    self._geometry_ready()
+                    self.command('SNAP')
+                else:
+                    self.command('GEOMETRY', start=len(self.geometry_parts), count=min(16, self.array.count-len(self.geometry_parts)))
             elif frame.verb == "CAPTURE":
                 try:
                     capture = Capture.parse(frame.fields)
@@ -143,7 +184,7 @@ class Session(threading.Thread):
                 if capture.boot != self.boot or capture.simulated != self.is_demo:
                     raise RuntimeError("采样来源或启动标识与当前连接不一致")
                 self.emit("capture", capture=capture)
-            elif frame.verb in ("CONFIG", "MODE", "START", "PAUSE", "STOP"):
+            elif frame.verb in ("CONFIG", "MODE", "START", "PAUSE", "STOP", "CALIBRATION"):
                 if frame.fields.get("applied") != "1" or not frame.fields.get("rev", "").isdigit():
                     raise RuntimeError("控制应答缺少已生效标志或配置版本")
             self.emit("ack", verb=frame.verb, fields=frame.fields,
@@ -153,7 +194,9 @@ class Session(threading.Thread):
             if not self.ready:
                 return
             try:
-                state = Snapshot.parse(frame.fields)
+                if ArraySpec.from_wire(frame.fields) != self.array:
+                    raise RuntimeError('实际阵列配置改变，请重新连接')
+                state = Snapshot.parse(frame.fields, self.array)
             except (ValueError, KeyError, TypeError) as error:
                 self.emit("warning", text=f"无效状态快照：{error}")
                 return
@@ -176,6 +219,12 @@ class Session(threading.Thread):
             self.state_received = now
             self.emit("state", state=state)
 
+    def _geometry_ready(self):
+        self.ready = True
+        self.state_received = time.monotonic()
+        self.emit('ready', device=self.hello_fields.get('device', 'FPGA'), demo=self.is_demo,
+                  limits=self.limits, capabilities=sorted(self.capabilities), array=self.array, workspace=self.workspace)
+
     def run(self):
         transport = None
         decoder = Decoder()
@@ -192,7 +241,7 @@ class Session(threading.Thread):
             self._write(transport, "HELLO")
             while not self.closing.is_set():
                 now = time.monotonic()
-                if self.ready and now >= next_ping:
+                if self.boot and now >= next_ping:
                     self._write(transport, "PING")
                     next_ping = now + 0.8
                 try:
@@ -204,13 +253,17 @@ class Session(threading.Thread):
                         transport.muted = fields["value"]
                     elif verb == "_BUTTON" and self.is_demo and self.ready:
                         transport.button(fields["action"])
+                    elif verb == 'GEOMETRY' and self.boot and not self.ready:
+                        self._write(transport, verb, fields)
                     elif not self.ready:
                         self.emit("rejected", verb=verb, text="尚未握手，未发送")
-                    elif verb in ("CONFIG", "MODE", "START", "PAUSE") and any(
-                            p.verb in ("CONFIG", "MODE", "START", "PAUSE", "STOP") for p in self.pending.values()):
+                    elif verb in ("CONFIG", "MODE", "START", "PAUSE", "CALIBRATION") and any(
+                            p.verb in ("CONFIG", "MODE", "START", "PAUSE", "STOP", "CALIBRATION") for p in self.pending.values()):
                         self.emit("rejected", verb=verb, text="上一控制命令尚未应答")
                     else:
                         try:
+                            if verb == 'CALIBRATION' and verb not in self.capabilities:
+                                raise ValueError('设备固件不支持相位校准')
                             if verb == "CAPTURE":
                                 if "ADC_CAPTURE" not in self.capabilities:
                                     raise ValueError("设备固件不支持接收采样")

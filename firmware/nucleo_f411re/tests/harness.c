@@ -16,12 +16,23 @@ static uint64_t started, resume_us;
 static uint16_t captured[HAP_ADC_SAMPLES];
 static bool capturing;
 static int capture_mode;
+static bool calibration_signal;
 static bool capture_start(void)
 {
     if (capturing || capture_mode == -2) return false;
     capturing = true;
+    float amplitude=100;
+    if (calibration_signal) {
+        float real=0, imaginary=0;
+        if (active) for (unsigned channel=0; channel<HAP_CHANNELS; ++channel) {
+            if (!(device.config.channel_mask & (1u<<channel))) continue;
+            float phase=6.28318530718f*((channel*7u%19u)+device.config.phase_offsets[channel])/64;
+            real+=(18+channel%5)*cosf(phase); imaginary+=(18+channel%5)*sinf(phase);
+        }
+        amplitude=sqrtf(real*real+imaginary*imaginary);
+    }
     for (unsigned i=0;i<HAP_ADC_SAMPLES;++i)
-        captured[i]=(uint16_t)lroundf(602+100*sinf(6.28318530718f*i/10));
+        captured[i]=(uint16_t)lroundf(602+amplitude*sinf(6.28318530718f*i/10));
     return true;
 }
 static int capture_poll(const uint16_t **out)
@@ -33,6 +44,7 @@ static int capture_poll(const uint16_t **out)
 static void capture_cancel(void) { capturing = false; }
 API void test_capture_mode(int mode) { capture_mode = mode; }
 API int test_capturing(void) { return capturing; }
+API void test_calibration_signal(int enabled) { calibration_signal=enabled!=0; }
 
 static bool start(const Config *c, uint64_t us)
 {
@@ -58,6 +70,7 @@ API void test_init(void)
 {
     sent_size = 0; sent[0] = 0; start_ok = true;
     capturing = false; capture_mode = 1;
+    calibration_signal = false;
     hap_init(&device,(Hardware){start,stop,readback,send,NULL,capture_start,capture_poll,capture_cancel},"test-boot-1");
 }
 API const char *test_take(void) { sent[sent_size]=0; sent_size=0; return sent; }

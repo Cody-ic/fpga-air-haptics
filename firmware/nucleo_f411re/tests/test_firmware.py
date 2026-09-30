@@ -19,6 +19,9 @@ from desktop_app.model import ArraySpec, Config, focus_phases, trajectory_sample
 from desktop_app.protocol import Snapshot, decode, encode
 from desktop_app.controller import Session
 from desktop_app.receiver import Capture
+from desktop_app.calibration import CalibrationRunner
+from desktop_app.array_geometry import Geometry, grid_geometry
+from firmware.nucleo_f411re.generate_geometry import generate
 
 
 class Sample(ct.Structure):
@@ -96,6 +99,74 @@ class FirmwareTests(unittest.TestCase):
         self.assertEqual(resumed.focus_mm, paused.focus_mm)
         self.assertEqual(self.command("STOP")[1].fields["state"], "IDLE")
         self.assertFalse(self.dll.test_active())
+
+    def test_geometry_readback_and_atomic_calibration(self):
+        original = self.configure(Config(shape='POINT', mod_hz=0, level=100))
+        g = self.array.resolved_geometry()
+        chunk = self.command('GEOMETRY', start=0, count=16)[0].fields
+        self.assertEqual(chunk['geometry_id'], g.identity)
+        self.assertEqual(tuple(tuple(map(int, row.split(','))) for row in chunk['elements'].split('|')), g.elements)
+        base = dict(action='store', geometry_id=g.identity, mask=65535, offsets=','.join(['3']*16))
+        for bad in ({'offsets': '0,1'}, {'offsets': ','.join(['64']*16)}, {'mask': 3},
+                    {'geometry_id': '0'*24}, {'mask': 65536}, {'offsets': ','.join(['99999999999999999']*16)}):
+            self.assertEqual(self.command('CALIBRATION', **dict(base, **bad))[0].kind, 'ERR')
+            self.assertEqual(Snapshot.parse(self.command('SNAP')[1].fields).revision, original.revision)
+        saved = Snapshot.parse(self.command('CALIBRATION', **base)[1].fields)
+        self.assertEqual(saved.phase_offsets, (3,)*16)
+        trial = dict(base, action='trial', mask=3, offsets=','.join(['17']*16))
+        self.assertEqual(self.command('CALIBRATION', **trial)[0].kind, 'ACK')
+        self.assertEqual(self.command('MODE', value='LOCAL')[0].fields['code'], 'BUSY')
+        self.command('START')
+        wave = Wave()
+        self.dll.test_wave(0, ct.byref(wave))
+        for b, c in zip(wave.b, wave.c):
+            self.assertEqual(b & 0xffff & ~3, 0)
+            self.assertEqual(c & 0xffff, 0)
+        sample = wave.samples[0]
+        expected = (focus_phases(saved.config, (0, 0, 150), self.array)+17) % 64
+        self.assertEqual(tuple(sample.phases), tuple(expected))
+        self.assertEqual(self.command('CALIBRATION', **base)[0].fields['code'], 'BUSY')
+        stopped = Snapshot.parse(self.command('STOP')[1].fields)
+        self.assertEqual(stopped.phase_offsets, (3,)*16)
+        self.assertEqual(stopped.channel_mask, 65535)
+        self.assertEqual(self.command('START')[0].fields['code'], 'CONFIG_REQUIRED')
+        self.configure()
+        self.assertEqual(Snapshot.parse(self.command('SNAP')[1].fields).phase_offsets, (3,)*16)
+
+    def test_compiled_sphere_header_matches_desktop(self):
+        import tempfile
+        with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
+            folder = Path(folder)
+            g = grid_geometry(2, 8, 11, radius_mm=80, sound_speed_m_s=348)
+            generate(g, folder/'array_geometry.h')
+            library = folder/('sphere.dll' if os.name == 'nt' else 'sphere.so')
+            subprocess.run([self.compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC',
+                            '-I'+str(folder.relative_to(ROOT)), '-Iinclude', 'src/haptics.c', 'src/geometry.c', 'tests/harness.c',
+                            '-lm', '-static-libgcc', '-o', str(library.relative_to(ROOT))], cwd=ROOT, check=True)
+            dll = ct.CDLL(str(library))
+            dll.test_take.restype = ct.c_char_p
+            dll.test_feed.argtypes = (ct.c_char_p, ct.c_size_t, ct.c_uint64)
+            dll.test_geometry.argtypes = (ct.c_uint64, ct.POINTER(Sample))
+            dll.test_init()
+            def request(seq, verb, **fields):
+                raw = encode('CMD', seq, verb, **fields)
+                dll.test_feed(raw, len(raw), 0)
+                return [decode(line) for line in dll.test_take().splitlines()]
+            try:
+                hello = request(1, 'HELLO')[0]
+                a = ArraySpec.from_geometry(g)
+                self.assertEqual(ArraySpec.from_wire(hello.fields), a)
+                config = Config(shape='POINT', z_um=80000)
+                self.assertEqual(request(2, 'CONFIG', **config.wire(), **a.wire())[0].kind, 'ACK')
+                sample = Sample()
+                dll.test_geometry(0, ct.byref(sample))
+                self.assertEqual(tuple(sample.phases), tuple(focus_phases(config, (0, 0, 80), a)))
+                wrong = dict(a.wire(), geometry_id='0'*24)
+                self.assertEqual(request(3, 'CONFIG', **config.wire(), **wrong)[0].fields['code'], 'HARDWARE_MISMATCH')
+            finally:
+                if os.name == 'nt':
+                    import _ctypes
+                    _ctypes.FreeLibrary(dll._handle)
 
     def test_rejected_config_is_atomic(self):
         original = self.configure()
@@ -315,6 +386,55 @@ class FirmwareTests(unittest.TestCase):
         self.command("STOP")
         too_fast = replace(Config(),shape="CUSTOM",scan_paths=paths,repeat_millihz=15000,blank_us=2000)
         self.assertEqual(self.command("CONFIG",**too_fast.wire(),**self.array.wire())[0].fields["code"],"SCAN_TOO_FAST")
+
+    def test_calibration_through_native_c_protocol_with_synthetic_adc(self):
+        dll = self.dll
+        dll.test_calibration_signal(1)
+        class NativeTransport:
+            def __init__(self):
+                self.started = time.monotonic()
+                self.buffer = bytearray()
+            def clock(self):
+                return int((time.monotonic()-self.started)*1000)
+            def write(self, raw):
+                dll.test_feed(raw, len(raw), self.clock())
+                self.buffer.extend(dll.test_take())
+            def read(self):
+                dll.test_poll(self.clock())
+                self.buffer.extend(dll.test_take())
+                raw = bytes(self.buffer[:256])
+                del self.buffer[:256]
+                if not raw:
+                    time.sleep(.002)
+                return raw
+            def close(self):
+                pass
+        s = Session(demo=False, factory=NativeTransport)
+        s.start()
+        runner = None
+        try:
+            deadline = time.monotonic()+4
+            while s.last_state is None and s.is_alive() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertIsNotNone(s.last_state)
+            original = s.last_state.config
+            runner = CalibrationRunner(s, (0, 0, 100), repeats=2)
+            runner.start()
+            runner.join(100)
+            self.assertFalse(runner.is_alive())
+            self.assertIsNone(runner.error, runner.error)
+            expected = [(-(i*7 % 19)) % 64 for i in range(16)]
+            self.assertEqual(runner.result['phase_offsets'], expected)
+            self.assertEqual(s.last_state.phase_offsets, tuple(expected))
+            self.assertEqual(s.last_state.config, original)
+            self.assertFalse(s.last_state.output)
+        finally:
+            if runner and runner.is_alive():
+                runner.cancel()
+                runner.join(8)
+            s.close()
+            s.join(4)
+        self.assertFalse(dll.test_active())
 
     def test_desktop_real_session_at_serial_wire_speed(self):
         dll = self.dll
