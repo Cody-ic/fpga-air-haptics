@@ -18,6 +18,24 @@ void main() {
     );
   });
   test(
+    '3D geometry frames roundtrip but unsupported geometry fails clearly',
+    () {
+      final hello = Frame.decode(ascii.encode(reference['geometry_hello']));
+      expect(hello.fields['mapping'], 'EXPLICIT_XYZ');
+      expect(() => ArraySpec.parse(hello.fields), throwsFormatException);
+      final raw = reference['geometry_chunk'] as String;
+      final frame = Frame.decode(ascii.encode(raw));
+      expect(frame.fields['elements']!.split('|').length, 16);
+      expect(frame.fields['geometry_id'], hello.fields['geometry_id']);
+      expect(ascii.decode(frame.encode()), raw);
+      final state = Frame.decode(
+        ascii.encode((reference['frames'] as List).last),
+      );
+      expect(state.fields['phase_offsets']!.split(',').length, 64);
+      expect(Snapshot(state.fields).array.count, 64);
+    },
+  );
+  test(
     'Python ACK and STATE survive arbitrary fragments and combined frames',
     () {
       final bytes = ascii.encode((reference['frames'] as List).join());

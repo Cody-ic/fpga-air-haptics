@@ -24,6 +24,9 @@ class ArraySpec {
   const ArraySpec({this.rows = 4, this.cols = 4, this.pitchUm = 10000});
   int get count => rows * cols;
   factory ArraySpec.parse(Map<String, String> f) {
+    if (f['mapping'] == 'EXPLICIT_XYZ') {
+      throw const FormatException('此设备使用三维阵列，请使用新版电脑端连接');
+    }
     final a = ArraySpec(
       rows: integer(f['hw_rows']),
       cols: integer(f['hw_cols']),

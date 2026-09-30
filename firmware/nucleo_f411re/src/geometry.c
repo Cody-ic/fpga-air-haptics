@@ -1,4 +1,5 @@
 #include "haptics.h"
+#include "array_geometry.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,7 @@ static float distance(Point a, Point b)
 void config_default(Config *c)
 {
     memset(c, 0, sizeof(*c));
+    c->channel_mask = 0xffff;
     c->carrier_hz = 40000; c->phase_steps = 64;
     c->z_um = 150000; c->radius_um = 20000;
     c->repeat_millihz = 500; c->mod_hz = 200; c->level = 30;
@@ -182,13 +184,20 @@ void geometry_sample(const Config *c, uint64_t us, Sample *out, float *remaining
 void phase_solve(Sample *s)
 {
     for (unsigned i = 0; i < HAP_CHANNELS; ++i) {
-        float dx = s->x_um/1000.0f - ((int)(i%4)*11.0f-16.5f);
-        float dy = s->y_um/1000.0f - ((int)(i/4)*11.0f-16.5f);
-        float z = s->z_um/1000.0f;
-        float cycles = -sqrtf(dx*dx+dy*dy+z*z)*(40.0f/343.0f);
+        float dx = s->x_um/1000.0f - array_elements[i][0]/1000000.0f;
+        float dy = s->y_um/1000.0f - array_elements[i][1]/1000000.0f;
+        float z = s->z_um/1000.0f - array_elements[i][2]/1000000.0f;
+        float cycles = -sqrtf(dx*dx+dy*dy+z*z)*(40000.0f/ARRAY_SOUND_MM_S);
         float fraction = cycles-floorf(cycles);
         s->phases[i] = (uint8_t)((unsigned)(fraction*64+.5f)&63);
     }
+}
+
+void phase_solve_config(const Config *c, Sample *s)
+{
+    phase_solve(s);
+    for (unsigned i = 0; i < HAP_CHANNELS; ++i)
+        s->phases[i] = (uint8_t)((s->phases[i]+c->phase_offsets[i])&63u);
 }
 
 void wave_render(const Config *c, uint64_t elapsed_us, WaveBlock *block)
@@ -203,11 +212,12 @@ void wave_render(const Config *c, uint64_t elapsed_us, WaveBlock *block)
             geometry_sample(c, time, &sample, &remaining);
             /* Blank the complete slot if it could straddle a transfer. */
             sample.scan_on = sample.scan_on && remaining >= 250;
-            phase_solve(&sample);
+            phase_solve_config(c, &sample);
             /* Two edges per channel; avoid a 64 x 16 inner loop at 4 kHz. */
             uint16_t edges_b[64] = {0}, edges_c[64] = {0};
             unsigned b = 0, cc = 0;
             for (unsigned i = 0; i < 16; ++i) {
+                if (!(c->channel_mask & (1u<<i))) continue;
                 unsigned phase = sample.phases[i], rise = (64-phase)&63, fall = (96-phase)&63;
                 unsigned bit = 1u << (i < 8 ? pins_b[i] : i-8);
                 uint16_t *edges = i < 8 ? edges_b : edges_c;

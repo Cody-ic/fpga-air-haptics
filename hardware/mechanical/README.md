@@ -110,6 +110,8 @@ python hardware/mechanical/package_release.py
 
 ## 9. 尺寸依据与资料
 
+2026-09-30：夹具孔位函数与[名义阵元坐标导出器](export_array.py)共用参数。`python hardware/mechanical/export_array.py` 输出 [P1 坐标表](../arrays/p1_flat_4x4.json)，包含局部发声面坐标与装配平移；原有 P1 零件和 STL 未改变。[球冠文件](../arrays/example_sphere_4x4_R80.json)仅用于软件，不是本打印件的改版；用法见[阵列与校准说明](../../desktop_app/ARRAY_CALIBRATION.md)。
+
 - 仓库现有 `hardware/Haptics_4x4_R5_12VDC/` 工程及 Gerber：80×88 mm 板框、11 mm 阵列间距和四个 Ø3.2 mm 安装孔。PCB 厚度按 1.6 mm 名义值设计，装配前核实实物。
 - [Murata MA40S4S/R 官方手册](https://www.murata.com/-/media/webrenewal/products/sensor/ultrasonic/open/datasheet_maopn.ashx)：器件外径 Ø9.9±0.3 mm、壳高 7.1±0.3 mm、引脚长度 10±1 mm，以及安装和焊接注意事项。手册不构成本夹具的厂商认证。
 - [Panasonic EEUFR1V102 官方产品页](https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1V102)：壳体 Ø12.5×20 mm。

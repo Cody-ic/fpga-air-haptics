@@ -1,0 +1,230 @@
+{
+  "schema": "haptics-array-1",
+  "geometry_id": "d3e4d118b6b2ca2469907382",
+  "rows": 4,
+  "cols": 4,
+  "pitch_um": 11000,
+  "sound_speed_mm_s": 343000,
+  "origin": "acoustic_face_center",
+  "units": "mm",
+  "nominal": true,
+  "elements": [
+    {
+      "channel": 0,
+      "position_mm": [
+        -16.5,
+        -16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 1,
+      "position_mm": [
+        -5.5,
+        -16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 2,
+      "position_mm": [
+        5.5,
+        -16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 3,
+      "position_mm": [
+        16.5,
+        -16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 4,
+      "position_mm": [
+        -16.5,
+        -5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 5,
+      "position_mm": [
+        -5.5,
+        -5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 6,
+      "position_mm": [
+        5.5,
+        -5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 7,
+      "position_mm": [
+        16.5,
+        -5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 8,
+      "position_mm": [
+        -16.5,
+        5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 9,
+      "position_mm": [
+        -5.5,
+        5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 10,
+      "position_mm": [
+        5.5,
+        5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 11,
+      "position_mm": [
+        16.5,
+        5.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 12,
+      "position_mm": [
+        -16.5,
+        16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 13,
+      "position_mm": [
+        -5.5,
+        16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 14,
+      "position_mm": [
+        5.5,
+        16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "channel": 15,
+      "position_mm": [
+        16.5,
+        16.5,
+        0.0
+      ],
+      "normal": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  ],
+  "cad_frame": {
+    "translation_mm": [
+      0,
+      0,
+      53.2
+    ],
+    "rotation": "identity",
+    "source": "parameters.json"
+  }
+}

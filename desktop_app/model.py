@@ -1,17 +1,19 @@
 """Protocol configuration and a deliberately simplified relative acoustic model.
 
-Coordinates: mm in computation, integer um on the wire. Channel order is
-row-major, +x along columns, +y along rows, emitters at z=0 facing +z.
+Coordinates: mm in computation; target coordinates use integer um on the wire.
+Legacy arrays use a row-major plane. Explicit arrays retain each channel's XYZ
+and normal from the device geometry table (nm / ppm storage units).
 Phasor convention: p = sum(exp(j*(k*r + phase))/r). Consequently the
 transmit phase at a target is -k*r modulo 2*pi (not a positive delay).
 No calibrated pressure, element directivity, reflections, or haptic threshold.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import math
 import re
 
 import numpy as np
+from .array_geometry import Geometry, grid_geometry
 
 MAX_SCAN_POINTS = 256
 MAX_STROKES = 32
@@ -34,6 +36,8 @@ class ArraySpec:
     cols: int = 4
     pitch_um: int = 10000
     mapping: str = "ROW_MAJOR_XY"
+    geometry_id: str = ""
+    geometry: Geometry | None = field(default=None, compare=False, repr=False)
 
     @property
     def count(self):
@@ -43,17 +47,43 @@ class ArraySpec:
         if (type(self.rows) is not int or type(self.cols) is not int
                 or not 1 <= self.rows <= 16 or not 1 <= self.cols <= 16
                 or type(self.pitch_um) is not int or not 1000 <= self.pitch_um <= 30000
-                or self.mapping != "ROW_MAJOR_XY"):
+                or self.mapping not in ("ROW_MAJOR_XY", "EXPLICIT_XYZ")):
             raise ValueError("不支持的实际阵列尺寸、间距或通道映射")
+        if self.mapping == 'EXPLICIT_XYZ':
+            if not re.fullmatch('[0-9a-f]{24}', self.geometry_id):
+                raise ValueError('三维阵列缺少有效几何标识')
+            if self.geometry is not None and (self.geometry.validate().identity != self.geometry_id
+                    or (self.rows, self.cols, self.pitch_um) != (self.geometry.rows, self.geometry.cols, self.geometry.pitch_um)):
+                raise ValueError('三维阵列内容与设备声明不一致')
+        elif self.geometry is not None or self.geometry_id:
+            raise ValueError('自定义坐标必须使用三维阵列映射')
         return self
 
+    def resolved_geometry(self):
+        self.validate()
+        if self.mapping == 'ROW_MAJOR_XY':
+            return grid_geometry(self.rows, self.cols, self.pitch_um/1000)
+        if self.geometry is None:
+            raise ValueError('设备的三维阵列坐标尚未读取完整')
+        return self.geometry
+
+    @classmethod
+    def from_geometry(cls, geometry):
+        geometry.validate()
+        return cls(geometry.rows, geometry.cols, geometry.pitch_um,
+                   'EXPLICIT_XYZ', geometry.identity, geometry).validate()
+
     def wire(self):
-        return dict(hw_rows=self.rows, hw_cols=self.cols, hw_pitch_um=self.pitch_um, mapping=self.mapping)
+        fields = dict(hw_rows=self.rows, hw_cols=self.cols, hw_pitch_um=self.pitch_um, mapping=self.mapping)
+        if self.mapping == 'EXPLICIT_XYZ':
+            fields['geometry_id'] = self.geometry_id
+        return fields
 
     @classmethod
     def from_wire(cls, fields):
         return cls(int(fields["hw_rows"]), int(fields["hw_cols"]),
-                   int(fields["hw_pitch_um"]), fields["mapping"]).validate()
+                   int(fields["hw_pitch_um"]), fields["mapping"],
+                   fields.get('geometry_id', '') if fields['mapping'] == 'EXPLICIT_XYZ' else '').validate()
 
 
 @dataclass(frozen=True)
@@ -240,16 +270,7 @@ def config_from_document(data):
 def array_coordinates(config):
     if not isinstance(config, ArraySpec):
         raise TypeError("阵元坐标必须来自实际 ArraySpec")
-    return _rectangular_coordinates(config)
-
-
-def _rectangular_coordinates(config):
-    config.validate()
-    pitch = config.pitch_um / 1000
-    x = (np.arange(config.cols) - (config.cols - 1) / 2) * pitch
-    y = (np.arange(config.rows) - (config.rows - 1) / 2) * pitch
-    xx, yy = np.meshgrid(x, y)
-    return np.column_stack((xx.ravel(), yy.ravel(), np.zeros(config.count)))
+    return np.array(config.resolved_geometry().positions_mm)
 
 
 def _polyline(points, fraction):
@@ -359,11 +380,11 @@ def trajectory_bounds(config):
 def focus_phases(config, focus_mm, array):
     """Quantized phase *advance* codes for the documented phasor convention."""
     r = np.linalg.norm(array_coordinates(array) - np.asarray(focus_mm), axis=1) / 1000
-    cycles = np.remainder(-r * config.carrier_hz / 343.0, 1.0)
+    cycles = np.remainder(-r * config.carrier_hz / (array.resolved_geometry().sound_speed_mm_s/1000), 1.0)
     return (np.floor(cycles * config.phase_steps + 0.5).astype(int) % config.phase_steps)
 
 
-def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71, plane="XY"):
+def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71, plane="XY", channel_mask=None):
     """Return normalized |p|, NOT Pa, SPL, tactile intensity or modulation envelope.
 
     The normalization uses ideal coherent pressure at the specified target for
@@ -380,7 +401,7 @@ def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71,
     if focus.shape != (3,) or not np.isfinite(focus).all() or focus[2] <= 0:
         raise ValueError("焦点坐标无效")
     low, high = trajectory_bounds(config)
-    span = max(45.0, max(array.rows, array.cols) * array.pitch_um / 2000 + 15,
+    span = max(45.0, float(np.abs(coords[:, :2]).max()) + 20,
                abs(focus[0]) + 25, abs(focus[1]) + 25,
                np.abs(np.r_[low[:2], high[:2]]).max() / 1000 + 15)
     horizontal = np.linspace(-span, span, resolution)
@@ -389,11 +410,13 @@ def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71,
     xx, vv = np.meshgrid(horizontal, vertical)
     yy, zz = (vv, np.full_like(xx, focus[2])) if plane == "XY" else (np.full_like(xx, focus[1]), vv)
     pressure = np.zeros_like(xx, dtype=np.complex128)
-    k = 2 * math.pi * config.carrier_hz / 343.0
+    k = 2 * math.pi * config.carrier_hz / (array.resolved_geometry().sound_speed_mm_s/1000)
     if enabled and config.level:
-        for (x, y, _), phase in zip(coords, phases):
-            distance = np.sqrt((xx - x) ** 2 + (yy - y) ** 2 + zz ** 2) / 1000
+        for i, ((x, y, z), phase) in enumerate(zip(coords, phases)):
+            if channel_mask is not None and not (channel_mask >> i) & 1:
+                continue
+            distance = np.maximum(.0001, np.sqrt((xx - x) ** 2 + (yy - y) ** 2 + (zz-z) ** 2) / 1000)
             pressure += np.exp(1j * (k * distance + phase * 2 * math.pi / config.phase_steps)) / distance
-    reference = np.sum(1000 / np.linalg.norm(coords - focus, axis=1))
+    reference = np.sum(1000 / np.maximum(.1, np.linalg.norm(coords - focus, axis=1)))
     values = np.abs(pressure) / reference * config.level / 100
     return horizontal, vertical, values

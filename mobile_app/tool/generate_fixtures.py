@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 from desktop_app.demo import DemoDevice
 from desktop_app.model import ArraySpec, Config, focus_phases, trajectory_sample
 from desktop_app.protocol import encode
+from desktop_app.array_geometry import grid_geometry
 
 
 def main():
@@ -32,6 +33,10 @@ def main():
     data = dict(array=array.wire(), frames=[raw.decode('ascii') for raw in hello+applied],
                 receiver_capture=capture[0].decode('ascii'),
                 vectors=vectors, document=dict(schema='haptics-config-3', config=config.wire()))
+    sphere = DemoDevice(clock=lambda: 12.0, array=ArraySpec.from_geometry(grid_geometry(radius_mm=80)))
+    sphere.boot = 'sphere01'
+    data['geometry_hello'] = sphere.handle(encode('CMD', 4, 'HELLO'))[0].decode('ascii')
+    data['geometry_chunk'] = sphere.handle(encode('CMD', 5, 'GEOMETRY', start=0, count=16))[0].decode('ascii')
     target = ROOT/'mobile_app/test/fixtures/python_reference.json'
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')

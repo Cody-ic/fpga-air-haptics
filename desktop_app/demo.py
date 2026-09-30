@@ -4,6 +4,7 @@ from dataclasses import replace
 import time
 import uuid
 import math
+import cmath
 
 from .model import (ArraySpec, Config, Workspace, SHAPES, MAX_PATH_POINTS,
                     MAX_SCAN_POINTS, MAX_STROKES, focus_phases, trajectory_sample)
@@ -29,16 +30,25 @@ class DemoDevice:
         self.started = self.birth
         self.connected = False
         self.last_capture = -1.0
+        self.saved_offsets = (0,) * self.array.count
+        self.phase_offsets = self.saved_offsets
+        self.channel_mask = (1 << self.array.count)-1
+        self.calibration_trial = False
 
     def _play_time(self):
         return self.elapsed + (self.clock() - self.started if self.state == "RUNNING" else 0)
 
     def _stop(self, reason="NONE"):
         self.state, self.elapsed, self.reason = "IDLE", 0.0, reason
+        if self.calibration_trial:
+            self.phase_offsets = self.saved_offsets
+            self.channel_mask = (1 << self.array.count)-1
+            self.calibration_trial = False
+            self.revision += 1
 
     def snapshot(self):
         focus, scan_on, stroke = trajectory_sample(self.config, self._play_time())
-        phases = focus_phases(self.config, focus, self.array)
+        phases = (focus_phases(self.config, focus, self.array) + self.phase_offsets) % self.config.phase_steps
         self.sample += 1
         fields = dict(boot=self.boot, sample=self.sample,
                       uptime_ms=int((self.clock() - self.birth) * 1000), rev=self.revision,
@@ -47,7 +57,8 @@ class DemoDevice:
                       scan_on=int(scan_on), stroke_index=stroke,
                       simulated=1, reason=self.reason, **self.config.wire(), **self.array.wire(),
                       fx_um=round(focus[0] * 1000), fy_um=round(focus[1] * 1000),
-                      fz_um=round(focus[2] * 1000), phases=",".join(map(str, phases)))
+                      fz_um=round(focus[2] * 1000), phases=",".join(map(str, phases)),
+                      channel_mask=self.channel_mask, phase_offsets=','.join(map(str, self.phase_offsets)))
         return encode("TEL", 0, "STATE", **fields)
 
     def handle(self, raw):
@@ -57,16 +68,22 @@ class DemoDevice:
         verb, fields = frame.verb, frame.fields
         try:
             if verb == "HELLO":
+                if self.mode == 'REMOTE':
+                    self._stop()
                 self.connected = True
                 self.last_ping = self.clock()
                 return [encode("ACK", frame.seq, verb, proto=VERSION, device="DEMO-FPGA",
                                boot=self.boot, simulated=1, hb_ms=3000, adc_capture=1,
-                               caps="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS",
+                               caps="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION",
                                max_rows=16, max_cols=16, max_channels=256, max_nodes=MAX_PATH_POINTS,
                                max_scan_points=MAX_SCAN_POINTS, max_strokes=MAX_STROKES,
                                **self.array.wire(), **self.workspace.wire()), self.snapshot()]
             if not self.connected:
                 raise ValueError("HANDSHAKE_REQUIRED")
+            if verb == 'GEOMETRY':
+                if set(fields) != {'start', 'count'}:
+                    raise ValueError('BAD_FIELDS')
+                return [encode('ACK', frame.seq, verb, **self.array.resolved_geometry().chunk(int(fields['start']), int(fields['count'])))]
             if verb == "CAPTURE":
                 if fields:
                     raise ValueError("BAD_FIELDS")
@@ -76,6 +93,11 @@ class DemoDevice:
                 self.last_capture = now
                 # Illustrative signal only; not an acoustic simulation or measurement.
                 amplitude = (180*self.config.level/100 if self.state == "RUNNING" else 0)
+                if self.calibration_trial and self.state == 'RUNNING':
+                    # Synthetic channel errors exercise calibration; no physical pressure claim.
+                    signal = sum((18+i % 5)*cmath.exp(2j*math.pi*((i*7 % 19)+self.phase_offsets[i])/64)
+                                 for i in range(self.array.count) if self.channel_mask >> i & 1)
+                    amplitude = min(500., abs(signal))
                 raw = [round(602+amplitude*math.sin(2*math.pi*i/10)+2*math.sin(i*1.7))
                        for i in range(200)]
                 return [encode("ACK", frame.seq, verb, boot=self.boot, rev=self.revision,
@@ -86,8 +108,30 @@ class DemoDevice:
                 self.last_ping = self.clock()
             elif verb == "STOP":
                 self._stop()
+            elif verb == 'CALIBRATION':
+                if self.mode != 'REMOTE':
+                    raise ValueError('LOCAL_CONTROL')
+                if self.state != 'IDLE':
+                    raise ValueError('BUSY')
+                if (set(fields) != {'action', 'offsets', 'mask', 'geometry_id'}
+                        or fields['geometry_id'] != self.array.resolved_geometry().identity
+                        or fields['action'] not in ('trial', 'store')):
+                    raise ValueError('BAD_CALIBRATION')
+                offsets = tuple(int(v) for v in fields['offsets'].split(','))
+                mask = int(fields['mask'])
+                if len(offsets) != self.array.count or any(not 0 <= v < self.config.phase_steps for v in offsets) or not 0 < mask < (1 << self.array.count):
+                    raise ValueError('BAD_CALIBRATION')
+                trial = fields['action'] == 'trial'
+                if trial and (self.config.shape != 'POINT' or self.config.mod_hz or self.config.level != 100):
+                    raise ValueError('STEADY_POINT_REQUIRED')
+                if not trial and mask != (1 << self.array.count)-1:
+                    raise ValueError('BAD_CALIBRATION')
+                self.phase_offsets, self.channel_mask, self.calibration_trial = offsets, mask, trial
+                if not trial:
+                    self.saved_offsets = offsets
+                self.revision += 1
             elif verb == "MODE":
-                if self.state != "IDLE":
+                if self.state != "IDLE" or self.calibration_trial:
                     raise ValueError("BUSY")
                 if fields.get("value") not in ("LOCAL", "REMOTE"):
                     raise ValueError("BAD_MODE")
@@ -107,6 +151,9 @@ class DemoDevice:
                 if any(fields.get(key) != str(value) for key, value in self.array.wire().items()):
                     raise ValueError("HARDWARE_MISMATCH")
                 self.config = config  # atomic after complete validation
+                self.phase_offsets = self.saved_offsets
+                self.channel_mask = (1 << self.array.count)-1
+                self.calibration_trial = False
                 self.revision += 1
                 self.elapsed = 0
             elif verb == "START":
