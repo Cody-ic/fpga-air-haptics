@@ -18,7 +18,7 @@ def main():
     assert mesh['common_datum']['modeled_face_height_spread_mm'] < 1e-5
     assert all(r['window_clear'] for r in mesh['common_datum']['resistor_checks'])
     sketches=[s for d in native['documents'] for s in d.get('sketches',[])]
-    assert len(sketches)==16 and all(s['constraint_status']==3 and s['fixed_relation_count']==0 for s in sketches)
+    assert len(sketches)==15 and all(s['constraint_status']==3 and s['fixed_relation_count']==0 for s in sketches)
     for p in (OUT/'solidworks').iterdir():
         if not p.name.startswith('~') and p.suffix.upper() in ('.SLDPRT','.SLDASM'):
             assert p.stat().st_mtime <= (OUT/'native_validation.json').stat().st_mtime, ('Recheck native CAD',p)
@@ -28,7 +28,7 @@ def main():
     shutil.copyfile(ROOT/'parameters.json',OUT/'parameters.json')
     summary=dict(passed=True,fully_defined_sketches=len(sketches),fixed_sketch_relations=0,
                  printable_part_types=6,printed_or_load_tested=False,
-                 note='P2 common Z0 datum, 16 through bores, resistor window verified against R5 positions.')
+                 note='P3 flat guide without PCB support posts; external PCB holder required; common Z0 datum preserved.')
     (OUT/'constraint_update.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
     included=[]
     for p in OUT.rglob('*'):

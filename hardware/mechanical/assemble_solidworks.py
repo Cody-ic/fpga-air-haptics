@@ -26,6 +26,7 @@ def placements():
     stand += [item('05_pcb_standoff_35',[x,y,p['base_thickness_mm']],color='#4d6376')
               for x,y in p['mount_centers_mm']]
     stand += [item('06_m4_nut_knob',[x,-106,z],RX_POS90,'#e4a345') for x in [-55,55]]
+    # PCB position is the nominal external-holder setup, no longer set by posts.
     jig=[item('01_array_alignment_jig',[0,0,0],color='#476f94'),
          item('REF_common_flat_datum',[0,0,0],color='#bdcdd5'),
          item('REF_16_emitters',[0,0,0],color='#cbd2dc'),

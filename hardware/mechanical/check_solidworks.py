@@ -147,7 +147,7 @@ def main():
     finally:
         for kind, key, value in old:
             getattr(sw.APP, 'SetUserPreference'+kind)(key, value)
-    report = dict(passed=True, scope='Native parts, common datum, nominal emitters/PCB and assumed front resistor envelopes; fasteners/padding/back electronics not modeled',
+    report = dict(passed=True, scope='Native parts, common datum, nominal emitters/PCB and assumed front resistor envelopes; external PCB holder/fasteners/padding/back electronics not modeled',
                   documents=results)
     (sw.OUT/'native_validation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     assert len(travel_checks) == 2

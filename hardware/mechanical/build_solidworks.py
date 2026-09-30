@@ -176,10 +176,8 @@ def guide():
         p.circle(x,y,1.7)
     p.polygon(chamfer_rectangle(*PARAMS['resistor_window_mm'],1.5))
     p.end('Guide_16_THROUGH_bores_and_R2_R16_window',0,PARAMS['guide_depth_mm'])
-    p.begin()
-    for x,y in PARAMS['mount_centers_mm']:
-        p.circle(x,y,3.6);p.circle(x,y,1.7)
-    p.end('PCB_front_datum_10p6',PARAMS['guide_depth_mm'],PARAMS['datum_to_pcb_front_mm'])
+    # Flat guide only. A separate workholding fixture must support the PCB;
+    # emitting front rims still register on the one external datum plate.
     return p.finish()
 
 

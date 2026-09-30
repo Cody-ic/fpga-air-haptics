@@ -84,6 +84,10 @@ def vertical_hits(mesh, x, y):
 def check_datum_and_relief():
     guide=triangles(OUT/'stl/01_array_alignment_jig.stl')
     datum=triangles(OUT/'reference/REF_common_flat_datum.stl')
+    assert abs(guide[:,:,2].min()) < 1e-5
+    assert abs(guide[:,:,2].max()-P['guide_depth_mm']) < 1e-5
+    for x,y in P['mount_centers_mm']:
+        assert np.allclose(vertical_hits(guide,x+2.8,y),[0,P['guide_depth_mm']])
     # Positive control: a solid region must be detected by the same probe code.
     assert np.allclose(vertical_hits(guide,-30,0),[0,P['guide_depth_mm']])
     bodies=json.loads((OUT/'REF_16_emitters.json').read_text(encoding='utf-8'))['boxes_mm']
@@ -115,6 +119,8 @@ def check_datum_and_relief():
                 assert not len(vertical_hits(guide,x+dx,y+dy)), r
         resistor_checks.append(dict(**r,window_clear=True))
     return dict(reference='one external unprinted flat plate, top Z=0',
+                flat_guide_height_mm=float(guide[:,:,2].max()),pcb_support_posts=False,
+                external_pcb_holder_required=True,
                 modeled_face_height_spread_mm=max(bottoms)-min(bottoms),
                 through_bore_vertical_probes=probes,resistor_checks=resistor_checks,
                 resistor_envelope_assumed_mm=P['resistor_envelope_mm'],
