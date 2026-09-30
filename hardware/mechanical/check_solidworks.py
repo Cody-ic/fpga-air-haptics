@@ -2,6 +2,7 @@
 import argparse
 import json
 import math
+from pathlib import Path
 import pythoncom
 import win32com.client as wc
 import build_solidworks as sw
@@ -98,6 +99,8 @@ def main():
         for kind, key, value in preferences:
             getattr(sw.APP, 'SetUserPreference'+kind)(key, value)
         for path in sorted((sw.OUT/'solidworks').glob('*.SLDPRT')):
+            if path.name.startswith('~'):
+                continue
             doc = open_doc(path)
             doc.ForceRebuild3(False)
             errors, sketches = inspect_features(doc)
@@ -112,11 +115,16 @@ def main():
             print('Checked', path.name, flush=True)
         transforms = json.loads((sw.OUT/'assemblies.json').read_text(encoding='utf-8'))
         for path in sorted((sw.OUT/'solidworks').glob('*.SLDASM')):
+            if path.name.startswith('~'):
+                continue
             doc = open_doc(path)
             doc.ForceRebuild3(False)
             assembly = sw.typed('IAssemblyDoc', doc)
             components = assembly.GetComponents(False)
             assert len(components) == len(transforms[path.stem])
+            resolved_paths = [Path(sw.typed('IComponent2', c).GetPathName()).resolve() for c in components]
+            assert all(p.parent == (sw.OUT/'solidworks').resolve() for p in resolved_paths), resolved_paths
+            assert sorted(p.stem for p in resolved_paths) == sorted(i['name'] for i in transforms[path.stem])
             expected = sorted(tuple(item['rotation']+[v/1000 for v in item['translation_mm']]+[1.,0.,0.,0.])
                               for item in transforms[path.stem])
             actual = sorted(tuple(sw.typed('IMathTransform', sw.typed('IComponent2', c).Transform2).ArrayData)
@@ -130,7 +138,8 @@ def main():
             manager.Done()
             assert count == 0, (path.name, count)
             results.append(dict(file=path.name, reopened=True, component_count=len(components),
-                                transforms_verified=True, modeled_interferences=count))
+                                transforms_verified=True, local_part_references_verified=True,
+                                modeled_interferences=count))
             if path.stem == 'Wrist_support_assembly':
                 travel_checks = check_travel(doc, assembly)
             sw.APP.CloseDoc(doc.GetTitle())
@@ -138,7 +147,7 @@ def main():
     finally:
         for kind, key, value in old:
             getattr(sw.APP, 'SetUserPreference'+kind)(key, value)
-    report = dict(passed=True, scope='Native parts and nominal reference bodies; hardware/padding not modeled',
+    report = dict(passed=True, scope='Native parts, common datum, nominal emitters/PCB and assumed front resistor envelopes; fasteners/padding/back electronics not modeled',
                   documents=results)
     (sw.OUT/'native_validation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     assert len(travel_checks) == 2

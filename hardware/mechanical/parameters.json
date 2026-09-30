@@ -1,5 +1,5 @@
 {
-  "revision": "P1-20260929",
+  "revision": "P2-20260930",
   "array_rows": 4,
   "array_cols": 4,
   "pitch_mm": 11.0,
@@ -7,6 +7,10 @@
   "body_nominal_height_mm": 7.1,
   "guide_bore_mm": 10.4,
   "guide_depth_mm": 5.0,
+  "resistor_window_mm": [25.5, -36.0, 33.5, -11.0],
+  "resistor_envelope_mm": [3.0, 1.6, 1.2],
+  "reference_plate_bounds_mm": [-50.0, -61.0, 53.0, 50.0],
+  "reference_plate_thickness_mm": 4.0,
   "datum_to_pcb_front_mm": 10.6,
   "pcb_thickness_assumed_mm": 1.6,
   "pcb_standoff_mm": 35.0,

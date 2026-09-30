@@ -27,7 +27,9 @@ def placements():
               for x,y in p['mount_centers_mm']]
     stand += [item('06_m4_nut_knob',[x,-106,z],RX_POS90,'#e4a345') for x in [-55,55]]
     jig=[item('01_array_alignment_jig',[0,0,0],color='#476f94'),
+         item('REF_common_flat_datum',[0,0,0],color='#bdcdd5'),
          item('REF_16_emitters',[0,0,0],color='#cbd2dc'),
+         item('REF_top_resistor_envelopes',[0,0,p['datum_to_pcb_front_mm']],color='#d39748'),
          item('REF_pcb_80x88',[0,0,p['datum_to_pcb_front_mm']],color='#258572')]
     return {'Wrist_support_assembly':stand,'Array_jig_assembly':jig}
 

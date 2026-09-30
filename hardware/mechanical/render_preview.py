@@ -54,11 +54,11 @@ def render(name, entries, camera, target, scale, exploded=False):
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
     for entry in entries:
-        extra = 18 if exploded and 'emitters' in entry['name'] else 50 if exploded and 'pcb' in entry['name'] else 0
+        extra = 18 if exploded and 'emitters' in entry['name'] else 50 if exploded and any(
+            tag in entry['name'] for tag in ('pcb','resistor')) else 0
         part(entry, extra)
-    if exploded:
-        cube('External flat reference plate', (0,-.005,-.002), (.104,.114,.004), '#b5c5cc')
-    cube('Floor', (0,0,-.006 if exploded else -.002), (2,2,.002), '#edf1f5')
+    has_datum=any('datum' in entry['name'] for entry in entries)
+    cube('Floor', (0,0,-.006 if has_datum else -.002), (2,2,.002), '#edf1f5')
     bpy.ops.object.camera_add(location=camera)
     cam=bpy.context.object
     cam.rotation_euler=(Vector(target)-cam.location).to_track_quat('-Z','Y').to_euler()
@@ -87,3 +87,6 @@ def render(name, entries, camera, target, scale, exploded=False):
 
 render('wrist_support', ASSEMBLIES['Wrist_support_assembly'], (.27,.30,.26), (0,-.036,.078), .285)
 render('alignment_exploded', ASSEMBLIES['Array_jig_assembly'], (.17,-.23,.13), (0,-.003,.030), .175, True)
+render('alignment_jig', [entry for entry in ASSEMBLIES['Array_jig_assembly']
+                        if 'jig' in entry['name'] or 'datum' in entry['name']],
+       (.13,-.18,.18), (0,-.006,.003), .150)
