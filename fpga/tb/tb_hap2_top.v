@@ -29,7 +29,9 @@ module tb_hap2_top;
     wire signed [PT_BITS-1:0] focus_x, focus_y;
     wire scan_on, output_on, walk_running, beat_pulse;
     wire [5:0] stroke_index;
-    wire [15:0] array_pos, array_neg;
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [15:0] array_pos, array_neg;   // 测试只盯第 0 路，其余位在波形上看
+    /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_top #(
         .CLK_HZ  (CLK_HZ),
@@ -56,9 +58,21 @@ module tb_hap2_top;
         .array_neg   (array_neg)
     );
 
-    // 数 16 路输出上出现的上升沿（用来核对「跑起来方波在动、停下来不动」）
-    integer drive_edges = 0;
-    always @(posedge array_pos[0]) drive_edges = drive_edges + 1;
+    // 数 16 路输出上出现的上升沿（用来核对「跑起来方波在动、停下来不动」），
+    // 顺便记住每一路有没有出现过高低电平（有没有哪一路一直不动）
+    /* verilator lint_off BLKSEQ */
+    /* verilator lint_off UNUSEDSIGNAL */
+    integer drive_edges;
+    integer drive_edges_neg;
+    reg [15:0] seen_hi, seen_lo;
+    always @(posedge array_pos[0]) drive_edges     = drive_edges + 1;
+    always @(posedge array_neg[0]) drive_edges_neg = drive_edges_neg + 1;
+    always @(posedge clk) begin
+        seen_hi <= seen_hi | array_pos;
+        seen_lo <= seen_lo | ~array_pos;
+    end
+    /* verilator lint_on UNUSEDSIGNAL */
+    /* verilator lint_on BLKSEQ */
 
     // ---------------- 板子发出来的字节 ----------------
     wire [7:0] board_byte;
@@ -386,6 +400,21 @@ module tb_hap2_top;
             end else begin
                 $display("  驱动输出：这段时间上升沿 %0d 个（%0s）",
                          drv_after - drv_before, want_edges ? "应当有" : "应当没有");
+            end
+            if (want_edges) begin
+                // 顺便核对：16 路都必须既出现过低电平也出现过高电平（没有哪一路是死的），
+                // 互补输出那一路也应该在动
+                checks = checks + 1;
+                if ((seen_hi & seen_lo) !== 16'hFFFF) begin
+                    $display("[用例 %0d] 有通道一直是同一个电平：高过=%b 低过=%b  **失败**",
+                             case_i, seen_hi, seen_lo);
+                    errors = errors + 1;
+                end
+                checks = checks + 1;
+                if (drive_edges_neg == 0) begin
+                    $display("[用例 %0d] 互补输出（array_neg）没有任何跳变  **失败**", case_i);
+                    errors = errors + 1;
+                end
             end
         end
     endtask

@@ -26,6 +26,8 @@ module tb_phase;
     reg [31:0] plan  [0:10*NCASES-1];
     reg [31:0] focus [0:63];            // 每帧三个数：fx_um fy_um z_um
     reg [7:0]  codes [0:511];           // 每帧 count 个相位码
+    reg [31:0] cfgv  [0:6];             // 换载波回归用的 7 个字段
+    reg [7:0]  cfgc  [0:31];            // 两个载波各自的 16 个期望码
 
     // ---------------- 三个实例 ----------------
     reg  [31:0] cfg_carrier, cfg_steps, cfg_z;
@@ -133,9 +135,15 @@ module tb_phase;
             cfg_change = 1'b1;
             @(negedge clk);
             cfg_change = 1'b0;
-            repeat (4) @(negedge clk);       // 等 busy 真的拉起来
+            // 配置换了之后引擎会自己做两件事：重算常数 A，再强制重算一遍相位表。
+            // 两次都会产生 done，所以这里把「done 记录」清掉之后直接等它全部做完，
+            // 免得把强制重算那一次的 done 当成第一帧算完。
+            repeat (4) @(negedge clk);
+            got_d0 = 1'b0;
+            got_d1 = 1'b0;
+            got_d2 = 1'b0;
             timeout = 0;
-            while (ph_busy && timeout < 20000) begin
+            while (!(got_d0 && got_d1 && got_d2) && timeout < 20000) begin
                 @(negedge clk);
                 timeout = timeout + 1;
             end
@@ -159,12 +167,8 @@ module tb_phase;
                     @(negedge clk);
                     timeout = timeout + 1;
                 end
-                checks = checks + 1;
-                if (!(got_d0 && got_d1 && got_d2)) begin
-                    $display("[相位 %0d 第 %0d 帧] 三个实例没都算完（%b%b%b）  **失败**",
-                             which, frame_i, got_d0, got_d1, got_d2);
-                    errors = errors + 1;
-                end
+                // 焦点和上一次相同的话，引擎会跳过不重算（省电），所以这里
+                // 等不到 done 是正常的——真正的判据是下面的逐通道比对。
                 stuck = 0;
                 for (ch = 0; ch < count; ch = ch + 1) begin
                     want = codes[c_off + frame_i*count + ch];
@@ -189,10 +193,85 @@ module tb_phase;
         end
     endtask
 
+    // 回归：配置换了、但机器停着（协议规定 CONFIG 只能在待机发，走步器没有节拍脉冲）。
+    // 相位表必须自己重算一遍，否则状态帧回传的还是旧载波算出来的码。
+    task check_cfgchange;
+        integer i, tmo;
+        begin
+            // ---- 配置 A：正常算一次 ----
+            cfg_carrier = cfgv[0];
+            cfg_steps   = cfgv[1];
+            cfg_z       = cfgv[6];
+            fx_21       = $signed(cfgv[4]) * 2;
+            fy_21       = $signed(cfgv[5]) * 2;
+            @(negedge clk);
+            cfg_change = 1'b1;
+            @(negedge clk);
+            cfg_change = 1'b0;
+            repeat (4) @(negedge clk);
+            tmo = 0;
+            while (ph_busy && tmo < 20000) begin @(negedge clk); tmo = tmo + 1; end
+            got_d0 = 1'b0; got_d1 = 1'b0; got_d2 = 1'b0;
+            @(negedge clk);
+            ph_start = 1'b1;
+            @(negedge clk);
+            ph_start = 1'b0;
+            tmo = 0;
+            while (!(got_d0 && got_d1 && got_d2) && tmo < 20000) begin
+                @(negedge clk); tmo = tmo + 1;
+            end
+            for (i = 0; i < 16; i = i + 1) begin
+                ch = i;
+                read_ch(0);
+                checks = checks + 1;
+                if (got !== cfgc[i]) begin
+                    $display("[换载波] 载波 %0d 第 %0d 路：实测 %0d，期望 %0d  **失败**",
+                             cfgv[0], i, got, cfgc[i]);
+                    errors = errors + 1;
+                end
+            end
+
+            // ---- 配置 B：只换载波，**不给 start**，看它自己会不会重算 ----
+            cfg_carrier = cfgv[2];
+            cfg_steps   = cfgv[3];
+            @(negedge clk);
+            cfg_change = 1'b1;
+            @(negedge clk);
+            cfg_change = 1'b0;
+            repeat (4) @(negedge clk);
+            tmo = 0;
+            while (ph_busy && tmo < 20000) begin @(negedge clk); tmo = tmo + 1; end
+            got_d0 = 1'b0; got_d1 = 1'b0; got_d2 = 1'b0;
+            tmo = 0;
+            while (!(got_d0 && got_d1 && got_d2) && tmo < 20000) begin
+                @(negedge clk); tmo = tmo + 1;
+            end
+            checks = checks + 1;
+            if (!(got_d0 && got_d1 && got_d2)) begin
+                $display("[换载波] 换了载波、机器停着，相位表没有自己重算  **失败**");
+                errors = errors + 1;
+            end
+            for (i = 0; i < 16; i = i + 1) begin
+                ch = i;
+                read_ch(0);
+                checks = checks + 1;
+                if (got !== cfgc[16 + i]) begin
+                    $display("[换载波] 载波 %0d 第 %0d 路：实测 %0d，期望 %0d  **失败**",
+                             cfgv[2], i, got, cfgc[16 + i]);
+                    errors = errors + 1;
+                end
+            end
+            $display("  换载波回归：%0d Hz → %0d Hz，机器停着也重算了，逐通道与参考实现一致",
+                     cfgv[0], cfgv[2]);
+        end
+    endtask
+
     initial begin
         $readmemh("tb/vectors/phase_plan.mem",  plan);
         $readmemh("tb/vectors/phase_focus.mem", focus);
         $readmemh("tb/vectors/phase_codes.mem", codes);
+        $readmemh("tb/vectors/phase_cfg.mem",   cfgv);
+        $readmemh("tb/vectors/phase_cfg_codes.mem", cfgc);
 
         rst_n       = 1'b0;
         cfg_carrier = 32'd40000;
@@ -211,6 +290,7 @@ module tb_phase;
         $display("相位计算仿真：焦点 → 每一路的相位码");
         $display("=========================================");
 
+        check_cfgchange;          // 先跑换载波回归（配置换了但机器停着）
         for (case_i = 0; case_i < NCASES; case_i = case_i + 1) check_case(case_i);
 
         $display("=========================================");

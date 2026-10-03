@@ -47,6 +47,7 @@ module tb_out;
     wire [31:0] ph_pub_fz_um;
     /* verilator lint_on UNUSEDSIGNAL */
     wire [CH-1:0] out_pos, out_neg;
+    wire [CH-1:0] dt_pos, dt_neg;      // 第二路实例：带死区的互补输出
     /* verilator lint_off UNUSEDSIGNAL */
     wire [8:0] cnt_dummy;
     /* verilator lint_on UNUSEDSIGNAL */
@@ -74,6 +75,44 @@ module tb_out;
         .tbl_addr(ph_rd2_addr), .tbl_data(ph_rd2_data),
         .out_pos(out_pos), .out_neg(out_neg)
     );
+
+    // 同一个相位表再喂一路「带死区」的输出级，专门验死区：
+    // 上下管任何时刻都不许同时导通，但换向时必须留出空档。
+    hap2_out #(
+        .ROWS(ROWS), .COLS(COLS), .CLK_HZ(50_000_000), .ACC_BITS(ACC_W), .DEAD_CYC(4)
+    ) u_out_dt (
+        .clk(clk), .rst_n(rst_n),
+        .cfg_carrier_hz(cfg_carrier), .cfg_phase_steps(cfg_steps),
+        .cfg_change(cfg_change),
+        .enable(enable),
+        .tbl_new(ph_done),
+        .tbl_addr(ph_rd2_addr), .tbl_data(ph_rd2_data),
+        .out_pos(dt_pos), .out_neg(dt_neg)
+    );
+
+    /* verilator lint_off BLKSEQ */
+    // 注意：输出寄存器比 enable 晚一拍，统计时要拿「当时那个 enable」
+    reg     enable_q;           // 初值在 initial 里给
+    integer dt_both_high;       // 上下管同时为高的拍数：必须恒为 0
+    integer dt_gap_run;         // 当前连续「两个都为低」的拍数
+    integer dt_gap_max;         // 观测到的最大空档
+    integer dt0_bad;            // DEAD_CYC=0 那一路不互补的拍数：也必须恒为 0
+    always @(posedge clk) begin
+        enable_q <= enable;
+        if (enable_q) begin
+            if ((dt_pos & dt_neg) != 0) dt_both_high = dt_both_high + 1;
+            if (dt_pos[0] == 1'b0 && dt_neg[0] == 1'b0) begin
+                dt_gap_run = dt_gap_run + 1;
+                if (dt_gap_run > dt_gap_max) dt_gap_max = dt_gap_run;
+            end else begin
+                dt_gap_run = 0;
+            end
+            if (out_pos[0] == out_neg[0]) dt0_bad = dt0_bad + 1;
+        end else begin
+            dt_gap_run = 0;
+        end
+    end
+    /* verilator lint_on BLKSEQ */
 
     integer errors = 0;
     integer checks = 0;
@@ -177,6 +216,7 @@ module tb_out;
         ph_start    = 1'b0;
         enable      = 1'b0;
         edge_cnt0   = 0;
+        dt_both_high = 0; dt_gap_run = 0; dt_gap_max = 0; dt0_bad = 0;
         repeat (10) @(negedge clk);
         rst_n = 1'b1;
         repeat (10) @(negedge clk);
@@ -270,6 +310,28 @@ module tb_out;
             end
         end
         $display("  相位：以第 0 路的上升沿为基准，逐路量了上升沿位置（共 %0d 路）", count);
+
+        // ---- 死区：上下管不许同时导通，但换向必须留空档 ----
+        checks = checks + 1;
+        if (dt_both_high != 0) begin
+            $display("[输出-死区] 上下两个输出同时为高 %0d 拍（半桥这样会烧管子）  **失败**",
+                     dt_both_high);
+            errors = errors + 1;
+        end else begin
+            $display("  死区：DEAD_CYC=4 那一路，上下管同时为高 0 拍");
+        end
+        checks = checks + 1;
+        if (dt_gap_max < 3 || dt_gap_max > 6) begin
+            $display("[输出-死区] 换向时的空档是 %0d 拍，期望 4 拍左右  **失败**", dt_gap_max);
+            errors = errors + 1;
+        end else begin
+            $display("  死区：每次换向都有 %0d 拍「两个都不导通」", dt_gap_max);
+        end
+        checks = checks + 1;
+        if (dt0_bad != 0) begin
+            $display("[输出-死区] DEAD_CYC=0 那一路不是严格互补：%0d 拍  **失败**", dt0_bad);
+            errors = errors + 1;
+        end
 
         // ---- 暂停（enable=0）：输出必须立刻关掉 ----
         @(negedge clk);

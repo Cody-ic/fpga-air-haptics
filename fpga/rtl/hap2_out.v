@@ -137,7 +137,12 @@ module hap2_out #(
             /* verilator lint_off UNUSEDSIGNAL */
             reg  [DEAD_MAX-1:0] dly;    // 死区延迟链（不用互补输出时也留着，方便看波形）
             /* verilator lint_on UNUSEDSIGNAL */
-            wire                sq_d = dly[DEAD_MAX-1]; // 延迟 DEAD_CYC 拍
+            // 死区：两个输出各自把**上升沿**推迟 DEAD_CYC 拍，下降沿立即跟随。
+            //   out_pos 要 sq 连续为高够久才拉高；out_neg 要 sq 连续为低够久才拉高。
+            // 这样每次换向都留出一段「两个都不导通」的空档，而不是两个一起导通。
+            // DEAD_CYC=0 时直通，就是严格的互补输出。
+            wire sq_pos = (DEAD_CYC == 0) ? sq        : (sq  & (&dly));
+            wire sq_neg = (DEAD_CYC == 0) ? (~sq)     : (~sq & (~|dly));
 
             always @(posedge clk) begin
                 if (!rst_n) begin
@@ -146,10 +151,9 @@ module hap2_out #(
                     dly         <= {(DEAD_MAX){1'b0}};
                 end else begin
                     dly         <= (dly << 1) | sq;   // 移位插入，位宽无关
-                    out_pos[gi] <= enable & sq;
-                    // 互补输出：用一个「晚一点点的」方波取反，就有了两边都不导通的空档。
-                    // enable=0 时两个输出一起拉低（半桥上下管都关，最安全）。
-                    out_neg[gi] <= enable & (DEAD_CYC == 0 ? ~sq : ~sq_d);
+                    out_pos[gi] <= enable & sq_pos;
+                    // enable=0 时两个输出一起拉低（半桥上下管都关，最安全）
+                    out_neg[gi] <= enable & sq_neg;
                 end
             end
         end

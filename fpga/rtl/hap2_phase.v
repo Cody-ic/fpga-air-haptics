@@ -297,7 +297,9 @@ module hap2_phase #(
                         a_numer <= ({{38{1'b0}}, cfg_carrier_hz[17:0]} << 39) + A_ROUND;
                         a_start <= 1'b1;
                         p_state <= P_ACALC;
-                    end else if (start && need_sweep) begin
+                    // force_sweep 自己就能触发：CONFIG 之后机器是停着的（协议规定只能待机配置），
+                    // 走步器没有节拍脉冲，光等 start 会一直等不到、回传的还是旧载波的码。
+                    end else if (force_sweep || (start && need_sweep)) begin
                         begin_sweep;
                         p_state <= P_GO;
                     end

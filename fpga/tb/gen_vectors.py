@@ -468,6 +468,30 @@ def build_phase_vectors():
     return listing
 
 
+def build_phase_cfgchange():
+    """回归用例：配置换了、但机器停着（协议规定 CONFIG 只能在待机发，所以没有节拍脉冲）。
+
+    相位表必须自己重算一遍，否则状态帧回传的还是旧载波算出来的码。
+    这里用同一阵列、同一焦点、只换载波，两个载波的期望码都由参考实现给出。
+    """
+    array = ArraySpec(4, 4, 10000, "ROW_MAJOR_XY")
+    focus_mm = (0.0, 0.0, 150.0)
+    carriers = (40000, 60000)
+    steps, z_um = 64, 150000
+    code_lines = []
+    for carrier in carriers:
+        codes = focus_phases(Config(carrier_hz=carrier, phase_steps=steps, z_um=z_um),
+                             focus_mm, array)
+        code_lines.append(" ".join("%02X" % int(v) for v in codes))
+    # 一行 7 个字段：载波A 档数A 载波B 档数B 焦点x 焦点y 高度
+    (VECTOR_DIR / "phase_cfg.mem").write_text(
+        "%08X %08X %08X %08X %08X %08X %08X\n"
+        % (carriers[0], steps, carriers[1], steps, 0, 0, z_um), encoding="ascii")
+    (VECTOR_DIR / "phase_cfg_codes.mem").write_text(
+        "\n".join(code_lines) + "\n", encoding="ascii")
+    return [(c, array.count) for c in carriers]
+
+
 # 端到端用例（tb_hap2_top 用）：一条一条真实报文，按顺序发给板子
 TOP_SKETCH  = "1000:2000,11000:2000|1000:7000,11000:7000"
 TOP_TOOFINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 61))
@@ -680,6 +704,9 @@ def main():
     for name, rows, cols, pipe, steps, carrier, z_um, frames in phase_list:
         print("  %-22s %d×%d 路（%d 路）、并行 %d、%d 档、载波 %d Hz、z=%.1f mm、%d 帧"
               % (name, rows, cols, rows * cols, pipe, steps, carrier, z_um / 1000, frames))
+    cfgchange = build_phase_cfgchange()
+    print("相位-换载波回归：载波 %d → %d Hz（机器停着也要重算）"
+          % (cfgchange[0][0], cfgchange[1][0]))
 
     # 单点草图的相位串期望值：单点 + 不动，所以相位是唯一确定的，
     # 端到端测试直接搜这一段文本，等于把「相位引擎 + 快照 + 回传」一整条链钉死。
