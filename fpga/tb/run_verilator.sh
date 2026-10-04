@@ -52,6 +52,14 @@ echo "-----------------------------------------"
 "$BUILD_DIR/obj_traj/traj_sim"
 
 echo
+echo "=== 预设图形（形状 → 点表，与参考实现逐点对拍）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_shape -o shape_sim -Mdir "$BUILD_DIR/obj_shape" \
+          rtl/hap2_shape.v rtl/hap2_pt_table.v tb/tb_shape.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_shape/shape_sim"
+
+echo
 echo "=== 相位计算（焦点 → 相位码，与参考实现逐通道对拍）==="
 verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           --top-module tb_phase -o phase_sim -Mdir "$BUILD_DIR/obj_phase" \
@@ -76,7 +84,8 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
-          rtl/hap2_traj_scan.v rtl/hap2_phase.v rtl/hap2_out.v \
+          rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
+          rtl/hap2_phase.v rtl/hap2_out.v \
           rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"

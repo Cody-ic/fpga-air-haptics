@@ -35,12 +35,25 @@ module hap2_traj_scan #(
     /* verilator lint_on UNUSEDSIGNAL */
     input  wire [ADDR_W:0]           src_len,
     input  wire                      plan_start,   // 单拍：把点表／段表编译成节拍表
+    // ---- 预设图形（CIRCLE / SQUARE / ... ）----
+    // preset=1 表示这次生效的是预设图形：点表由 hap2_shape 生成，而且没有抬笔时间
+    input  wire                      preset,
+    input  wire                      shape_start,  // 单拍：开始生成预设图形的点表
+    input  wire [2:0]                shape,        // 和字段解析层一致
+    input  wire [31:0]               cfg_radius_um,
+    input  wire [31:0]               cfg_cx_um,
+    input  wire [31:0]               cfg_cy_um,
+    output wire                      shape_busy,
+    output wire                      shape_done,   // 单拍：点表生成完了
     // 单拍：这份配置被接受了，可以把抄下来的原文公布出去（STATE 里要回传它）。
     // 被拒绝的配置不能公布，否则回传的 scan_paths 和实际生效的图形对不上。
     input  wire                      txt_commit,
     // 和 txt_commit 同时给出：这次生效的配置里**没有草图**（预设图形，或 NONE），
     // 那回传的 scan_paths 就应当老老实实写 NONE
     input  wire                      txt_none,
+    // 命令层说「这份已生效的配置有没有可用的节拍表」。注意它和 txt_none 不是一回事：
+    // 预设图形没有草图文案（txt_none=1），但它**有**轨迹表。
+    input  wire                      traj_ready_in,
     // 节拍表要用的是**影子配置**里的这两个值（编译在配置生效之前发生）
     input  wire [31:0]               cfg_repeat_millihz,
     input  wire [31:0]               cfg_blank_us,
@@ -183,8 +196,10 @@ module hap2_traj_scan #(
                 pub_x0  <= plan_x0;
                 pub_y0  <= plan_y0;
                 pub_moves <= move_count; // 行数也要跟着切，不然走步器会按错的行数循环
-            end else if (txt_commit && txt_none) begin
-                traj_ok <= 1'b0;         // 这次生效的配置没有草图（预设图形 / NONE）
+            end else if (!traj_ready_in) begin
+                // 命令层说这份生效的配置没有轨迹表（比如 CUSTOM + scan_paths=NONE）。
+                // 注意不能用 txt_none 判断：预设图形也没有草图文案，但它有轨迹表。
+                traj_ok <= 1'b0;
             end
         end
     end
@@ -193,6 +208,78 @@ module hap2_traj_scan #(
     // 免得把上一份图形的表当成这一份继续走。
     wire signed [PT_BITS-1:0] walk_x0 = traj_ok ? pub_x0 : {PT_BITS{1'b0}};
     wire signed [PT_BITS-1:0] walk_y0 = traj_ok ? pub_y0 : {PT_BITS{1'b0}};
+
+    // ---------------- 预设图形：单独一份点表 ----------------
+    // 填这张表的是 hap2_shape（草图那条路填的是解析器自己的表）。两张表共用
+    // 计划模块发出的地址，读出来的数据用 preset 选一份。
+    wire                      sh_pt_wr_en, sh_st_wr_en, sh_counts_en;
+    wire [7:0]                sh_pt_wr_addr;
+    wire signed [PT_BITS-1:0] sh_pt_wr_x, sh_pt_wr_y, sh_pt_x, sh_pt_y;
+    wire [4:0]                sh_st_wr_addr;
+    wire [8:0]                sh_st_wr_start, sh_st_wr_len, sh_st_start, sh_st_len;
+    wire [8:0]                sh_npt_in, sh_tab_npt;
+    wire [5:0]                sh_nst_in, sh_tab_nst;
+
+    hap2_shape #(
+        .PT_BITS (PT_BITS)
+    ) u_shape (
+        .clk          (clk),
+        .rst_n        (rst_n),
+        .start        (shape_start),
+        .shape        (shape),
+        .radius_um    (cfg_radius_um),
+        .cx_um        (cfg_cx_um),
+        .cy_um        (cfg_cy_um),
+        .pt_wr_en     (sh_pt_wr_en),
+        .pt_wr_addr   (sh_pt_wr_addr),
+        .pt_wr_x      (sh_pt_wr_x),
+        .pt_wr_y      (sh_pt_wr_y),
+        .st_wr_en     (sh_st_wr_en),
+        .st_wr_addr   (sh_st_wr_addr),
+        .st_wr_start  (sh_st_wr_start),
+        .st_wr_len    (sh_st_wr_len),
+        .counts_en    (sh_counts_en),
+        .npt_out      (sh_npt_in),
+        .nst_out      (sh_nst_in),
+        .busy         (shape_busy),
+        .done         (shape_done)
+    );
+
+    hap2_pt_table #(
+        .PT_BITS (PT_BITS), .MAX_PTS (MAX_PTS), .MAX_STK (MAX_STK)
+    ) u_shape_tab (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .wr_en       (sh_pt_wr_en),
+        .wr_addr     (sh_pt_wr_addr),
+        .wr_x        (sh_pt_wr_x),
+        .wr_y        (sh_pt_wr_y),
+        .st_wr_en    (sh_st_wr_en),
+        .st_wr_addr  (sh_st_wr_addr),
+        .st_wr_start (sh_st_wr_start),
+        .st_wr_len   (sh_st_wr_len),
+        .counts_en   (sh_counts_en),
+        .npt_in      (sh_npt_in),
+        .nst_in      (sh_nst_in),
+        .rd_pt_addr  (pt_addr),
+        .rd_pt_x     (sh_pt_x),
+        .rd_pt_y     (sh_pt_y),
+        .rd_st_addr  (st_addr),
+        .rd_st_start (sh_st_start),
+        .rd_st_len   (sh_st_len),
+        .point_count (sh_tab_npt),
+        .stroke_count(sh_tab_nst)
+    );
+
+    // 计划模块读哪一份：草图 or 预设图形
+    wire signed [PT_BITS-1:0] plan_pt_x = preset ? sh_pt_x : pt_x;
+    wire signed [PT_BITS-1:0] plan_pt_y = preset ? sh_pt_y : pt_y;
+    wire [8:0]                plan_st_start = preset ? sh_st_start : st_start;
+    wire [8:0]                plan_st_len   = preset ? sh_st_len   : st_len;
+    wire [8:0]                plan_npt      = preset ? sh_tab_npt  : point_count;
+    wire [5:0]                plan_nst      = preset ? sh_tab_nst  : stroke_count;
+    // 预设图形没有抬笔时间（参考实现里 blank_us 只对多段草图生效）
+    wire [31:0]               plan_blank    = preset ? 32'd0 : cfg_blank_us;
 
     hap2_traj #(
         .PT_BITS (PT_BITS), .MAX_PTS (MAX_PTS), .MAX_STK (MAX_STK),
@@ -208,16 +295,16 @@ module hap2_traj_scan #(
         .walk_x0            (walk_x0),
         .walk_y0            (walk_y0),
         .walk_moves         (pub_moves),
-        .point_count        (point_count),
-        .stroke_count       (stroke_count),
+        .point_count        (plan_npt),
+        .stroke_count       (plan_nst),
         .pt_addr            (pt_addr),
-        .pt_x               (pt_x),
-        .pt_y               (pt_y),
+        .pt_x               (plan_pt_x),
+        .pt_y               (plan_pt_y),
         .st_addr            (st_addr),
-        .st_start           (st_start),
-        .st_len             (st_len),
+        .st_start           (plan_st_start),
+        .st_len             (plan_st_len),
         .cfg_repeat_millihz (cfg_repeat_millihz),
-        .cfg_blank_us       (cfg_blank_us),
+        .cfg_blank_us       (plan_blank),
         .plan_busy          (plan_busy),
         .plan_done          (plan_done),
         .plan_fault         (plan_fault),
@@ -244,5 +331,6 @@ module hap2_traj_scan #(
     assign focus_y      = traj_ok ? walk_fy     : {PT_BITS{1'b0}};
     assign scan_on      = traj_ok ? walk_scan   : 1'b0;
     assign stroke_index = traj_ok ? walk_stroke : 6'd0;
+
 
 endmodule

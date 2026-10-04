@@ -141,6 +141,9 @@ module hap2_top #(
     wire        traj_parse_start, traj_plan_start;
     wire        traj_txt_commit;
     wire        traj_txt_none;
+    wire        traj_shape_start, traj_preset, traj_shape_done, traj_shape_busy;
+    wire [2:0]  traj_shape_kind;
+    wire [31:0] traj_radius_um, traj_cx_um, traj_cy_um;
     wire        traj_parse_ok, traj_parse_bad, traj_none;
     wire        traj_plan_busy, traj_plan_done, traj_plan_fault;
     wire [ADDR_W:0] traj_src_off, traj_src_len;
@@ -180,6 +183,13 @@ module hap2_top #(
         .traj_plan_start  (traj_plan_start),
         .traj_txt_commit  (traj_txt_commit),
         .traj_txt_none    (traj_txt_none),
+        .traj_shape_start (traj_shape_start),
+        .traj_preset      (traj_preset),
+        .traj_shape_done  (traj_shape_done),
+        .traj_shape_kind  (traj_shape_kind),
+        .traj_radius_um   (traj_radius_um),
+        .traj_cx_um       (traj_cx_um),
+        .traj_cy_um       (traj_cy_um),
         .traj_parse_ok    (traj_parse_ok),
         .traj_parse_bad   (traj_parse_bad),
         .traj_none        (traj_none),
@@ -237,8 +247,20 @@ module hap2_top #(
         .src_off            (traj_src_off),
         .src_len            (traj_src_len),
         .plan_start         (traj_plan_start),
+        // 预设图形这条支路
+        .preset             (traj_preset),
+        .shape_start        (traj_shape_start),
+        // 注意用的是**影子配置**里的形状参数：生成发生在配置生效之前，
+        // 用已生效的旧配置会生成出上一种图形
+        .shape              (traj_shape_kind),
+        .cfg_radius_um      (traj_radius_um),
+        .cfg_cx_um          (traj_cx_um),
+        .cfg_cy_um          (traj_cy_um),
+        .shape_busy         (traj_shape_busy),
+        .shape_done         (traj_shape_done),
         .txt_commit         (traj_txt_commit),
         .txt_none           (traj_txt_none),
+        .traj_ready_in      (traj_ready),
         .cfg_repeat_millihz (traj_repeat_millihz),
         .cfg_blank_us       (traj_blank_us),
         .parse_busy         (scan_parse_busy),

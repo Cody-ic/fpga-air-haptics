@@ -78,8 +78,15 @@ module hap2_traj_plan #(
     // 协议规定：单点或长度小于 0.1 mm 的一笔按 0.1 mm 权重分配（0.1 mm = 200 个 0.5 µm 单位）
     localparam [31:0] MIN_WEIGHT  = 32'd200;
 
-    // 行数上限：每个点后跟一段，每笔末尾再加一条跳转段，单点笔还要多一条「原地停留」
-    localparam integer MAX_MV = MAX_PTS + MAX_STK;
+    // 节拍表是双缓冲的，索引写成 {半边选择, 行号}：行号是 9 位（0~511），
+    // 再拼 1 位选半边，所以每张表必须有 2×512 = 1024 行。
+    // 这里必须按**拼接后的位宽**来开：以前按 2*MAX_MV = 576 开，
+    // 结果「后半边」的第 65 行起就写到数组外面去了（写到 576 行以后的位置），
+    // 写不进去也不报错——圆是 128 行，走完半边就撞上了这个坑，焦点会冻住。
+    // 需要多少行：每个点后跟一段，每笔末尾再加一条跳转段，单点笔还要多一条
+    // 「原地停留」，上限是 MAX_PTS + MAX_STK = 256 + 32 = 288 ≤ 512，
+    // 所以每一半 512 行的容量是够的。
+    localparam integer MV_ROWS = 1 << 9;    // 每一半的行数（和行号位宽对齐）
 
     // 注意点表是同步读：「给地址那一拍的下下拍」数据才有效（给地址的下一拍，
     // 数据寄存器的输出还是**上一个**地址的内容）。所以每次取点前都要空等一拍：
@@ -109,6 +116,7 @@ module hap2_traj_plan #(
     localparam [4:0] S_P2_BY  = 5'd22;
     localparam [4:0] S_P2_BYW = 5'd23;
     localparam [4:0] S_DONE   = 5'd24;
+    localparam [4:0] S_DONE2  = 5'd25;   // 再等一拍才发 done：让别人读得到 settle 好的行数
 
     // ---- 段表本地副本（避开跨模块读的时序讲究，后面反复要用）----
     reg [8:0]  s_start [0:MAX_STK-1];
@@ -122,11 +130,11 @@ module hap2_traj_plan #(
 
     // ---- 输出：移动表 ----
     // 上下两半：一半在用，一半在写（双缓冲，见 tbl_sel）
-    reg [23:0]        beats_tab [0:2*MAX_MV-1];
-    reg signed [31:0] stx_tab   [0:2*MAX_MV-1];
-    reg signed [31:0] sty_tab   [0:2*MAX_MV-1];
-    reg               scan_tab  [0:2*MAX_MV-1];
-    reg [5:0]         stroke_tab[0:2*MAX_MV-1];
+    reg [23:0]        beats_tab [0:2*MV_ROWS-1];
+    reg signed [31:0] stx_tab   [0:2*MV_ROWS-1];
+    reg signed [31:0] sty_tab   [0:2*MV_ROWS-1];
+    reg               scan_tab  [0:2*MV_ROWS-1];
+    reg [5:0]         stroke_tab[0:2*MV_ROWS-1];
 
     reg [4:0]  state;
     reg        fail;
@@ -528,8 +536,15 @@ module hap2_traj_plan #(
 
                 // ---- 抬笔跳转段：从本笔末点直线走到下一笔首点 ----
                 S_P2_BLKA: begin
-                    pt_addr <= s_start[s[4:0]] + s_npt[s[4:0]] - 9'd1;
-                    state   <= S_P2_BLKB;
+                    if (blank_beats == 24'd0) begin
+                        // 没有抬笔时间（预设图形就是这样）：这一笔后面不写跳转行，直接换下一笔，
+                        // 否则会多出一行 0 拍、走步器会卡在那里
+                        s     <= s + 6'd1;
+                        state <= S_P2_STK;
+                    end else begin
+                        pt_addr <= s_start[s[4:0]] + s_npt[s[4:0]] - 9'd1;
+                        state   <= S_P2_BLKB;
+                    end
                 end
 
                 S_P2_BLKB: begin
@@ -612,8 +627,14 @@ module hap2_traj_plan #(
                 end
 
                 S_DONE: begin
-                    busy       <= 1'b0;
+                    // 先把「算出来多少行」写进去，再等一拍才拉 done：
+                    // 下游是在 done 那一拍读这个数的，同一拍写会读到旧值。
                     move_count <= mv_wr;
+                    state      <= S_DONE2;
+                end
+
+                S_DONE2: begin
+                    busy       <= 1'b0;
                     if (fail) fault <= 1'b1;
                     else      done  <= 1'b1;
                     state      <= S_IDLE;

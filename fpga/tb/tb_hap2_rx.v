@@ -146,8 +146,26 @@ module tb_hap2_rx;
     wire            walk_start, walk_stop, traj_ready;
     wire [ADDR_W:0] traj_src_off, traj_src_len;
     wire [31:0]     traj_repeat_millihz, traj_blank_us_w;
+    wire            traj_shape_start, traj_preset;
+    wire [2:0]      traj_shape_kind;
+    wire [31:0]     traj_radius_um, traj_cx_um, traj_cy_um;
     wire [7:0]      dummy_buf_data;
     /* verilator lint_on UNUSEDSIGNAL */
+
+    // 轨迹子系统的「替身」：这个测试台只测收报文和命令裁决，不接真的草图子系统。
+    // 命令层现在是「预设图形先让形状生成器出点表（traj_shape_start），再编译节拍表
+    // （traj_plan_start），两步的完成脉冲都回来了才回 ACK」。这里让两个完成脉冲
+    // 一拍后就跟上，否则命令层会一直等在待办状态里，后面每条命令都只回 BUSY。
+    reg traj_shape_done_r, traj_plan_done_r;
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            traj_shape_done_r <= 1'b0;
+            traj_plan_done_r  <= 1'b0;
+        end else begin
+            traj_shape_done_r <= traj_shape_start;
+            traj_plan_done_r  <= traj_plan_start;
+        end
+    end
 
     hap2_cmd #(
         .ADDR_W (ADDR_W)
@@ -175,10 +193,17 @@ module tb_hap2_rx;
         // 这个测试台只测收报文和命令裁决，草图子系统不接（由 tb_hap2_top 端到端测）
         .traj_parse_start (traj_parse_start),
         .traj_plan_start  (traj_plan_start),
+        .traj_shape_start (traj_shape_start),
+        .traj_preset      (traj_preset),
+        .traj_shape_kind  (traj_shape_kind),
+        .traj_radius_um   (traj_radius_um),
+        .traj_cx_um       (traj_cx_um),
+        .traj_cy_um       (traj_cy_um),
+        .traj_shape_done  (traj_shape_done_r),
         .traj_parse_ok    (1'b0),
         .traj_parse_bad   (1'b0),
         .traj_none        (1'b0),
-        .traj_plan_done   (1'b0),
+        .traj_plan_done   (traj_plan_done_r),
         .traj_plan_fault  (1'b0),
         .traj_src_off     (traj_src_off),
         .traj_src_len     (traj_src_len),

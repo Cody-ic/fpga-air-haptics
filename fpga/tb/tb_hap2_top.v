@@ -381,6 +381,70 @@ module tb_hap2_top;
 
     // 盯住 16 路驱动输出：跑起来方波要在动，停下来必须彻底不动
     integer drv_before, drv_after;
+    // 预设图形（圆）跑起来的样子：焦点在半径 r 的圆上转，而且全程都在扫描
+    integer cc_beats, cc_blank, cc_rmin, cc_rmax, cc_fxmin, cc_fxmax, cc_fymin, cc_fymax;
+    task watch_circle;
+        input integer radius_units;     // 0.5 µm 单位
+        input integer cycles;
+        integer c, rr;
+        begin
+            cc_beats = 0; cc_blank = 0;
+            cc_rmin = 100000000; cc_rmax = -100000000;
+            cc_fxmin = 100000000; cc_fxmax = -100000000;
+            cc_fymin = 100000000; cc_fymax = -100000000;
+            for (c = 0; c < cycles; c = c + 1) begin
+                @(negedge clk);
+                if (beat_pulse) begin
+                    cc_beats = cc_beats + 1;
+                    if (!scan_on) cc_blank = cc_blank + 1;
+                    // 到圆心的距离（整数近似就够判数量级）
+                    rr = (focus_x > 0 ? focus_x : -focus_x)
+                       + (focus_y > 0 ? focus_y : -focus_y);
+                    if (focus_x < cc_fxmin) cc_fxmin = focus_x;
+                    if (focus_x > cc_fxmax) cc_fxmax = focus_x;
+                    if (focus_y < cc_fymin) cc_fymin = focus_y;
+                    if (focus_y > cc_fymax) cc_fymax = focus_y;
+                    if (rr < cc_rmin) cc_rmin = rr;
+                    if (rr > cc_rmax) cc_rmax = rr;
+                end
+            end
+            checks = checks + 1;
+            if (cc_beats == 0) begin
+                $display("[用例 %0d] 预设图形没有节拍  **失败**", case_i);
+                errors = errors + 1;
+            end
+            // 预设图形没有抬笔：整圈每一拍都在扫描（参考实现里 blank_us 只对多段草图生效）
+            checks = checks + 1;
+            if (cc_blank != 0) begin
+                $display("[用例 %0d] 预设图形不该有抬笔时间，却出现 %0d 拍 scan_on=0  **失败**",
+                         case_i, cc_blank);
+                errors = errors + 1;
+            end
+            // 圆上的点到圆心距离 ≈ 半径。这里用 |x|+|y| 近似（它落在 [r, 1.42r]），
+            // 再留 1/16 的余量：节拍表把圆切成 128 条弦，弦中间的采样点比半径
+            // 最多短 r×(1−cos(π/128)) ≈ 12 个 0.5 µm 单位，不留余量会误判。
+            checks = checks + 1;
+            if (cc_rmin < radius_units * 15 / 16 || cc_rmax > radius_units * 3 / 2) begin
+                $display("[用例 %0d] 焦点不在半径 %0d 的圆上：|x|+|y| 落在 %0d～%0d  **失败**",
+                         case_i, radius_units, cc_rmin, cc_rmax);
+                errors = errors + 1;
+            end
+            checks = checks + 1;
+            // 「动没动」要看两个轴里跨得更大的那个：8 ms 的窗口只覆盖一圈的
+            // 115°，如果这一小段正好压着圆的起点（x 最大处），光看 x 方向的
+            // 跨度就只有 0.48r，会误判；这时 y 方向的跨度是 1.7r。
+            if ((cc_fxmax - cc_fxmin < radius_units / 2)
+                && (cc_fymax - cc_fymin < radius_units / 2)) begin
+                $display("[用例 %0d] 焦点没怎么动：x 从 %0d 到 %0d、y 从 %0d 到 %0d  **失败**",
+                         case_i, cc_fxmin, cc_fxmax, cc_fymin, cc_fymax);
+                errors = errors + 1;
+            end
+            $display("  预设图形（圆，半径 %0d 个 0.5 µm 单位）：%0d 拍全程扫描，|x|+|y| 在 %0d～%0d，x 从 %0d 到 %0d、y 从 %0d 到 %0d",
+                     radius_units, cc_beats, cc_rmin, cc_rmax,
+                     cc_fxmin, cc_fxmax, cc_fymin, cc_fymax);
+        end
+    endtask
+
     task check_drive;
         input integer want_edges;    // 1 = 这段时间里必须有上升沿，0 = 一个都不许有
         begin
@@ -587,7 +651,7 @@ module tb_hap2_top;
         wait_frames(2);
         found("state=IDLE");
 
-        // ---- 14. 预设图形：配置通过，但轨迹还没做 ----
+        // ---- 14. 预设图形（圆）：点表由板子自己按形状生成 ----
         case_i = 13;
         clear_rx;
         send_case(13);
@@ -596,19 +660,21 @@ module tb_hap2_top;
         // 预设图形没有草图，回传的 scan_paths 必须是 NONE
         found("scan_paths=NONE blank_us=");
 
-        // ---- 15. 启动预设图形：焦点原地不动、扫描开关保持 0 ----
+        // ---- 15. 启动预设图形：焦点沿半径 20 mm 的圆转，全程都在扫描 ----
         case_i = 14;
         clear_rx;
         send_case(14);
         wait_frames(2);
         found("state=RUNNING");
-        repeat (60000) @(negedge clk);
         checks = checks + 1;
-        if (focus_x !== 0 || focus_y !== 0 || scan_on !== 1'b0 || output_on !== 1'b0) begin
-            $display("[用例 %0d] 预设图形没有轨迹，应当原地不动：焦点 (%0d,%0d) 扫描 %b 输出 %b  **失败**",
-                     case_i, focus_x, focus_y, scan_on, output_on);
+        if (output_on !== 1'b1) begin
+            // 预设图形整圈都在扫描，等级 30 > 0，又处在 RUNNING，输出必须是开的
+            $display("[用例 %0d] 预设图形跑起来之后输出没开（scan_on=%b）  **失败**",
+                     case_i, scan_on);
             errors = errors + 1;
         end
+        // 半径 20000 µm = 40000 个 0.5 µm 单位
+        watch_circle(40000, 400000);
 
         // ---- 16. 停止 ----
         case_i = 15;

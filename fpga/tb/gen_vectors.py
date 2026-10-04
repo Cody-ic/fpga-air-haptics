@@ -27,6 +27,15 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Windows 的控制台默认是 GBK，打不出「µ」这类字符会直接抛异常、
+# 让整个脚本以失败退出（向量其实已经写完了，但调用方会以为出错）。
+# 这里只是让打印降级成「?」，不影响文件内容和退出码。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 from desktop_app.demo import DemoDevice
 from desktop_app.model import ArraySpec, Config, focus_phases, trajectory_sample
 from desktop_app.protocol import encode
@@ -285,6 +294,14 @@ STK_SLOTS = 32                 # 每个用例在段表向量里占多少行
 # 小台阶连一拍都分不到，应当整份拒绝（而不是偷偷把图形拉长）。
 _TOO_FINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 201))
 
+# 一笔里塞 129 个点（128 个小段）的近似圆：圆心挪到 (30000, 30000)、半径 20000 µm，
+# 所以坐标全是正的。这条用例专门盯「节拍表一张半边装不下 64 行」那个坑：
+# 128 行必须原样写进去、走回来时一整圈都在动，而不是走到第 65 行就没数据了。
+_MANY_POINT_CIRCLE = ",".join(
+    "%d:%d" % (round(30000 + 20000 * math.cos(2 * math.pi * i / 128)),
+               round(30000 + 20000 * math.sin(2 * math.pi * i / 128)))
+    for i in range(129))
+
 TRAJ_CASES = [
     ("two_strokes",    "0:0,10000:0|0:5000,10000:5000",            40000, 2000, 1),
     ("square",         "0:0,10000:0,10000:10000,0:10000,0:0",      40000, 2000, 1),
@@ -292,6 +309,8 @@ TRAJ_CASES = [
     ("short_strokes",  "0:0,20:0|0:0,20:0",                        20000, 2000, 1),
     ("many_segments",  "0:0,10000:0,10000:10000|0:0,5000:0,5000:5000,0:5000,0:0",
                                                                    40000, 2000, 1),
+    # 一条笔 129 个点（128 小段）：节拍表要写出 128 行以上，装到「另一半」里去
+    ("long_stroke_129", _MANY_POINT_CIRCLE,                        40000, 2000, 1),
     # 拒绝：抬笔时间已经把一圈占满（协议里那条 10^9 的规则）
     ("reject_blank",   "0:0,1000:0",                               200000, 100000, 0),
     # 拒绝：算下来每个点分到的拍数不足 1（严格来说 T 必须大于 N×B）
@@ -498,6 +517,41 @@ TOP_TOOFINE = "0:0,100000:0" + "".join(",100000:%d" % i for i in range(1, 61))
 TOP_DOT     = "10:2"      # 4 个字符的单点草图：容易和 NONE 混，专门测一测
 
 
+def build_shape_vectors():
+    """预设图形生成器的对拍向量：形状 → 期望顶点表（0.5 µm 单位）。
+
+    顶点就是 desktop_app/model.py 里 trajectory_point() 用的那套折线顶点
+    （圆取 i/128 处的精确 cos/sin），再按配置把圆心与半径加上去。
+    """
+    cases = [
+        ("point",    0, 20000,  5000, -3000, [(0.0, 0.0)]),
+        ("line_x",   1, 20000,     0,     0, [(-1.0, 0.0), (1.0, 0.0), (-1.0, 0.0)]),
+        ("line_y",   2, 15000,  1000,  2000, [(0.0, -1.0), (0.0, 1.0), (0.0, -1.0)]),
+        ("square",   4, 20000,     0,     0, [(-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1)]),
+        ("triangle", 5, 30000, -5000,     0, [(0, 1), (-0.866, -0.5), (0.866, -0.5), (0, 1)]),
+        ("arrow",    6, 25000,     0,  1000,
+         [(-1, 0), (1, 0), (0.3, 0.7), (1, 0), (0.3, -0.7), (1, 0), (-1, 0)]),
+        ("circle",   3, 20000,     0,     0,
+         [(math.cos(2 * math.pi * i / 128), math.sin(2 * math.pi * i / 128))
+          for i in range(129)]),
+    ]
+    plan_lines, pt_lines, listing = [], [], []
+    off = 0
+    for name, shp, r_um, cx_um, cy_um, units in cases:
+        for ux, uy in units:
+            x = int(round(2 * (cx_um + r_um * ux)))
+            y = int(round(2 * (cy_um + r_um * uy)))
+            pt_lines.append("%06X %06X" % (x & 0x1FFFFF, y & 0x1FFFFF))
+        plan_lines.append("%01X %06X %08X %08X %03X %04X"
+                          % (shp, r_um, cx_um & 0xFFFFFFFF, cy_um & 0xFFFFFFFF,
+                             len(units), off))
+        listing.append((name, shp, len(units), r_um, cx_um, cy_um))
+        off += len(units)
+    (VECTOR_DIR / "shape_plan.mem").write_text("\n".join(plan_lines) + "\n", encoding="ascii")
+    (VECTOR_DIR / "shape_pts.mem").write_text("\n".join(pt_lines) + "\n", encoding="ascii")
+    return listing
+
+
 def build_top_cases(device):
     """端到端测试要发的报文（真实 CRC）。返回 [(名字, 报文, 说明)]。"""
     dev = dict(device.array.wire())
@@ -530,13 +584,13 @@ def build_top_cases(device):
          "单点草图：4 个字符，不能误判成 NONE"),
         ("start_dot", encode("CMD", 12, "START"), "启动单点草图：原地停留，扫描开关照常开关"),
         ("stop_dot", encode("CMD", 13, "STOP"), "停止"),
-        # 预设图形（CIRCLE 等）的轨迹还没做：配置接受，但没有节拍表，
-        # 启动之后焦点原地不动、扫描开关保持 0。这一条就是把现状钉住，
-        # 等相位那一轮做完再改期望值。
+        # 预设图形（CIRCLE 等）：点表由板子按形状参数自己生成（不是电脑下发草图），
+        # 生成完再照常编译节拍表。回传的 scan_paths 应当是 NONE。
         ("config_circle", cfg(14, shape="CIRCLE", radius_um=20000,
                               repeat_millihz=40000, level=30),
-         "预设图形：配置通过，轨迹暂不可用"),
-        ("start_preset", encode("CMD", 15, "START"), "启动预设图形：焦点原地不动"),
+         "预设图形：配置通过，板子自己生成圆的点表"),
+        ("start_preset", encode("CMD", 15, "START"),
+         "启动预设图形：焦点沿半径 20 mm 的圆转，整圈都在扫描"),
         ("stop_preset", encode("CMD", 16, "STOP"), "停止"),
         ("ping", encode("CMD", 17, "PING"), "探活：只回 ACK"),
         # 最后一条：一份 CONFIG 后面**紧跟着**一条探活，中间没有任何等待。
@@ -707,6 +761,11 @@ def main():
     cfgchange = build_phase_cfgchange()
     print("相位-换载波回归：载波 %d → %d Hz（机器停着也要重算）"
           % (cfgchange[0][0], cfgchange[1][0]))
+    shape_list = build_shape_vectors()
+    print("预设图形：%d 种" % len(shape_list))
+    for name, shp, npt, r_um, cx_um, cy_um in shape_list:
+        print("  %-10s 形状 %d、半径 %5d µm、圆心 (%d,%d)、%d 个顶点"
+              % (name, shp, r_um, cx_um, cy_um, npt))
 
     # 单点草图的相位串期望值：单点 + 不动，所以相位是唯一确定的，
     # 端到端测试直接搜这一段文本，等于把「相位引擎 + 快照 + 回传」一整条链钉死。

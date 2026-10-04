@@ -169,13 +169,13 @@ module hap2_traj_walk #(
                             acc_x      <= acc_x_run;         // 走一步
                             acc_y      <= acc_y_run;
                             beats_left <= beats_left - 24'd1;
-                            if (beats_left == 24'd1) begin
+                        if (beats_left == 24'd1) begin
                                 // 这一行走完了：整行换掉（参数早就预取好了，不用等）
                                 step_x       <= n_step_x;
                                 step_y       <= n_step_y;
-                                beats_left   <= n_beats;
-                                scan_on      <= n_scan;
-                                stroke_index <= n_stroke;
+                            beats_left   <= n_beats;
+                            scan_on      <= n_scan;
+                            stroke_index <= n_stroke;
                                 rd_mv        <= rd_next;     // 接着预取下下行的后面一行
                                 pf           <= 2'd1;
                             end

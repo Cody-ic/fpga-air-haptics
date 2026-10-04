@@ -14,7 +14,7 @@ module tb_traj;
     localparam integer PT_BITS   = 21;
     localparam integer FRAC      = 16;
     localparam integer TICK_CYC  = 500;      // 50 MHz 下 10 µs = 500 个时钟
-    localparam integer CASES     = 8;
+    localparam integer CASES     = 9;
     localparam integer PT_SLOTS  = 256;      // 每个用例在点表里占多少行
     localparam integer STK_SLOTS = 32;       // 每个用例在段表里占多少行
     localparam integer MV_MAX    = 1024;     // 所有用例的节拍表行数之和
@@ -38,13 +38,16 @@ module tb_traj;
 
     // ---------------- 点表 / 段表（模仿 hap2_scan_parse 的读写口）----------------
     reg  [10:0] pt_base;                     // 这一路的点表基址（用例序号 × 256）
-    reg  [7:0]  st_base;                     // 这一路的段表基址（用例序号 × 32）
+    reg  [10:0] st_base;                     // 这一路的段表基址（用例序号 × 32；用例多了要留够位宽）
     wire [7:0]  pt_addr;
     wire [10:0] pt_full = pt_base + {3'b0, pt_addr};
     reg  signed [PT_BITS-1:0] pt_x, pt_y;
 
     wire [4:0]  st_addr;
-    wire [7:0]  st_full = st_base + {3'b0, st_addr};
+    /* verilator lint_off UNUSEDSIGNAL */
+    // 段表基址留的位宽比实际用的宽（用例变多时不用改这里）
+    wire [10:0] st_full = st_base + {6'b0, st_addr};
+    /* verilator lint_on UNUSEDSIGNAL */
     wire [8:0]  st_start = mem_stks[st_full];   // 段表是组合读（同拍出数据）
     wire [8:0]  st_len   = mem_stkl[st_full];
 

@@ -52,6 +52,9 @@ module hap2_cmd #(
     // ---- 轨迹子系统（多段草图 → 节拍表 → 走步器）----
     output reg             traj_parse_start,    // 单拍：解析草图文本
     output reg             traj_plan_start,     // 单拍：编译节拍表
+    output reg             traj_shape_start,    // 单拍：生成预设图形的点表
+    output reg             traj_preset,         // 1 = 这次生效的是预设图形（不是草图）
+    input  wire            traj_shape_done,     // 单拍：预设图形的点表生成完了
     output reg             traj_txt_commit,     // 单拍：配置被接受，原文可以对外公布
     output reg             traj_txt_none,       // 这份配置没有草图（预设图形或 NONE）
     input  wire            traj_parse_ok,       // 单拍：原文解析通过
@@ -63,6 +66,13 @@ module hap2_cmd #(
     output wire [ADDR_W:0] traj_src_len,
     output wire [31:0]     traj_repeat_millihz, // 编译用的是影子配置（编译发生在生效之前）
     output wire [31:0]     traj_blank_us,
+    // 生成预设图形要用的是**影子配置**里的形状参数（生成发生在配置生效之前）。
+    // 这一点和节拍表用 traj_repeat_millihz / traj_blank_us 是同一个道理：
+    // 拿「已生效的旧配置」去生成，会生成出上一种图形。
+    output wire [2:0]      traj_shape_kind,
+    output wire [31:0]     traj_radius_um,
+    output wire [31:0]     traj_cx_um,
+    output wire [31:0]     traj_cy_um,
     output reg             walk_start,          // 单拍：从轨迹起点开始走
     output wire            walk_hold,           // 电平：暂停（位置冻结）
     output reg             walk_stop,           // 单拍：停下并回到起点
@@ -167,6 +177,7 @@ module hap2_cmd #(
     localparam [1:0] P_IDLE  = 2'd0;
     localparam [1:0] P_PARSE = 2'd1;
     localparam [1:0] P_PLAN  = 2'd2;
+    localparam [1:0] P_SHAPE = 2'd3;
 
     reg connected;          // 是否已完成握手
     reg array_bad;          // CONFIG 帧里阵列字段与实际不符
@@ -208,6 +219,10 @@ module hap2_cmd #(
     assign traj_src_len        = sh_scan_size;
     assign traj_repeat_millihz = sh_repeat_millihz;
     assign traj_blank_us       = sh_blank_us;
+    assign traj_shape_kind     = sh_shape;
+    assign traj_radius_um      = sh_radius_um;
+    assign traj_cx_um          = sh_cx_um;
+    assign traj_cy_um          = sh_cy_um;
     // 暂停 = 冻结走步器（启动阶段就一直在数节拍）；没有节拍表就没什么可冻结的
     assign walk_hold           = traj_ready && (run_state == R_PAUSED);
     assign connected_out       = connected;
@@ -357,6 +372,8 @@ module hap2_cmd #(
             traj_ready     <= 1'b0;
             traj_parse_start <= 1'b0;
             traj_plan_start  <= 1'b0;
+            traj_shape_start <= 1'b0;
+            traj_preset      <= 1'b0;
             traj_txt_commit  <= 1'b0;
             traj_txt_none    <= 1'b0;
             walk_start       <= 1'b0;
@@ -409,6 +426,7 @@ module hap2_cmd #(
             config_changed <= 1'b0;
             traj_parse_start <= 1'b0;
             traj_plan_start  <= 1'b0;
+            traj_shape_start <= 1'b0;
             traj_txt_commit  <= 1'b0;
             traj_txt_none    <= 1'b0;
             walk_start       <= 1'b0;
@@ -475,8 +493,17 @@ module hap2_cmd #(
                     // 两步都过了才回 ACK（见 P_PARSE / P_PLAN）
                     pending          <= P_PARSE;
                     traj_parse_start <= 1'b1;
+                    traj_preset      <= 1'b0;
                     // 这几拍之后可能要过一毫秒才回话，先把「回给谁」记下来。
                     // 只在这条路上记：编译期间插进来的探活不能把序号顶掉。
+                    lat_verb         <= verb;
+                    lat_seq          <= seq;
+                end else if (dec_commit) begin
+                    // 预设图形（CIRCLE / SQUARE / ...）：先按形状生成点表，再编译节拍表。
+                    // 同样是都过了才回 ACK。
+                    pending          <= P_SHAPE;
+                    traj_shape_start <= 1'b1;
+                    traj_preset      <= 1'b1;
                     lat_verb         <= verb;
                     lat_seq          <= seq;
                 end else begin
@@ -500,7 +527,6 @@ module hap2_cmd #(
                             // RUNNING，但扫描开关保持 0、输出保持关闭
                             walk_start <= 1'b1;
                     end
-                    // 预设图形的轨迹还没做，这份配置没有可用的节拍表
                     if (dec_commit) accept_config(1'b0, seq, verb);
                 end
             end
@@ -510,7 +536,7 @@ module hap2_cmd #(
                 array_bad <= 1'b0;
             end
 
-            // ---- 2.5 待办配置：解析原文 → 编译节拍表 ----
+            // ---- 2.5 待办配置：解析原文／生成图形 → 编译节拍表 ----
             case (pending)
                 P_PARSE: begin
                     if (traj_parse_bad) begin
@@ -536,6 +562,14 @@ module hap2_cmd #(
                     end else if (traj_plan_done) begin
                         accept_config(1'b1, lat_seq, lat_verb);   // 算好了，才真的生效
                         pending <= P_IDLE;
+                    end
+                end
+
+                P_SHAPE: begin
+                    // 预设图形的点表生成完了，接着编译节拍表
+                    if (traj_shape_done) begin
+                        traj_plan_start <= 1'b1;
+                        pending         <= P_PLAN;
                     end
                 end
 
