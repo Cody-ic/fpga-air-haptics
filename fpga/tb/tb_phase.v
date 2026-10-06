@@ -95,6 +95,10 @@ module tb_phase;
     integer errors = 0;
     integer checks = 0;
     integer case_i, frame_i, ch, timeout, stuck;
+    // 相位表扫一遍花了多少拍（只看真算过的那几帧）。一拍 = 10 µs @100 kHz，
+    // 50 MHz 下就是 500 个时钟，所以这个数必须远小于 500，否则实时跟不动。
+    integer sweep_cyc_max;
+    integer sel_cyc;              // 这一路的引擎自己用了几拍
     integer rows, cols, pipe, steps, carrier, z_um, frames, f_off, c_off, count;
     reg [31:0] hx, hy;
     reg [7:0]  got, want;
@@ -126,6 +130,7 @@ module tb_phase;
             f_off   = plan[10*which + 8];
             c_off   = plan[10*which + 9];
             count   = rows * cols;
+            sweep_cyc_max = 0;
 
             // ---- 配置：载波/档数/高度，然后让常数重算 ----
             cfg_carrier = carrier;
@@ -163,10 +168,19 @@ module tb_phase;
                 @(negedge clk);
                 ph_start = 1'b0;
                 timeout = 0;
+                sel_cyc = 0;
                 while (!(got_d0 && got_d1 && got_d2) && timeout < 20000) begin
                     @(negedge clk);
                     timeout = timeout + 1;
+                    // 三个引擎是同一个 start 一起发的，但通道数不同、算完的时刻不同：
+                    // 这里单独记「本用例这个引擎」用了几拍，才是这一路的真实耗时。
+                    if (sel_cyc == 0) begin
+                        if ((which == 0 && got_d0) || (which == 1 && got_d1)
+                            || (which == 2 && got_d2)) sel_cyc = timeout;
+                    end
                 end
+                // 只有真算过的那一帧才有参考价值（焦点没变时引擎会跳过不重算）
+                if (sel_cyc > 0 && sel_cyc > sweep_cyc_max) sweep_cyc_max = sel_cyc;
                 // 焦点和上一次相同的话，引擎会跳过不重算（省电），所以这里
                 // 等不到 done 是正常的——真正的判据是下面的逐通道比对。
                 stuck = 0;
@@ -190,6 +204,19 @@ module tb_phase;
             end
             $display("  用例 %0d：%0d×%0d（%0d 路，并行 %0d）、%0d 档、载波 %0d Hz、z=%0d mm、%0d 帧完成",
                      which, rows, cols, count, pipe, steps, carrier, z_um / 1000, frames);
+            // 实时预算：一个节拍 10 µs（50 MHz 下 500 个时钟），相位表必须在这之内扫完
+            checks = checks + 1;
+            if (sweep_cyc_max == 0) begin
+                $display("[相位 %0d] 一帧都没真算过，量不到耗时  **失败**", which);
+                errors = errors + 1;
+            end else if (sweep_cyc_max >= 500) begin
+                $display("[相位 %0d] 扫一遍要 %0d 拍，超过一拍 500 拍（10 µs）  **失败**",
+                         which, sweep_cyc_max);
+                errors = errors + 1;
+            end else begin
+                $display("  实时预算：%0d 路扫一遍 %0d 拍，一拍（500 拍 / 10 µs）里装得下",
+                         count, sweep_cyc_max);
+            end
         end
     endtask
 

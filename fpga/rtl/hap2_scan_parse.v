@@ -46,6 +46,14 @@ module hap2_scan_parse #(
     output reg  [8:0]                point_count,
     output reg  [5:0]                stroke_count,
     output reg                       is_none,   // 原文就是 NONE（没有草图）
+    // ---- 包围盒：这份图形的外接矩形（给「越出工作空间」检查用）----
+    // 单位 0.5 µm。没有图形（NONE）时 bb_vld=0；解析失败时这个值没有意义，
+    // 上层看到 bad 就直接拒绝，不会去看它。
+    output reg                       bb_vld,
+    output reg  signed [PT_BITS-1:0] bb_xmin,
+    output reg  signed [PT_BITS-1:0] bb_xmax,
+    output reg  signed [PT_BITS-1:0] bb_ymin,
+    output reg  signed [PT_BITS-1:0] bb_ymax,
     // ---- 给轨迹发生器读的表 ----
     input  wire [7:0]                pt_addr,
     output reg  signed [PT_BITS-1:0] pt_x,
@@ -163,6 +171,11 @@ module hap2_scan_parse #(
             is_none      <= 1'b0;
             none_i       <= 2'd0;
             none_ph      <= 1'b0;
+            bb_vld       <= 1'b0;
+            bb_xmin      <= 0;
+            bb_xmax      <= 0;
+            bb_ymin      <= 0;
+            bb_ymax      <= 0;
         end else begin
             ok  <= 1'b0;
             bad <= 1'b0;
@@ -188,6 +201,7 @@ module hap2_scan_parse #(
                         st_pt_start <= 9'd0;
                         none_i      <= 2'd0;
                         none_ph     <= 1'b0;
+                        bb_vld      <= 1'b0;    // 每次解析都从头算包围盒
                         if (src_len == 0 || src_len > MAX_TXT) begin
                             fail_flag <= 1'b1;      // 空串或超出原文上限
                             state     <= S_DONE;
@@ -311,6 +325,19 @@ module hap2_scan_parse #(
                     end else begin
                         pt_xram[pt_idx[7:0]] <= new_x;
                         pt_yram[pt_idx[7:0]] <= new_y;
+                        // 顺手更新包围盒（第一个点直接起框，后面逐点扩）
+                        if (!bb_vld) begin
+                            bb_xmin <= new_x;
+                            bb_xmax <= new_x;
+                            bb_ymin <= new_y;
+                            bb_ymax <= new_y;
+                            bb_vld  <= 1'b1;
+                        end else begin
+                            if (new_x < bb_xmin) bb_xmin <= new_x;
+                            if (new_x > bb_xmax) bb_xmax <= new_x;
+                            if (new_y < bb_ymin) bb_ymin <= new_y;
+                            if (new_y > bb_ymax) bb_ymax <= new_y;
+                        end
                         pt_idx   <= pt_idx + 1'b1;
                         prev_x   <= new_x;
                         prev_y   <= new_y;

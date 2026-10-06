@@ -6,7 +6,7 @@
   "scan_cases": 9,
   "traj_cases": 9,
   "phase_cases": 3,
-  "top_cases": 18,
+  "top_cases": 24,
   "field_order": [
     "offset",
     "bytes",

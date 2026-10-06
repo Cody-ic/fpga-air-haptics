@@ -45,6 +45,15 @@ module hap2_traj_scan #(
     input  wire [31:0]               cfg_cy_um,
     output wire                      shape_busy,
     output wire                      shape_done,   // 单拍：点表生成完了
+    // ---- 图形包围盒（给命令层查「有没有越出工作空间」）----
+    // 单位 0.5 µm，和点表一致。草图取解析器算出来的；预设图形直接由
+    // 中心 ± 半径 推出来（每种形状都伸不出这个范围）。bb_vld=0 表示这份配置
+    // 没有图形（scan_paths=NONE），那就没有可检查的包围盒。
+    output wire                      bb_vld,
+    output wire signed [PT_BITS-1:0] bb_xmin,
+    output wire signed [PT_BITS-1:0] bb_xmax,
+    output wire signed [PT_BITS-1:0] bb_ymin,
+    output wire signed [PT_BITS-1:0] bb_ymax,
     // 单拍：这份配置被接受了，可以把抄下来的原文公布出去（STATE 里要回传它）。
     // 被拒绝的配置不能公布，否则回传的 scan_paths 和实际生效的图形对不上。
     input  wire                      txt_commit,
@@ -95,6 +104,8 @@ module hap2_traj_scan #(
     wire [4:0]                st_addr;
     wire [8:0]                st_start, st_len;
     wire signed [PT_BITS-1:0] pt_x, pt_y;
+    wire                      sp_bb_vld;
+    wire signed [PT_BITS-1:0] sp_bb_xmin, sp_bb_xmax, sp_bb_ymin, sp_bb_ymax;
     reg  [7:0]                pt_addr;
 
     hap2_scan_parse #(
@@ -117,6 +128,11 @@ module hap2_traj_scan #(
         .point_count  (point_count),
         .stroke_count (stroke_count),
         .is_none      (is_none),
+        .bb_vld       (sp_bb_vld),
+        .bb_xmin      (sp_bb_xmin),
+        .bb_xmax      (sp_bb_xmax),
+        .bb_ymin      (sp_bb_ymin),
+        .bb_ymax      (sp_bb_ymax),
         .pt_addr      (pt_addr),
         .pt_x         (pt_x),
         .pt_y         (pt_y),
@@ -332,5 +348,24 @@ module hap2_traj_scan #(
     assign scan_on      = traj_ok ? walk_scan   : 1'b0;
     assign stroke_index = traj_ok ? walk_stroke : 6'd0;
 
+    // ---- 包围盒 ----
+    // 预设图形：中心（有符号，可能为负）× 2 换算成 0.5 µm 单位，再 ± 半径。
+    // 中间量用 32 位算，避免 21 位截断。半径上限 80000 µm、中心上限 ±100000 µm，
+    // 所以结果一定落在 ±360000 个 0.5 µm 单位内，21 位装得下。
+    /* verilator lint_off UNUSEDSIGNAL */   // 高 11 位用不到（换算完一定装得下 21 位）
+    wire signed [31:0] preset_cx_q2 = $signed(cfg_cx_um) * 32'sd2;
+    wire signed [31:0] preset_cy_q2 = $signed(cfg_cy_um) * 32'sd2;
+    wire signed [31:0] preset_r_q2  = $signed(cfg_radius_um) * 32'sd2;
+
+    assign bb_vld  = preset ? 1'b1 : sp_bb_vld;
+    assign bb_xmin = preset ? preset_cx_q2[PT_BITS-1:0] - preset_r_q2[PT_BITS-1:0]
+                            : sp_bb_xmin;
+    assign bb_xmax = preset ? preset_cx_q2[PT_BITS-1:0] + preset_r_q2[PT_BITS-1:0]
+                            : sp_bb_xmax;
+    assign bb_ymin = preset ? preset_cy_q2[PT_BITS-1:0] - preset_r_q2[PT_BITS-1:0]
+                            : sp_bb_ymin;
+    assign bb_ymax = preset ? preset_cy_q2[PT_BITS-1:0] + preset_r_q2[PT_BITS-1:0]
+                            : sp_bb_ymax;
+    /* verilator lint_on UNUSEDSIGNAL */
 
 endmodule

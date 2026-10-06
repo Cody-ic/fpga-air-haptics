@@ -20,7 +20,18 @@
 // 配置用「影子寄存器 + 一次性替换」：字段流先写进影子，全部检查通过才整体
 // 拷进生效寄存器。这样不会出现「换了一半」的中间状态。
 module hap2_cmd #(
-    parameter integer ADDR_W = 13      // 行缓冲 8192 字节，地址 13 位
+    parameter integer ADDR_W = 13,     // 行缓冲 8192 字节，地址 13 位
+    // ---- 设备声明的工作空间（握手应答里发给电脑的那组范围，单位微米）----
+    // 单独一项字段合法不代表整个图形合法：比如 cx=90000 µm、radius=20000 µm
+    // 两个字段各自都在范围内，但圆最远会伸到 110000 µm，超出工作空间。
+    parameter integer WS_X_MIN_UM = -100000,
+    parameter integer WS_X_MAX_UM =  100000,
+    parameter integer WS_Y_MIN_UM = -100000,
+    parameter integer WS_Y_MAX_UM =  100000,
+    parameter integer WS_Z_MIN_UM =   20000,
+    parameter integer WS_Z_MAX_UM =  300000,
+    // 本地按键选中预设图形时用的半径（板上固定值；改这里就等于改「本地演示用多大」）
+    parameter integer LOC_RADIUS_UM = 20000
 ) (
     input  wire            clk,
     input  wire            rst_n,
@@ -73,6 +84,21 @@ module hap2_cmd #(
     output wire [31:0]     traj_radius_um,
     output wire [31:0]     traj_cx_um,
     output wire [31:0]     traj_cy_um,
+    // ---- 图形的包围盒（给「越出工作空间」检查用）----
+    // 单位是 0.5 µm，和点表、节拍表一致。bb_vld=1 表示这份配置有图形、
+    // 包围盒已经算好了；bb_vld=0（比如 scan_paths=NONE）时不做这项检查。
+    input  wire            bb_vld,
+    input  wire signed [20:0] bb_xmin,
+    input  wire signed [20:0] bb_xmax,
+    input  wire signed [20:0] bb_ymin,
+    input  wire signed [20:0] bb_ymax,
+    // ---- 本地按键（面板上的按钮；只在 LOCAL 模式下起作用）----
+    // 三个脉冲都已经过消抖，是单拍信号；loc_shape 是「本次按下之后该用的图形」，
+    // 在 loc_next 那一拍就已经是新值，直接采样即可。
+    input  wire            loc_next,
+    input  wire            loc_play,
+    input  wire            loc_stop,
+    input  wire [2:0]      loc_shape,
     output reg             walk_start,          // 单拍：从轨迹起点开始走
     output wire            walk_hold,           // 电平：暂停（位置冻结）
     output reg             walk_stop,           // 单拍：停下并回到起点
@@ -149,8 +175,7 @@ module hap2_cmd #(
     localparam [3:0] C_BUSY             = 4'd1;
     localparam [3:0] C_LOCAL_CONTROL    = 4'd2;
     localparam [3:0] C_BAD_CONFIG       = 4'd3;
-    // 4 号错误码是 C_OUT_OF_WORKSPACE（越出设备声明的工作空间）。它要等
-    // path_xy_um 的坐标串解析做完、能算出轨迹包围盒之后才用得上，这里先留空。
+    localparam [3:0] C_OUT_OF_WORKSPACE = 4'd4;   // 图形越出设备声明的工作空间
     localparam [3:0] C_HARDWARE_MISMATCH= 4'd5;
     localparam [3:0] C_NOT_RUNNING      = 4'd6;
     localparam [3:0] C_BAD_MODE         = 4'd7;
@@ -171,6 +196,14 @@ module hap2_cmd #(
     // 多段草图的形状编号（和字段解析、应答里的图形名一致）
     localparam [2:0] SH_CUSTOM = 3'd7;
 
+    // 工作空间换算到 0.5 µm 单位，好和包围盒直接比（±100000 µm → ±200000）
+    localparam signed [20:0] WS_X_LO_Q = WS_X_MIN_UM * 2;
+    localparam signed [20:0] WS_X_HI_Q = WS_X_MAX_UM * 2;
+    localparam signed [20:0] WS_Y_LO_Q = WS_Y_MIN_UM * 2;
+    localparam signed [20:0] WS_Y_HI_Q = WS_Y_MAX_UM * 2;
+    localparam [31:0] WS_Z_LO_UM = WS_Z_MIN_UM;
+    localparam [31:0] WS_Z_HI_UM = WS_Z_MAX_UM;
+
     // 待办配置的三步：解析原文 → 编译节拍表 → 才回 ACK、才把配置换上去。
     // 之所以要「等」，是因为协议里 ACK applied=1 的意思就是「这份配置已经生效」，
     // 而能不能生效要等节拍表算出来才知道（算不出来必须回 BAD_CONFIG）。
@@ -185,6 +218,8 @@ module hap2_cmd #(
     reg [1:0] pending;      // 见 P_*
     reg [3:0] lat_verb;     // 待办配置的应答要用的命令名与序号
     reg [15:0] lat_seq;
+    reg       local_cfg;        // 这次待办配置是本地按键发起的（不回串口）
+    reg       local_auto_run;   // 本地配置生效后要不要自动开始播放
 
     // ---------------- 影子配置寄存器 ----------------
     reg [31:0]     sh_carrier_hz;
@@ -235,6 +270,7 @@ module hap2_cmd #(
         input ready;
         input [15:0] rseq;
         input [3:0]  rverb;
+        input        do_reply;      // 0 = 本地动作，不往串口回话
         begin
             cfg_carrier_hz     <= sh_carrier_hz;
             cfg_phase_steps    <= sh_phase_steps;
@@ -258,29 +294,67 @@ module hap2_cmd #(
             traj_txt_commit    <= 1'b1;    // 原文可以对外公布了（STATE 要回传）
             traj_txt_none      <= (sh_shape != SH_CUSTOM) || traj_none;
             walk_stop          <= 1'b1;        // 新图形一律从起点重新开始
-            reply_valid        <= 1'b1;
-            reply_kind         <= 2'd0;
-            reply_verb         <= rverb;
-            reply_seq          <= rseq;
-            reply_code         <= C_NONE;
-            reply_want_state   <= 1'b1;
+            if (do_reply) begin
+                reply_valid      <= 1'b1;
+                reply_kind       <= 2'd0;
+                reply_verb       <= rverb;
+                reply_seq        <= rseq;
+                reply_code       <= C_NONE;
+                reply_want_state <= 1'b1;
+            end else begin
+                reply_valid      <= 1'b0;      // 本地动作：串口上一个字都不发
+                reply_want_state <= 1'b0;
+            end
+            // 本地按键发起的配置：如果按键之前正在跑，配置一生效就自动接着跑
+            if (local_cfg) begin
+                if (local_auto_run) begin
+                    run_state  <= R_RUNNING;
+                    reason     <= REASON_NONE;
+                    walk_start <= 1'b1;
+                end
+                local_auto_run <= 1'b0;
+                local_cfg      <= 1'b0;
+            end
         end
     endtask
 
+    // 这份待办配置（还在影子里，没生效）在不在设备声明的工作空间里？
+    // 查两件事：焦点高度 z，以及图形的包围盒（只有「这份配置有图形」时才算）。
+    // 注意：单个字段合法不等于整个图形合法——cx=90000 µm 和 radius=20000 µm
+    // 都合法，但圆会伸到 110000 µm。这一项就是专门拦这种情况的。
+    function ws_ok;
+        begin
+            ws_ok = 1'b1;
+            if (sh_z_um < WS_Z_LO_UM || sh_z_um > WS_Z_HI_UM) ws_ok = 1'b0;
+            if (bb_vld) begin
+                if (bb_xmin < WS_X_LO_Q || bb_xmax > WS_X_HI_Q ||
+                    bb_ymin < WS_Y_LO_Q || bb_ymax > WS_Y_HI_Q) ws_ok = 1'b0;
+            end
+        end
+    endfunction
+
     // 这份配置不能用：回 ERR，配置一个字都不动，版本号也不动
     task reject_config;
+        input [3:0]  rcode;
         input [15:0] rseq;
         input [3:0]  rverb;
+        input        do_reply;
         begin
             // 注意：这里**不能**动 traj_ready。被拒绝的配置不改变已生效的任何东西，
             // 上一份草图的节拍表仍然是好的（表本身是双缓冲的，编译不会破坏它）。
             walk_stop    <= 1'b1;
-            reply_valid  <= 1'b1;
-            reply_kind   <= 2'd1;
-            reply_verb   <= rverb;
-            reply_seq    <= rseq;
-            reply_code   <= C_BAD_CONFIG;
+            if (do_reply) begin
+                reply_valid  <= 1'b1;
+                reply_kind   <= 2'd1;
+                reply_verb   <= rverb;
+                reply_seq    <= rseq;
+                reply_code   <= rcode;
+            end else begin
+                reply_valid  <= 1'b0;      // 本地动作：不回串口
+            end
             reply_want_state <= 1'b0;
+            local_cfg        <= 1'b0;
+            local_auto_run   <= 1'b0;
         end
     endtask
 
@@ -369,6 +443,8 @@ module hap2_cmd #(
             pending        <= P_IDLE;
             lat_verb       <= 4'd0;
             lat_seq        <= 16'd0;
+            local_cfg      <= 1'b0;
+            local_auto_run <= 1'b0;
             traj_ready     <= 1'b0;
             traj_parse_start <= 1'b0;
             traj_plan_start  <= 1'b0;
@@ -527,7 +603,7 @@ module hap2_cmd #(
                             // RUNNING，但扫描开关保持 0、输出保持关闭
                             walk_start <= 1'b1;
                     end
-                    if (dec_commit) accept_config(1'b0, seq, verb);
+                    if (dec_commit) accept_config(1'b0, seq, verb, 1'b1);
                 end
             end
 
@@ -536,17 +612,71 @@ module hap2_cmd #(
                 array_bad <= 1'b0;
             end
 
+            // ---- 2.6 本地按键（LOCAL 模式下的面板操作）----
+            // 只在「这一拍没有命令帧」且确实是本地模式时动手，免得和远程命令抢同一拍。
+            // 本地动作和远程命令的区别只有两处：不回串口、不用握手。
+            if (!frame_ok && (mode == M_LOCAL)) begin
+                if (loc_stop) begin
+                    run_state      <= R_IDLE;
+                    reason         <= REASON_NONE;
+                    walk_stop      <= 1'b1;
+                    local_auto_run <= 1'b0;
+                end else if (loc_play) begin
+                    if (run_state == R_RUNNING) begin
+                        run_state <= R_PAUSED;          // 运行中按一下 = 暂停
+                    end else if (run_state == R_PAUSED) begin
+                        run_state <= R_RUNNING;         // 暂停中按一下 = 继续
+                    end else if (traj_ready) begin
+                        run_state <= R_RUNNING;         // 待机 + 已有图形 = 从头开始放
+                        reason    <= REASON_NONE;
+                        walk_start <= 1'b1;
+                    end else if (pending == P_IDLE) begin
+                        // 上电后什么都没配过：先按当前选中的图形配一份，配好了自动开播
+                        local_cfg      <= 1'b1;
+                        local_auto_run <= 1'b1;
+                        sh_shape         <= loc_shape;
+                        sh_radius_um     <= LOC_RADIUS_UM[31:0];
+                        sh_cx_um         <= 32'd0;
+                        sh_cy_um         <= 32'd0;
+                        pending          <= P_SHAPE;
+                        traj_shape_start <= 1'b1;
+                        traj_preset      <= 1'b1;
+                        lat_verb         <= V_CONFIG;
+                        lat_seq          <= 16'd0;
+                    end
+                end else if (loc_next && pending == P_IDLE) begin
+                    // 换图形：把影子配置改成新选中的预设图形，再走同一个
+                    // 「生成点表 → 编译节拍表 → 查工作空间」流程
+                    local_cfg      <= 1'b1;
+                    local_auto_run <= (run_state != R_IDLE);
+                    if (run_state != R_IDLE) begin
+                        run_state <= R_IDLE;
+                        walk_stop <= 1'b1;
+                    end
+                    sh_shape         <= loc_shape;
+                    sh_radius_um     <= LOC_RADIUS_UM[31:0];
+                    sh_cx_um         <= 32'd0;
+                    sh_cy_um         <= 32'd0;
+                    pending          <= P_SHAPE;
+                    traj_shape_start <= 1'b1;
+                    traj_preset      <= 1'b1;
+                    lat_verb         <= V_CONFIG;
+                    lat_seq          <= 16'd0;
+                end
+            end
+
             // ---- 2.5 待办配置：解析原文／生成图形 → 编译节拍表 ----
             case (pending)
                 P_PARSE: begin
                     if (traj_parse_bad) begin
-                        reject_config(lat_seq, lat_verb);   // 原文不是合法草图
+                        reject_config(C_BAD_CONFIG, lat_seq, lat_verb, ~local_cfg);   // 原文不是合法草图
                         pending <= P_IDLE;
                     end else if (traj_parse_ok) begin
                         if (traj_none) begin
                             // 这份配置没有草图（scan_paths=NONE）：不需要节拍表，
-                            // 直接生效，轨迹标记清掉
-                            accept_config(1'b0, lat_seq, lat_verb);
+                            // 检查过工作空间就直接生效，轨迹标记清掉
+                            if (!ws_ok()) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
+                            else        accept_config(1'b0, lat_seq, lat_verb, ~local_cfg);
                             pending <= P_IDLE;
                         end else begin
                             traj_plan_start <= 1'b1;
@@ -557,10 +687,12 @@ module hap2_cmd #(
 
                 P_PLAN: begin
                     if (traj_plan_fault) begin
-                        reject_config(lat_seq, lat_verb);   // 图形／配置做不出节拍表
+                        reject_config(C_BAD_CONFIG, lat_seq, lat_verb, ~local_cfg);   // 图形／配置做不出节拍表
                         pending <= P_IDLE;
                     end else if (traj_plan_done) begin
-                        accept_config(1'b1, lat_seq, lat_verb);   // 算好了，才真的生效
+                        // 节拍表算好了，还要过最后一关：整张图在不在工作空间里
+                        if (!ws_ok()) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
+                        else        accept_config(1'b1, lat_seq, lat_verb, ~local_cfg);
                         pending <= P_IDLE;
                     end
                 end

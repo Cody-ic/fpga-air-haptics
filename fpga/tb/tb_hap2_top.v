@@ -30,6 +30,11 @@ module tb_hap2_top;
     wire scan_on, output_on, walk_running, beat_pulse;
     wire [5:0] stroke_index;
     /* verilator lint_off UNUSEDSIGNAL */
+    wire mode_local;                    // 这一套用例不测本地模式，只看波形
+    /* verilator lint_on UNUSEDSIGNAL */
+    // 面板按键（高有效：1 = 按下）。这一套用例里由测试台直接驱动，模拟按键。
+    reg key_next, key_play, key_stop;
+    /* verilator lint_off UNUSEDSIGNAL */
     wire [15:0] array_pos, array_neg;   // 测试只盯第 0 路，其余位在波形上看
     /* verilator lint_on UNUSEDSIGNAL */
 
@@ -40,6 +45,9 @@ module tb_hap2_top;
         .HW_COLS (4),
         .HW_PITCH_UM (10000),
         .HB_MS   (3000),
+        // 面板按键的消抖时间：真实板子上用 20 ms，仿真里缩到 2 ms 免得跑太久
+        // （逻辑一模一样，只是常数不同；真实的按键抖动在 tb_local.v 里单独测）
+        .KEY_DEB_MS(2),
         // 测试台把「主动上报状态」关掉：这一轮要一条一条数「这条命令回了几个帧」
         .STATE_MS(0)
     ) dut (
@@ -47,6 +55,14 @@ module tb_hap2_top;
         .rst_n       (rst_n),
         .uart_rx_pin (uart_line),
         .uart_tx_pin (uart_tx_pin),
+        // 复位标识：真板子上由板级顶层给一个「每次复位都变」的值；这里给常数，
+        // 好让状态帧里 boot=... 的期望值保持固定。
+        .boot_id     (32'hA1B2C3D4),
+        // 面板按键：这一套用例只走串口那条路，按键保持松开（高有效，0 = 没按）
+        .key_next    (key_next),
+        .key_play    (key_play),
+        .key_stop    (key_stop),
+        .mode_local  (mode_local),
         .focus_x     (focus_x),
         .focus_y     (focus_y),
         .scan_on     (scan_on),
@@ -184,6 +200,13 @@ module tb_hap2_top;
             checks = checks + 1;
             if (!ok) begin
                 $display("[用例 %0d] 应答里找不到「%0s」  **失败**", case_i, needle);
+                // 找不到的时候把实际收到的字节原样打出来（否则只能靠猜）
+                $write("    实际收到：");
+                for (a = 0; a < txlen; a = a + 1) begin
+                    if (txbuf[a] == 8'h0A) $write("\n              ");
+                    else                   $write("%c", txbuf[a]);
+                end
+                $write("\n");
                 errors = errors + 1;
             end
         end
@@ -216,6 +239,80 @@ module tb_hap2_top;
             if (val < 0) begin
                 $display("[用例 %0d] 应答里找不到字段「%0s」  **失败**", case_i, key);
                 errors = errors + 1;
+            end
+        end
+    endtask
+
+    // ---- 面板按键：模拟真人按一下 ----
+    // 按下 3 ms、松开 3 ms（都比消抖的 2 ms 长），所以一定会被认一次、且只认一次。
+    localparam integer KEY_CYC = 150_000;      // 3 ms @ 50 MHz
+    task press_key;                             // 带抖动地按一下：先抖几下再按住
+        input [1:0] which;                      // 0 = next, 1 = play, 2 = stop
+        integer b;
+        begin
+            for (b = 0; b < 8; b = b + 1) begin
+                // 抖动：每 5k 拍翻一次，累计不到消抖时间，所以不该被认成「按下」
+                if (which == 0) key_next = ~key_next;
+                if (which == 1) key_play = ~key_play;
+                if (which == 2) key_stop = ~key_stop;
+                repeat (5000) @(negedge clk);
+            end
+            // 按住足够久 → 认一次
+            if (which == 0) key_next = 1'b1;
+            if (which == 1) key_play = 1'b1;
+            if (which == 2) key_stop = 1'b1;
+            repeat (KEY_CYC) @(negedge clk);
+            // 松开，并且等消抖确认，免得两次按键黏在一起
+            if (which == 0) key_next = 1'b0;
+            if (which == 1) key_play = 1'b0;
+            if (which == 2) key_stop = 1'b0;
+            repeat (KEY_CYC) @(negedge clk);
+        end
+    endtask
+
+    // 本地按键触发的配置要走「生成点表 + 编译节拍表」，等它一会儿
+    task wait_local_build;
+        begin
+            repeat (300000) @(negedge clk);      // 6 ms，够几毫秒的编译
+        end
+    endtask
+
+    // 预设图形跑起来的样子（不挑形状）：每一拍都在扫描，而且焦点真的在动。
+    // 预设图形没有抬笔时间，所以 scan_on 必须恒为 1。
+    integer pm_beats, pm_blank, pm_xmin, pm_xmax, pm_ymin, pm_ymax;
+    task watch_preset_motion;
+        input integer span_units;      // 期望至少动多远（0.5 µm 单位）
+        input integer cycles;
+        integer c;
+        begin
+            pm_beats = 0; pm_blank = 0;
+            pm_xmin = 100000000; pm_xmax = -100000000;
+            pm_ymin = 100000000; pm_ymax = -100000000;
+            for (c = 0; c < cycles; c = c + 1) begin
+                @(negedge clk);
+                if (beat_pulse) begin
+                    pm_beats = pm_beats + 1;
+                    if (!scan_on) pm_blank = pm_blank + 1;
+                    if (focus_x < pm_xmin) pm_xmin = focus_x;
+                    if (focus_x > pm_xmax) pm_xmax = focus_x;
+                    if (focus_y < pm_ymin) pm_ymin = focus_y;
+                    if (focus_y > pm_ymax) pm_ymax = focus_y;
+                end
+            end
+            checks = checks + 1;
+            if (pm_beats == 0 || pm_blank != 0) begin
+                $display("[用例 %0d] 预设图形应当全程扫描：%0d 拍里 %0d 拍关着输出  **失败**",
+                         case_i, pm_beats, pm_blank);
+                errors = errors + 1;
+            end
+            checks = checks + 1;
+            if ((pm_xmax - pm_xmin) < span_units && (pm_ymax - pm_ymin) < span_units) begin
+                $display("[用例 %0d] 焦点没怎么动：x %0d→%0d、y %0d→%0d  **失败**",
+                         case_i, pm_xmin, pm_xmax, pm_ymin, pm_ymax);
+                errors = errors + 1;
+            end else begin
+                $display("  本地播放：%0d 拍全程扫描，焦点 x %0d→%0d、y %0d→%0d（真的在动）",
+                         pm_beats, pm_xmin, pm_xmax, pm_ymin, pm_ymax);
             end
         end
     endtask
@@ -490,6 +587,9 @@ module tb_hap2_top;
 
         rst_n     = 1'b0;
         uart_line = 1'b1;
+        key_next  = 1'b0;
+        key_play  = 1'b0;
+        key_stop  = 1'b0;
         txlen     = 0;
         lf_count  = 0;
         repeat (10) @(negedge clk);
@@ -705,6 +805,137 @@ module tb_hap2_top;
         wait_frames(3);                    // 探活 ACK + 配置 ACK + 配置的 STATE
         found("HAP3 ACK 19 PING");
         found("HAP3 ACK 18 CONFIG applied=1 rev=4");
+
+        // ---- 19. 工作空间越界：字段各自合法，但整张图越界（第 4 项）----
+        // 草图点 x=150000 µm，参考实现允许（≤300 mm），但设备声明的工作空间是 ±100 mm
+        case_i = 18;
+        clear_rx;
+        send_case(18);
+        wait_frames(1);
+        found("HAP3 ERR 20 CONFIG code=OUT_OF_WORKSPACE");
+
+        // 预设图形：cx=90000 + radius=20000 = 110000 µm，同样是越界
+        case_i = 19;
+        clear_rx;
+        send_case(19);
+        wait_frames(1);
+        found("HAP3 ERR 21 CONFIG code=OUT_OF_WORKSPACE");
+
+        // 两次被拒之后要版本号没动（还是 4）：要一份状态来看看真实的 rev
+        case_i = 20;
+        clear_rx;
+        send_case(23);                       // SNAP
+        wait_frames(2);
+        found("HAP3 ACK 25 SNAP");
+        field_int("rev=");
+        checks = checks + 1;
+        if (val !== 4) begin
+            $display("[用例 %0d] 越界配置被拒之后版本号应当还是 4，实测 %0d  **失败**", case_i, val);
+            errors = errors + 1;
+        end else begin
+            $display("  越界拒绝：ERR OUT_OF_WORKSPACE，版本号保持 4（上一份配置没被动过）");
+        end
+
+        // 边界用例：cx=80000 + radius=20000 = 正好 100000 µm，压线应当接受
+        case_i = 21;
+        clear_rx;
+        send_case(20);
+        wait_frames(2);
+        found("HAP3 ACK 22 CONFIG applied=1 rev=5");
+
+        // ---- 20. 本地模式：按键选图形、播放、停止（第 6 项）----
+        case_i = 22;
+        clear_rx;
+        send_case(21);                       // MODE value=LOCAL
+        wait_frames(2);
+        found("HAP3 ACK 23 MODE applied=1 rev=5");
+        found("mode=LOCAL");
+
+        // 按一次「换图形」：默认选中的是圆，按一下应当变成方（SQUARE）。
+        // press_key 里先抖 8 下再按住——抖动不该被认，所以只能发生**一次**动作：
+        // 版本号 5 → 6，图形 CIRCLE → SQUARE。
+        clear_rx;                            // 先清空，方便核对「按键本身不回串口」
+        press_key(0);
+        wait_local_build;
+        checks = checks + 1;
+        if (lf_count !== 0) begin
+            $display("[用例 %0d] 本地按键不该往串口回话，实测回了 %0d 条  **失败**",
+                     case_i, lf_count);
+            errors = errors + 1;
+        end else begin
+            $display("  本地按键：不经过串口，电脑那边一条报文都收不到（靠主动上报刷界面）");
+        end
+
+        case_i = 23;
+        clear_rx;
+        send_case(23);                       // SNAP：读回本地动作的结果
+        wait_frames(2);
+        found("shape=SQUARE");
+        found("scan_paths=NONE");
+        field_int("rev=");
+        checks = checks + 1;
+        if (val !== 6) begin
+            $display("[用例 %0d] 本地换图形应当只动一次（rev 5→6），实测 rev=%0d  **失败**", case_i, val);
+            errors = errors + 1;
+        end else begin
+            $display("  本地换图形：按键抖动 8 次 + 按住一次 → 只发生一次动作，rev 5→6，图形变 SQUARE");
+        end
+
+        // 按「播放」：本地应当自己跑起来（不需要电脑下 START）
+        case_i = 24;
+        press_key(1);
+        checks = checks + 1;
+        if (walk_running !== 1'b1) begin
+            $display("[用例 %0d] 本地按键播放之后走步器应当跑起来，实测 walk_running=%b  **失败**",
+                     case_i, walk_running);
+            errors = errors + 1;
+        end else begin
+            $display("  本地播放：按键之后板子自己跑起来（走步器已启动）");
+        end
+        // 真的在走：焦点必须动起来、而且全程都在扫描（方形的半边长是 20 mm，
+        // 所以取 5 mm 作为「动了」的门槛）
+        watch_preset_motion(10000, 1200000);
+
+        // 再按一次「播放」= 暂停：焦点应当冻住、输出关掉
+        case_i = 25;
+        press_key(1);
+        checks = checks + 1;
+        st = focus_x;
+        repeat (200000) @(negedge clk);
+        if (focus_x !== st || output_on !== 1'b0) begin
+            $display("[用例 %0d] 本地暂停没生效：焦点 %0d→%0d、输出 %b  **失败**",
+                     case_i, st, focus_x, output_on);
+            errors = errors + 1;
+        end else begin
+            $display("  本地暂停：再按一次播放，焦点冻在 (%0d,%0d)、输出关闭", focus_x, focus_y);
+        end
+
+        // 按「停止」：回到待机，输出保持关闭
+        case_i = 26;
+        press_key(2);
+        checks = checks + 1;
+        if (walk_running !== 1'b0 || output_on !== 1'b0) begin
+            $display("[用例 %0d] 本地停止没生效：走步器 %b、输出 %b  **失败**",
+                     case_i, walk_running, output_on);
+            errors = errors + 1;
+        end else begin
+            $display("  本地停止：回到 IDLE，输出关闭");
+        end
+
+        // 本地模式下，电脑的 CONFIG/START 必须被拒（协议规定 LOCAL 不接受远程命令）
+        case_i = 27;
+        clear_rx;
+        send_case(20);                       // 一条本来合法的 CONFIG
+        wait_frames(1);
+        found("HAP3 ERR 22 CONFIG code=LOCAL_CONTROL");
+
+        // ---- 21. 切回电脑控制 ----
+        case_i = 28;
+        clear_rx;
+        send_case(22);                       // MODE value=REMOTE
+        wait_frames(2);
+        found("HAP3 ACK 24 MODE applied=1 rev=6");
+        found("mode=REMOTE");
 
         $display("=========================================");
         $display("共检查 %0d 项，失败 %0d 项", checks, errors);

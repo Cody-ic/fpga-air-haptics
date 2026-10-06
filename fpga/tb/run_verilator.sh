@@ -76,6 +76,44 @@ echo "-----------------------------------------"
 "$BUILD_DIR/obj_out/out_sim"
 
 echo
+echo "=== 本地按键（抖动、按住、松开、循环选图形）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_local -o local_sim -Mdir "$BUILD_DIR/obj_local" \
+          rtl/hap2_local.v tb/tb_local.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_local/local_sim"
+
+echo
+echo "=== 板级（上电复位 + 复位标识 boot + 重新握手）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_board -o board_sim -Mdir "$BUILD_DIR/obj_board" \
+          rtl/uart_rx.v rtl/uart_tx.v rtl/dec_ascii.v rtl/crc16_ccitt.v \
+          rtl/hap2_line_rx.v rtl/hap2_frame_check.v rtl/hap2_field_parse.v \
+          rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
+          rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
+          rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
+          rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v rtl/hap2_top.v \
+          rtl/por_reset.v rtl/board_top.v tb/tb_board.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_board/board_sim"
+
+echo
+echo "=== 8×8 端到端（64 路的完整链路预演）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_top8 -o top8_sim -Mdir "$BUILD_DIR/obj_top8" \
+          rtl/uart_rx.v rtl/uart_tx.v rtl/dec_ascii.v rtl/crc16_ccitt.v \
+          rtl/hap2_line_rx.v rtl/hap2_frame_check.v rtl/hap2_field_parse.v \
+          rtl/hap2_cmd.v rtl/hap2_tx.v rtl/hap2_watchdog.v rtl/hap2_rx.v \
+          rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
+          rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
+          rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v rtl/hap2_top.v \
+          tb/tb_top8.v
+echo "-----------------------------------------"
+"$BUILD_DIR/obj_top8/top8_sim"
+
+echo
 echo "=== 端到端（整条通路，对着串口线）==="
 verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           --top-module tb_hap2_top -o hap2_top_sim -Mdir "$BUILD_DIR/obj_top" \
@@ -85,7 +123,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v \
           rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"

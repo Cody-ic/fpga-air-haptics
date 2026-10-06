@@ -20,7 +20,15 @@
 module hap2_tx #(
     parameter integer CLK_HZ = 50_000_000,
     parameter integer BAUD   = 115200,
-    parameter integer DIGITS = 10            // 十进制最多几位
+    parameter integer DIGITS = 10,           // 十进制最多几位
+    // 设备声明的工作空间（微米）：握手应答里发给电脑，同时命令层拿同一组值
+    // 去查「图形有没有越界」。放在这里当参数，是为了两边只有一个来源。
+    parameter integer WS_X_MIN_UM = -100000,
+    parameter integer WS_X_MAX_UM =  100000,
+    parameter integer WS_Y_MIN_UM = -100000,
+    parameter integer WS_Y_MAX_UM =  100000,
+    parameter integer WS_Z_MIN_UM =   20000,
+    parameter integer WS_Z_MAX_UM =  300000
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -99,12 +107,13 @@ module hap2_tx #(
     localparam [31:0] MAX_NODES     = 32'd64;
     localparam [31:0] MAX_SCAN_PTS  = 32'd256;
     localparam [31:0] MAX_STROKES   = 32'd32;
-    localparam [31:0] WS_X_MIN      = -32'sd100000;
-    localparam [31:0] WS_X_MAX      =  32'sd100000;
-    localparam [31:0] WS_Y_MIN      = -32'sd100000;
-    localparam [31:0] WS_Y_MAX      =  32'sd100000;
-    localparam [31:0] WS_Z_MIN      =  32'sd20000;
-    localparam [31:0] WS_Z_MAX      =  32'sd300000;
+    // 工作空间由模块参数给（见文件开头的参数表），这里不再写死
+    localparam [31:0] WS_X_MIN      = WS_X_MIN_UM;
+    localparam [31:0] WS_X_MAX      = WS_X_MAX_UM;
+    localparam [31:0] WS_Y_MIN      = WS_Y_MIN_UM;
+    localparam [31:0] WS_Y_MAX      = WS_Y_MAX_UM;
+    localparam [31:0] WS_Z_MIN      = WS_Z_MIN_UM;
+    localparam [31:0] WS_Z_MAX      = WS_Z_MAX_UM;
 
     // ---------------- 名字表 ----------------
     localparam [8*5-1:0]  N_HELLO   = "HELLO";
@@ -120,6 +129,10 @@ module hap2_tx #(
     localparam [8*4-1:0]  C_BUSY    = "BUSY";
     localparam [8*13-1:0] C_LOCAL   = "LOCAL_CONTROL";
     localparam [8*10-1:0] C_BADCFG  = "BAD_CONFIG";
+    // 注意：这里的位宽必须**正好等于字符个数**。字符串赋值给更宽的向量时会在左边补 0，
+    // 发出去的时候那些 0 就是两个看不见的 NUL 字节（校验码还是对的，肉眼看不出来，
+    // 但电脑按名字匹配就会对不上）。OUT_OF_WORKSPACE 是 16 个字符。
+    localparam [8*16-1:0] C_OOWSP   = "OUT_OF_WORKSPACE";
     localparam [8*18-1:0] C_HANDSH  = "HANDSHAKE_REQUIRED";
     localparam [8*17-1:0] C_HWMIS   = "HARDWARE_MISMATCH";
     localparam [8*11-1:0] C_NOTRUN  = "NOT_RUNNING";
@@ -285,6 +298,7 @@ module hap2_tx #(
                     4'd1: name_char = (pos <  4) ? {1'b0, C_BUSY   [8*4 -1 - 8*pos -: 8]} : 9'h100;
                     4'd2: name_char = (pos < 13) ? {1'b0, C_LOCAL  [8*13-1 - 8*pos -: 8]} : 9'h100;
                     4'd3: name_char = (pos < 10) ? {1'b0, C_BADCFG [8*10-1 - 8*pos -: 8]} : 9'h100;
+                    4'd4: name_char = (pos < 16) ? {1'b0, C_OOWSP  [8*16-1 - 8*pos -: 8]} : 9'h100;
                     4'd5: name_char = (pos < 17) ? {1'b0, C_HWMIS  [8*17-1 - 8*pos -: 8]} : 9'h100;
                     4'd6: name_char = (pos < 11) ? {1'b0, C_NOTRUN [8*11-1 - 8*pos -: 8]} : 9'h100;
                     4'd7: name_char = (pos <  8) ? {1'b0, C_BADMODE[8*8 -1 - 8*pos -: 8]} : 9'h100;

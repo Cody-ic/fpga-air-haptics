@@ -13,8 +13,10 @@
 //   板子每秒自己算十万次相位、走十万步，**快**，全程不碰串口；
 //   板子每秒回几十份状态快照，**慢**，只是报告，不参与实时输出。
 //
-// 现在还没做的：相位计算（`phases=` 先回全 0）、输出级、预设图形
-// （CIRCLE 等形状的轨迹；多段草图已经能用）、以及上板约束。
+// 已经做完并仿真验证过的：串口收发与协议、命令裁决、多段草图与预设图形的轨迹、
+// 相位计算、输出级（含等级/调制）、本地按键、工作空间越界检查。
+// 还需要上板确认的：相位符号、死区取值、驱动板与真实换能器。
+// 板级封装（上电复位、boot 标识、引脚约束）见 rtl/board_top.v 和 fpga/board/。
 module hap2_top #(
     parameter integer        CLK_HZ       = 50_000_000,
     parameter integer        BAUD         = 115200,
@@ -23,7 +25,19 @@ module hap2_top #(
     parameter integer        HW_ROWS      = 4,
     parameter integer        HW_COLS      = 4,
     parameter integer        HW_PITCH_UM  = 10000,
-    parameter [31:0]         BOOT_ID      = 32'hA1B2C3D4,
+    // ---- 设备声明的工作空间（微米）----
+    // 握手时发给电脑，命令层也拿同一组值去查「图形有没有越界」。
+    // 上板时按真实阵列的有效口径改小一点更安全。
+    parameter integer        WS_X_MIN_UM  = -100000,
+    parameter integer        WS_X_MAX_UM  =  100000,
+    parameter integer        WS_Y_MIN_UM  = -100000,
+    parameter integer        WS_Y_MAX_UM  =  100000,
+    parameter integer        WS_Z_MIN_UM  =   20000,
+    parameter integer        WS_Z_MAX_UM  =  300000,
+    // 本地按键选中预设图形时的半径（微米）
+    parameter integer        LOC_RADIUS_UM = 20000,
+    // 本地按键消抖时间（毫秒）
+    parameter integer        KEY_DEB_MS    = 20,
     parameter integer        HB_MS        = 3000,
     // 没收到命令时每隔多少毫秒主动回一份状态快照。
     // 上位机每 0.8 秒探活一次、状态超过 2.5 秒没到就判过期，所以 500 毫秒足够；
@@ -38,6 +52,15 @@ module hap2_top #(
     input  wire rst_n,
     input  wire uart_rx_pin,
     output wire uart_tx_pin,
+    // 本次启动的标识（协议要求「每次复位都变、同一会话不变」）。
+    // 板级顶层用「不受复位影响的自由计数器」在复位放开那一刻锁一个值进来。
+    input  wire [31:0] boot_id,
+    // ---- 面板按键（高有效，已经由板级顶层把板上的低有效按键取反）----
+    input  wire        key_next,
+    input  wire        key_play,
+    input  wire        key_stop,
+    // 当前是不是本地控制模式（给状态灯用）
+    output wire        mode_local,
     // 调试／观测：当前焦点与扫描开关（相位计算做出来之后这里接阵列）
     output wire signed [20:0] focus_x,
     output wire signed [20:0] focus_y,
@@ -154,10 +177,22 @@ module hap2_top #(
     wire        traj_ready;
     wire        connected;
     wire        state_capture;      // 发送模块开始拼 STATE 的那一拍
+    // 图形包围盒（0.5 µm）与本地按键
+    wire        bb_vld;
+    wire signed [20:0] bb_xmin, bb_xmax, bb_ymin, bb_ymax;
+    wire        loc_next, loc_play, loc_stop;
+    wire [2:0]  loc_shape;
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_cmd #(
-        .ADDR_W (ADDR_W)
+        .ADDR_W      (ADDR_W),
+        .WS_X_MIN_UM (WS_X_MIN_UM),
+        .WS_X_MAX_UM (WS_X_MAX_UM),
+        .WS_Y_MIN_UM (WS_Y_MIN_UM),
+        .WS_Y_MAX_UM (WS_Y_MAX_UM),
+        .WS_Z_MIN_UM (WS_Z_MIN_UM),
+        .WS_Z_MAX_UM (WS_Z_MAX_UM),
+        .LOC_RADIUS_UM (LOC_RADIUS_UM)
     ) u_cmd (
         .clk              (clk),
         .rst_n            (rst_n),
@@ -190,6 +225,15 @@ module hap2_top #(
         .traj_radius_um   (traj_radius_um),
         .traj_cx_um       (traj_cx_um),
         .traj_cy_um       (traj_cy_um),
+        .bb_vld           (bb_vld),
+        .bb_xmin          (bb_xmin),
+        .bb_xmax          (bb_xmax),
+        .bb_ymin          (bb_ymin),
+        .bb_ymax          (bb_ymax),
+        .loc_next         (loc_next),
+        .loc_play         (loc_play),
+        .loc_stop         (loc_stop),
+        .loc_shape        (loc_shape),
         .traj_parse_ok    (traj_parse_ok),
         .traj_parse_bad   (traj_parse_bad),
         .traj_none        (traj_none),
@@ -229,6 +273,27 @@ module hap2_top #(
         .cfg_blank_us     (cfg_blank_us)
     );
 
+    // ---------------- 本地按键（不接电脑时的面板操作）----------------
+    // 消抖、边沿识别都在 hap2_local 里；这里只是把三个单拍脉冲和「当前选中的图形」
+    // 转给命令层。本地动作只在 LOCAL 模式下生效，不需要电脑握手。
+    hap2_local #(
+        .CLK_HZ (CLK_HZ),
+        .DEB_MS (KEY_DEB_MS)
+    ) u_local (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .key_next   (key_next),
+        .key_play   (key_play),
+        .key_stop   (key_stop),
+        .next_pulse (loc_next),
+        .play_pulse (loc_play),
+        .stop_pulse (loc_stop),
+        .sel        (loc_shape)
+    );
+
+    // 当前是不是本地控制模式（LOCAL = 0，和协议里的枚举一致）
+    assign mode_local = (cmd_mode == 2'd0);
+
     // ---------------- 多段草图子系统 ----------------
     wire [7:0]  txt_data;
     wire [11:0] txt_addr;
@@ -258,6 +323,11 @@ module hap2_top #(
         .cfg_cy_um          (traj_cy_um),
         .shape_busy         (traj_shape_busy),
         .shape_done         (traj_shape_done),
+        .bb_vld             (bb_vld),
+        .bb_xmin            (bb_xmin),
+        .bb_xmax            (bb_xmax),
+        .bb_ymin            (bb_ymin),
+        .bb_ymax            (bb_ymax),
         .txt_commit         (traj_txt_commit),
         .txt_none           (traj_txt_none),
         .traj_ready_in      (traj_ready),
@@ -344,6 +414,8 @@ module hap2_top #(
         .cfg_carrier_hz     (cfg_carrier_hz),
         .cfg_phase_steps    (cfg_phase_steps),
         .cfg_change         (config_changed),
+        .cfg_level          (cfg_level),
+        .cfg_mod_hz         (cfg_mod_hz),
         .enable             (output_on),
         .tbl_new            (ph_done),
         .tbl_addr           (ph_rd2_addr),
@@ -453,7 +525,14 @@ module hap2_top #(
     hap2_tx #(
         .CLK_HZ (CLK_HZ),
         .BAUD   (BAUD),
-        .DIGITS (10)
+        .DIGITS (10),
+        // 工作空间：和命令层用同一组参数，保证「声明的范围」和「实际拦的范围」一致
+        .WS_X_MIN_UM (WS_X_MIN_UM),
+        .WS_X_MAX_UM (WS_X_MAX_UM),
+        .WS_Y_MIN_UM (WS_Y_MIN_UM),
+        .WS_Y_MAX_UM (WS_Y_MAX_UM),
+        .WS_Z_MIN_UM (WS_Z_MIN_UM),
+        .WS_Z_MAX_UM (WS_Z_MAX_UM)
     ) u_tx (
         .clk              (clk),
         .rst_n            (rst_n),
@@ -465,7 +544,7 @@ module hap2_top #(
         .reply_seq        (reply_seq),
         .reply_code       (reply_code),
         .reply_want_state (reply_want_state),
-        .boot_id          (BOOT_ID),
+        .boot_id          (boot_id),
         .state_push       (state_push),
         .state_capture    (state_capture),
         .revision         (cmd_rev),

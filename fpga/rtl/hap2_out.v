@@ -14,6 +14,11 @@
 // 三个门控条件（运行中、等级>0、正在扫描）由 enable 一句话带进来；enable=0 时
 // 所有输出一律拉低——换能器在跳转、暂停、停止、上电复位时都不能被驱动。
 //
+// 两个「强弱」旋钮（都是 HAP3 配置里的字段）：
+//   level（0~100）   归一化驱动等级 → 用占空比调幅度（level=100 = 满驱动 = 50% 方波）
+//   mod_hz（0~1000） 包络调制频率  → 用 mod_hz 的方波把输出整段开/关（0 = 不调制）
+//   两者都是**首版约定**：真实换能器的「等级—声压」曲线要用示波器和麦克风标定一次。
+//
 // 如果驱动板要的是「互补的两个输入」（半桥），把 DEAD_CYC 设成死区拍数，
 // out_neg 就是带死区的互补输出（两边同时导通会烧管子，所以要有都不导通的空档）。
 // 只用单端驱动时 DEAD_CYC=0、只用 out_pos 就行。
@@ -32,6 +37,11 @@ module hap2_out #(
     /* verilator lint_on UNUSEDSIGNAL */
     input  wire [31:0]               cfg_phase_steps,
     input  wire                      cfg_change,   // 单拍：载波换了，增量重算
+    // ---- 调制与等级（HAP3 的 mod_hz / level）----
+    // level：0~100 的归一化驱动等级；mod_hz：0~1000 的包络调制频率（0 = 不调制）。
+    // 两个都是**首版约定**，真实换能器上的曲线要上板标定，见下面注释。
+    input  wire [31:0]               cfg_level,
+    input  wire [31:0]               cfg_mod_hz,
     // ---- 门控 ----
     input  wire                      enable,       // 运行中 && 等级>0 && 正在扫描
     // ---- 相位表读口（新表好了就读一遍，锁进本地寄存器）----
@@ -63,6 +73,28 @@ module hap2_out #(
 
     reg [ACC_BITS-1:0] inc;
     reg [5:0]          off_shift;    // ACC_BITS − log2(S)
+
+    // ---------------- 等级：0~100 的百分比 → 占空比门槛 ----------------
+    // 参考实现（model.py）只把 level 当「开/关」；协议里 level 是「归一化驱动等级」。
+    // 这里定成：level=100 就是原来的 50% 占空比方波（满驱动）；level 越小，
+    // 载波周期里高电平那一段越短。方波的基波幅度 ∝ sin(π × 占空比)，所以
+    // 占空比从 0 走到 50% 正好是一条从「关」到「满」的单调曲线。这就是数字电路里
+    // 常用的「用占空比调幅度」（PWM，Pulse Width Modulation，脉冲宽度调制）。
+    // 门槛 ≈ 2^32 ÷ 200 × level，所以 level=100 时门槛 ≈ 半个周期。
+    // 首版约定：真实换能器的「等级—声压」曲线要在示波器和麦克风上标定一次。
+    // level 的取值范围 0~100 由字段解析层把关；这里再夹一次，万一真收到超范围的值
+    // 也不会因为乘法溢出而算出一个奇怪的门槛。
+    wire [31:0] duty_thr = (cfg_level > 32'd100) ? 32'd2_147_483_648
+                                                 : cfg_level * 32'd21_474_836;
+
+    // ---------------- 调制包络：mod_hz 的 50% 方波 ----------------
+    // mod_hz=0 时包络恒为 1（等于不调制）。mod_hz>0 时用一个专门的相位累加器
+    // 产生 mod_hz 的方波，把输出整段整段地开/关（触感强弱随时间变化就靠它）。
+    // 累加器位宽 40 位：mod_hz=1 时增量也有两万多，不会退化成 0。
+    localparam integer      MOD_ACC_BITS = 40;
+    reg  [MOD_ACC_BITS-1:0] mod_acc;
+    reg  [MOD_ACC_BITS-1:0] mod_inc;
+    wire mod_on = (cfg_mod_hz == 32'd0) ? 1'b1 : mod_acc[MOD_ACC_BITS-1];
 
     function [3:0] log2s;            // S 只可能是 8..256
         input [31:0] s;
@@ -126,14 +158,21 @@ module hap2_out #(
         else                 acc <= acc + inc;
     end
 
+    // ---------------- 调制包络累加器 ----------------
+    always @(posedge clk) begin
+        if (!rst_n)         mod_acc <= {MOD_ACC_BITS{1'b0}};
+        else if (cfg_change) mod_acc <= {MOD_ACC_BITS{1'b0}};   // 配置一换，包络从零相位重新开始
+        else                mod_acc <= mod_acc + mod_inc;
+    end
 
-
-    // ---------------- 每一路：加偏移取最高位 ----------------
+    // ---------------- 每一路：加相位偏移，和占空比门槛比 ----------------
     genvar gi;
     generate
         for (gi = 0; gi < CHANNELS; gi = gi + 1) begin : g_ch
             wire [ACC_BITS-1:0] ph = acc + off[gi];
-            wire                sq = ph[ACC_BITS-1];    // 50% 占空比，天然如此
+            // level=100 时 duty_thr ≈ 半个周期，这一行就等于原来的「取最高位」，
+            // 也就是 50% 占空比；等级调低，高电平那一段就变短。
+            wire                sq = (ph < duty_thr);
             /* verilator lint_off UNUSEDSIGNAL */
             reg  [DEAD_MAX-1:0] dly;    // 死区延迟链（不用互补输出时也留着，方便看波形）
             /* verilator lint_on UNUSEDSIGNAL */
@@ -151,18 +190,27 @@ module hap2_out #(
                     dly         <= {(DEAD_MAX){1'b0}};
                 end else begin
                     dly         <= (dly << 1) | sq;   // 移位插入，位宽无关
-                    out_pos[gi] <= enable & sq_pos;
+                    // out_gate = 三个门控条件 × 调制包络：任何一个不满足，两个输出一起拉低
+                    out_pos[gi] <= out_gate & sq_pos;
                     // enable=0 时两个输出一起拉低（半桥上下管都关，最安全）
-                    out_neg[gi] <= enable & sq_neg;
+                    out_neg[gi] <= out_gate & sq_neg;
                 end
             end
         end
     endgenerate
 
-    // ---------------- 状态机（只负责算增量）----------------
+    // ---------------- 状态机（只负责算两个增量：载波 inc、调制 mod_inc）----------------
     /* verilator lint_off UNUSEDSIGNAL */
     reg busy;   // 只在波形上看：算增量的时候是 1
     /* verilator lint_on UNUSEDSIGNAL */
+
+    wire out_gate = enable & mod_on;     // 最终门控：运行为前提，再叠上调制包络
+
+    localparam [1:0] O_IDLE = 2'd0;
+    localparam [1:0] O_INC  = 2'd1;
+    localparam [1:0] O_MOD  = 2'd2;
+
+    reg [1:0] ostate;
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -170,19 +218,45 @@ module hap2_out #(
             in_start  <= 1'b0;
             in_numer  <= 56'd0;
             inc       <= {ACC_BITS{1'b0}};
+            mod_inc   <= {MOD_ACC_BITS{1'b0}};
             off_shift <= ACC_BITS[5:0] - 6'd6;
+            ostate    <= O_IDLE;
         end else begin
             in_start <= 1'b0;
-            if (cfg_change) begin
-                busy     <= 1'b1;
-                in_numer <= ({{38{1'b0}}, cfg_carrier_hz[17:0]} << ACC_BITS)
-                           + {30'h0, CLK_HZ[25:0]};
-                in_start <= 1'b1;
-                off_shift<= ACC_BITS[5:0] - {2'b0, log2s(cfg_phase_steps)};
-            end else if (in_done) begin
-                busy <= 1'b0;
-                inc  <= in_div0 ? {ACC_BITS{1'b0}} : in_quot[ACC_BITS-1:0];
-            end
+            case (ostate)
+                O_IDLE: begin
+                    if (cfg_change) begin
+                        busy      <= 1'b1;
+                        in_numer  <= ({{38{1'b0}}, cfg_carrier_hz[17:0]} << ACC_BITS)
+                                    + {30'h0, CLK_HZ[25:0]};
+                        in_start  <= 1'b1;
+                        off_shift <= ACC_BITS[5:0] - {2'b0, log2s(cfg_phase_steps)};
+                        ostate    <= O_INC;
+                    end
+                end
+                O_INC: begin
+                    if (in_done) begin
+                        inc <= in_div0 ? {ACC_BITS{1'b0}} : in_quot[ACC_BITS-1:0];
+                        if (cfg_mod_hz == 32'd0) begin
+                            busy   <= 1'b0;
+                            ostate <= O_IDLE;
+                        end else begin
+                            // 第二趟：把 mod_hz 也算成「每拍加多少」，同一个除法器接着用
+                            in_numer <= ({{46{1'b0}}, cfg_mod_hz[9:0]} << MOD_ACC_BITS)
+                                        + {30'h0, CLK_HZ[25:0]};
+                            in_start <= 1'b1;
+                            ostate   <= O_MOD;
+                        end
+                    end
+                end
+                default: begin   // O_MOD
+                    if (in_done) begin
+                        mod_inc <= in_div0 ? {MOD_ACC_BITS{1'b0}} : in_quot[MOD_ACC_BITS-1:0];
+                        busy    <= 1'b0;
+                        ostate  <= O_IDLE;
+                    end
+                end
+            endcase
         end
     end
 

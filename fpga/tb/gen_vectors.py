@@ -601,6 +601,55 @@ def build_top_cases(device):
              repeat_millihz=40000, blank_us=2000, level=30)
          + encode("CMD", 19, "PING"),
          "配置和探活连着发：探活不能顶掉配置应答的序号"),
+        # ---- 工作空间越界（字段各自合法，合起来越界）----
+        # 草图的点 x=150000 µm：参考实现允许到 300 mm，但设备声明的工作空间是 ±100 mm
+        ("config_ws_sketch",
+         cfg(20, shape="CUSTOM", scan_paths="0:0,150000:0",
+             repeat_millihz=40000, blank_us=2000, level=30),
+         "越界草图：x=150000 µm 超出 ±100000 µm，应回 OUT_OF_WORKSPACE"),
+        # 预设图形：cx=90000 和 radius=20000 各自都合法，但圆会伸到 110000 µm
+        ("config_ws_radius",
+         cfg(21, shape="CIRCLE", radius_um=20000, cx_um=90000,
+             repeat_millihz=40000, level=30),
+         "越界预设图形：cx+radius=110000 µm，应回 OUT_OF_WORKSPACE"),
+        # 边界：cx=80000 + radius=20000 正好 100000 µm，压线应当接受
+        ("config_ws_edge",
+         cfg(22, shape="CIRCLE", radius_um=20000, cx_um=80000,
+             repeat_millihz=40000, level=30),
+         "边界预设图形：正好压在 ±100000 µm 上，应当接受"),
+        # ---- 本地模式：切过去、切回来（本地按键由测试台直接驱动）----
+        ("mode_local", encode("CMD", 23, "MODE", value="LOCAL"),
+         "切成本地控制：之后串口的 CONFIG/START 都应当被拒"),
+        ("mode_remote", encode("CMD", 24, "MODE", value="REMOTE"),
+         "切回电脑控制"),
+        # 本地按键之后要读回真实的 rev / shape：SNAP 在任何模式下都允许
+        ("snap_local", encode("CMD", 25, "SNAP"),
+         "要一份状态：本地动作之后核对 rev/shape 用"),
+    ]
+
+
+def build_top8_cases(device8):
+    """8×8 端到端预演用的最小报文集。
+
+    板子还没到，先在仿真里把 64 路那条路走一遍：握手（声明 hw_rows=8）、
+    配一个 20 mm 的圆（64 路点表 + 节拍表）、启动、要一份状态（应当有 64 个相位码）、停止。
+    """
+    dev = dict(device8.array.wire())
+
+    def cfg(seq, **over):
+        fields = dict(Config(**over).wire())
+        fields.update(dev)
+        return encode("CMD", seq, "CONFIG", **fields)
+
+    return [
+        ("hello8", encode("CMD", 1, "HELLO"),
+         "8×8 握手：应答里应当声明 hw_rows=8 hw_cols=8"),
+        ("config_circle8", cfg(2, shape="CIRCLE", radius_um=20000,
+                               repeat_millihz=40000, level=30),
+         "8×8 的圆：64 路的点表 + 节拍表"),
+        ("start8", encode("CMD", 3, "START"), "启动：走步器开始走"),
+        ("snap8", encode("CMD", 4, "SNAP"), "要状态：phase 串应当正好 64 个数"),
+        ("stop8", encode("CMD", 5, "STOP"), "停止"),
     ]
 
 
@@ -712,7 +761,7 @@ def main():
     for name, frame, kind, code, mode, run, rev_delta, want_state, note in cmd_cases:
         print("  %-18s %-3s 错误码 %-2d %s" % (name, "ACK" if kind == 0 else "ERR", code, note))
 
-    # ---- 板子应答的逐字节对照 ----
+# ---- 板子应答的逐字节对照 ----
     txp = bytearray()
     tx_lines = []
     for name, frame in build_tx_expect():
@@ -790,6 +839,20 @@ def main():
     (VECTOR_DIR / "top_plan.mem").write_text("\n".join(t_lines) + "\n", encoding="ascii")
     print("端到端：%d 条报文，%d 字节" % (len(t_lines), len(tp)))
     for name, frame, note in top_cases:
+        print("  %-16s %3d 字节  %s" % (name, len(frame), note))
+
+    # ---- 8×8 端到端预演（板子没到，先在仿真里把 64 路跑一遍）----
+    device8 = DemoDevice(array=ArraySpec(8, 8, 10000, "ROW_MAJOR_XY"))
+    tp8 = bytearray()
+    t8_lines = []
+    for name, frame, note in build_top8_cases(device8):
+        offset = len(tp8)
+        tp8 += frame
+        t8_lines.append("%03X %03X" % (offset, len(frame)))
+    write_bytes(VECTOR_DIR / "top8_packets.mem", bytes(tp8))
+    (VECTOR_DIR / "top8_plan.mem").write_text("\n".join(t8_lines) + "\n", encoding="ascii")
+    print("8×8 端到端：%d 条报文，%d 字节" % (len(t8_lines), len(tp8)))
+    for name, frame, note in build_top8_cases(device8):
         print("  %-16s %3d 字节  %s" % (name, len(frame), note))
 
     summary = {"frame_cases": len(plan_lines), "field_cases": len(fplan_lines),

@@ -29,6 +29,7 @@ module tb_out;
     reg [7:0]  codes [0:511];
 
     reg  [31:0] cfg_carrier, cfg_steps, cfg_z;
+    reg  [31:0] cfg_level, cfg_mod_hz;     // HAP3 的「驱动等级」和「调制频率」
     reg         cfg_change;
     reg  signed [20:0] fx_21, fy_21;
     reg         ph_start;
@@ -70,6 +71,7 @@ module tb_out;
         .clk(clk), .rst_n(rst_n),
         .cfg_carrier_hz(cfg_carrier), .cfg_phase_steps(cfg_steps),
         .cfg_change(cfg_change),
+        .cfg_level(cfg_level), .cfg_mod_hz(cfg_mod_hz),
         .enable(enable),
         .tbl_new(ph_done),
         .tbl_addr(ph_rd2_addr), .tbl_data(ph_rd2_data),
@@ -84,6 +86,7 @@ module tb_out;
         .clk(clk), .rst_n(rst_n),
         .cfg_carrier_hz(cfg_carrier), .cfg_phase_steps(cfg_steps),
         .cfg_change(cfg_change),
+        .cfg_level(cfg_level), .cfg_mod_hz(cfg_mod_hz),
         .enable(enable),
         .tbl_new(ph_done),
         .tbl_addr(ph_rd2_addr), .tbl_data(ph_rd2_data),
@@ -155,6 +158,48 @@ module tb_out;
         end
     endtask
 
+    // 量第 0 路在**一个载波周期里**有多少拍是高电平（= 占空比 × 1250）
+    integer high_ticks, duty_total;
+    task measure_duty;
+        integer n;
+        begin
+            wait_rising0;
+            high_ticks = 0; duty_total = 0;
+            if (found_edge) begin
+                for (n = 0; n < 1250; n = n + 1) begin
+                    @(negedge clk);
+                    duty_total = duty_total + 1;
+                    if (out_pos[0]) high_ticks = high_ticks + 1;
+                end
+            end
+        end
+    endtask
+
+    // 在 win_cycles 拍里数两件事：输出跳变次数、以及「静音」出现了几次
+    // （连续 2000 拍不动 = 40 µs 没跳变，正常 50% 方波最长只会有半个周期约 625 拍，
+    //   所以这一定是调制包络把输出关掉了）
+    integer env_edges, env_silence, idle_run;
+    reg     last_pos;
+    task measure_envelope;
+        input integer win_cycles;
+        integer n;
+        begin
+            env_edges = 0; env_silence = 0; idle_run = 0;
+            last_pos = out_pos[0];
+            for (n = 0; n < win_cycles; n = n + 1) begin
+                @(negedge clk);
+                if (out_pos[0] !== last_pos) begin
+                    env_edges = env_edges + 1;
+                    idle_run  = 0;
+                end else begin
+                    idle_run = idle_run + 1;
+                    if (idle_run == 2000) env_silence = env_silence + 1;
+                end
+                last_pos = out_pos[0];
+            end
+        end
+    endtask
+
     // 量第 0 路的周期：从一次上升沿开始，等 200 个周期，看花了多少时间
     integer period_ticks;
     task measure_period;
@@ -210,6 +255,8 @@ module tb_out;
         cfg_carrier = 32'd40000;
         cfg_steps   = 32'd64;
         cfg_z       = 32'd150000;
+        cfg_level   = 32'd100;     // 满驱动（= 50% 占空比，和以前的波形一模一样）
+        cfg_mod_hz  = 32'd0;       // 不调制
         cfg_change  = 1'b0;
         fx_21       = 21'sd0;
         fy_21       = 21'sd0;
@@ -343,6 +390,94 @@ module tb_out;
             errors = errors + 1;
         end else begin
             $display("  关断：enable 拉低后 5 拍内所有输出都归零");
+        end
+
+        // ---- 驱动等级 level：用占空比调幅度 ----
+        // level=100 时应当还是原来那个 50% 方波（1250 拍里高 625 拍）；
+        // level=50 时占空比减半（高约 312 拍）。这条把「等级→占空比」这条路钉住。
+        enable    = 1'b1;
+        cfg_level = 32'd100;
+        repeat (20) @(negedge clk);
+        measure_duty;
+        checks = checks + 1;
+        if (high_ticks < 618 || high_ticks > 632) begin
+            $display("[输出-等级] level=100 时一个周期里高 %0d 拍，期望 625±7（50%% 占空比）  **失败**",
+                     high_ticks);
+            errors = errors + 1;
+        end else begin
+            $display("  等级：level=100 → 一个周期（%0d 拍）里高 %0d 拍，占空比约 50%%",
+                     duty_total, high_ticks);
+        end
+
+        cfg_level = 32'd50;
+        repeat (20) @(negedge clk);
+        measure_duty;
+        checks = checks + 1;
+        if (high_ticks < 305 || high_ticks > 320) begin
+            $display("[输出-等级] level=50 时一个周期里高 %0d 拍，期望 312±8  **失败**", high_ticks);
+            errors = errors + 1;
+        end else begin
+            $display("  等级：level=50 → 高 %0d 拍，占空比约 25%%（幅度随等级单调变化）", high_ticks);
+        end
+
+        // level=0：即使 enable 还是 1，也不许有任何输出（“等级 0 = 不驱动”）
+        cfg_level = 32'd0;
+        repeat (20) @(negedge clk);
+        checks = checks + 1;
+        seen_edge = 0;
+        for (k = 0; k < 3000; k = k + 1) begin
+            @(negedge clk);
+            if (out_pos !== {CH{1'b0}}) seen_edge = 1;
+        end
+        if (seen_edge) begin
+            $display("[输出-等级] level=0 时输出还在动  **失败**");
+            errors = errors + 1;
+        end else begin
+            $display("  等级：level=0 → 即使 enable=1，输出也全部拉低");
+        end
+        cfg_level = 32'd100;
+        repeat (20) @(negedge clk);
+
+        // ---- 调制频率 mod_hz：把输出整段开/关 ----
+        // mod_hz=100 → 包络周期 10 ms（50 MHz ÷ 100 = 500000 拍），占空比 50%，
+        // 所以在 50 ms 的窗口里：静音段约 5 次、跳变次数约为不调制时的一半。
+        cfg_mod_hz = 32'd100;
+        cfg_change = 1'b1;
+        @(negedge clk);
+        cfg_change = 1'b0;
+        repeat (400) @(negedge clk);      // 等两趟除法（载波 + 调制）算完
+        measure_envelope(2_500_000);      // 50 ms
+        checks = checks + 1;
+        if (env_silence < 4 || env_silence > 6) begin
+            $display("[输出-调制] mod_hz=100 时 50 ms 内静音 %0d 次，期望 5±1  **失败**", env_silence);
+            errors = errors + 1;
+        end else begin
+            $display("  调制：mod_hz=100 → 50 ms 里输出被关掉 %0d 次（包络 100 Hz）", env_silence);
+        end
+        checks = checks + 1;
+        if (env_edges < 1900 || env_edges > 2100) begin
+            $display("[输出-调制] mod_hz=100 时 50 ms 内跳变 %0d 次，期望 2000±100  **失败**", env_edges);
+            errors = errors + 1;
+        end else begin
+            $display("  调制：mod_hz=100 → 50 ms 内跳变 %0d 次（约为不调制 4000 次的一半，包络占空比 50%%）",
+                     env_edges);
+        end
+
+        // 关掉调制：应当回到「一直在动」，静音段一次都没有
+        cfg_mod_hz = 32'd0;
+        cfg_change = 1'b1;
+        @(negedge clk);
+        cfg_change = 1'b0;
+        repeat (400) @(negedge clk);
+        measure_envelope(500_000);        // 10 ms
+        checks = checks + 1;
+        if (env_silence != 0 || env_edges < 700) begin
+            $display("[输出-调制] mod_hz=0 时 10 ms 内静音 %0d 次、跳变 %0d 次，期望 0 次 / 约 800 次  **失败**",
+                     env_silence, env_edges);
+            errors = errors + 1;
+        end else begin
+            $display("  调制：mod_hz=0 → 10 ms 内跳变 %0d 次、一次静音都没有（回到连续输出）",
+                     env_edges);
         end
 
         $display("=========================================");
