@@ -1,0 +1,162 @@
+# STM32F103C8T6 验证工程
+
+更新于 **2026-10-07**。此工程用于替代 F411 做 4×4 阵列的串口、相位输出与接收 ADC 验证。最终控制平台仍为 Tang Mega 60K。
+
+## 1. 打开工程
+
+仓库工程位于 `firmware/stm32f103c8_cube/`，CubeIDE 工程名称为 `haptics_f103c8`。本机工作区副本位于 `D:\STM32Dev\haptics_f103c8`；其他电脑可直接导入克隆仓库中的工程目录。
+
+在 CubeIDE 中选择 **File → Import → General → Existing Projects into Workspace**，选择该目录。不要勾选复制到工作区。选中工程后可直接 Run，或自行 Build 后使用 Debug；无需单独使用 HEX。
+
+双击 `haptics_f103c8.ioc`，或用独立 STM32CubeMX 打开它，可查看引脚和时钟。当前配置为 STM32F103C8T6、**8 MHz 外部晶振、64 MHz 系统时钟**；若实际板卡晶振不同，应先调整配置。未启用 USB。
+
+## 2. 下载与串口
+
+| 接口 | F103 引脚 | 用途 |
+|---|---|---|
+| ST-LINK SWDIO | PA13 | 下载与调试 |
+| ST-LINK SWCLK | PA14 | 下载与调试 |
+| ST-LINK GND | GND | 共地 |
+| ST-LINK NRST（建议连接） | NRST | 复位与复位下连接 |
+| USB-UART RX | PA2 / USART2_TX | 接收 MCU 发出的数据 |
+| USB-UART TX | PA3 / USART2_RX | 向 MCU 发送数据 |
+| USB-UART GND | GND | 共地 |
+
+串口使用 **115200、8N1、无流控、3.3 V 逻辑**。独立 ST-LINK V2 通常没有虚拟串口，上位机通信需另接 USB-UART。板卡电源只选一个来源；不要将多个供电输出直接并联。
+
+**快捷烧录（绿色 Run）**：使用 **Run → Run Configurations → C/C++ Application → haptics_f103c8**。第一次选择并 Run 后，工具栏绿色 Run 按钮会复用它。该配置先增量编译 Debug，再由 OpenOCD 下载、回读校验、复位运行并释放 ST-LINK；无需额外手动转换 HEX/BIN。控制台出现 `Verified OK` 表示校验通过；`<terminated> (exit value: 0)` 表示下载工具正常退出，板上程序继续运行。源码调试会占用 ST-LINK，应先结束调试再 Run。
+
+本机源码调试使用 **GDB Hardware Debugging → OpenOCD (pipe)**，与 Run 共用 SWD、100 kHz 和软件复位，不依赖 NRST 接线。在 **Run → Debug Configurations → GDB Hardware Debugging** 中选择：
+
+- **haptics_f103c8 OpenOCD Debug**：下载已编译的 `Debug/haptics_f103c8.elf`，复位并运行至 `main` 断点。关闭自动编译，由你先自行 Build。
+- **haptics_f103c8 Connection Check**：只连接、复位并暂停，读取寄存器；不下载程序、不自动编译。板上原程序没有加载符号时，出现“找不到源码”属于预期现象。
+
+`haptics_f103c8.launch` 已替换为上述快捷烧录配置，避免再次进入报 `Could not verify ST device` 的 ST 专用流程。F11 用于调试；应先选定 **haptics_f103c8 OpenOCD Debug**，与绿色 Run 的下载运行用途不同。
+
+换电脑或更新 CubeIDE 后，在工程目录生成本机初始化文件，再刷新工程：
+
+```powershell
+python configure_ide.py --cubeide 'D:\STM32Dev\STM32CubeIDE_2.1.0'
+```
+
+将路径改为实际安装目录。生成的 `haptics_openocd.local.gdb` 和 `haptics_run.local.cfg` 保存本机工具路径，已排除出 Git；Run 和 Debug 会自动启动 OpenOCD，无需手动启动服务器。Run 从本次 ELF 生成带 `0xff` 填充的临时镜像，限制在 63 KB 应用区内并保留末尾启动日志页；路径含空格也可使用。
+
+2026-10-02 本机检查：CubeProgrammer 和 OpenOCD 均识别到 Device ID `0x410`、64 KB Flash。芯片 ROM 返回的厂商字段为 `jedec=1, con=8, id=0x0e`，不符合 CubeIDE 的 ST 校验规则；仅凭此尚未确定芯片品牌或下载器真伪。通用配置已在 CubeIDE 内成功下载并停在 `main`；未修改 ST 插件或厂商校验。
+
+同日烧录验证发现并修复看门狗初始化顺序：先启动 IWDG，使 LSI 时钟工作，再配置并等待更新标志清零，避免启动卡住；等待增加 100 ms 超时。修复后重新编译无错误、无警告，使用 OpenOCD 烧录并通过回读校验，保留末尾 1 KB 启动日志页。源码断点确认进入 `app_f103_poll()`，系统时钟为 64 MHz，`boot_ok=true`；运行时间增长至 2536 ms 时仍为 `IDLE`、无待处理故障、GPIOB 输出全低。已释放下载连接并保持程序运行；串口联调、输出波形与声学效果尚未验证。
+
+2026-10-04 本机验证：Run 配置对话框和工具栏绿色 Run 按钮均完成增量编译（0 错误、0 警告）、ST-LINK V2 烧录、`Verified OK` 回读校验和复位运行，下载工具正常退出。启动断点与 2 秒运行检查确认 64 MHz、`boot_ok=true`、`IDLE`、无待处理故障、输出关闭；验证后恢复运行并释放 ST-LINK。
+
+## 3. 阵列接线
+
+以下映射保留 [R5 驱动板](../../hardware/Haptics_4x4_R5_12VDC/README.md) 原来的物理通道顺序。2026-10-04 按实物 Blue Pill 照片调整：逻辑通道 2 从未引出的 PB2/BOOT1 改到 **PA8**，其余 15 路及协议通道编号不变。
+
+| MCU 引脚 | 逻辑通道 | 驱动板 CN1 引脚 | 驱动板通道 |
+|---|---|---|---|
+| PB0 | 0 | 7 | 4 |
+| PB1 | 1 | 8 | 5 |
+| **PA8** | 2 | **9** | 6 |
+| PB3 | 3 | 10 | 7 |
+| PB4 | 4 | 3 | 0 |
+| PB5 | 5 | 4 | 1 |
+| PB6 | 6 | 5 | 2 |
+| PB7 | 7 | 6 | 3 |
+| PB8 | 8 | 11 | 12 |
+| PB9 | 9 | 12 | 13 |
+| PB10 | 10 | 17 | 14 |
+| PB11 | 11 | 18 | 15 |
+| PB12 | 12 | 13 | 8 |
+| PB13 | 13 | 14 | 9 |
+| PB14 | 14 | 15 | 10 |
+| PB15 | 15 | 16 | 11 |
+
+CN1-1 接 GND；CN1-2/19/20 不接。驱动板 XT30 单独接 **12 V DC**，不能接 MCU 电源脚。换能器连接驱动板输出，不能由 MCU 引脚直接驱动。
+
+照片方向为 USB 在下、SWD 四针在上时，**PA8 是右侧从下往上的第 5 个排针，位于 B15 与 A9 之间**。只将 CN1-9 接到这个 A8 排针；不要从 BOOT1 跳帽取驱动信号。标准 Blue Pill 原理图中，BOOT1 跳帽经 100 kΩ 电阻连接 PB2，实物阻值仍应以板卡为准。
+
+其余引脚检查：
+
+| 引脚 | 板上关联功能 | 当前处理 |
+|---|---|---|
+| PB2 / BOOT1 | 启动跳帽，两侧无 B2 排针 | 不用于阵列，保持浮空输入；两个 BOOT 跳帽保持 0 |
+| PB3、PB4 | 默认 JTAG 调试引脚 | `HAL_MspInit()` 关闭 JTAG，释放为阵列输出 |
+| PA13、PA14 | 顶部 SWD 接口 | 保留给 ST-LINK，不接阵列 |
+| PC13 | 板载状态 LED | 保留给 LED，不接阵列 |
+| PA11、PA12 | 板载 USB 数据线 | 不用于阵列；未启用 USB 串口 |
+| PC14、PC15、PD0、PD1 | 板载晶振 | 不用于阵列 |
+| PA0、PA2/PA3、PA5–PA7 | ADC、串口和按键 | 均有侧边排针；PA3 增加内部上拉，避免未接 USB-UART 时接收端悬空 |
+
+照片确认其余 15 个 PB 阵列引脚均有侧边排针。GPIO 复用和内部上拉属于配置检查，尚未测量实板各引脚波形。
+
+## 4. 接收板与按键
+
+接收板 U4-2 `ADCV_P` 接 PA0，U4-3/4 接 GND，接收板按其设计独立供 5 V。PA0 输入须处于 0 至 VDDA 范围；保留原接收前端与分压，上位机按 3.4 倍还原前端电压。
+
+**上电自动启动**：初始化完成后等待 3 秒，再进入本地模式，开始输出内置默认圆形。倒计时期间阵列输出保持低电平，PC13 状态灯灭；启动后状态灯亮。默认参数为半径 20 mm、焦点高度 150 mm、输出等级 30%、200 Hz 调制和 40 kHz 载波，实际触觉效果尚未测量。无需串口模块或启动按键。红色板载 RESET 会重启 MCU，并重新进行这次倒计时。
+
+倒计时在主循环中执行，不阻塞看门狗、串口或按键。只尝试自动启动一次；停止、暂停或故障后不会再次自动播放。倒计时期间收到串口数据或按键操作会取消自动启动；初始化故障也会阻止启动。已自动启动后，电脑可先发 STOP，再发 `MODE value=REMOTE`，然后配置和开始远程播放；协议帧格式见 HAP3。F411 工程的默认启动行为不受此改动影响。
+
+新版电脑端点击“电脑控制”会自动执行停止确认和模式切换。调试模式的“实测数据 → 接收波形”可在 LOCAL/REMOTE 请求采样；“连续查看”以每秒最多两次请求 200 点、400 kS/s 的窗口，自动保存原码 JSONL 和电压分析 CSV，详见[上位机接收板调试](../../desktop_app/README.md#接收板调试)。采样仍由串口请求触发，不依赖外接按键，不会自动修改相位；没有供电时先用 Demo 验证流程。
+
+外接按键为可选操作：一端接对应引脚，另一端接 GND，内部上拉、低电平有效：
+
+- PA5：停止；长按 1.5 秒切换本地/远程模式。
+- PA6：切换预设图形。
+- PA7：暂停/继续；停止状态下播放所选图形。
+- PC13：低电平点亮的状态 LED，仅适用于对应板卡电路。
+
+## 5. 能力与限制
+
+固件保持 [HAP3](../../desktop_app/PROTOCOL.md) 双向通信语义，支持配置确认、开始/暂停/停止、状态与相位回传、几何配置和 ADC 短窗口采集。F103 握手如实声明 **16 通道、最多 64 个坐标和 8 段路径**，兼容旧版 64 点导入；超限配置拒绝，不截断。复杂草图可能需要简化。
+
+TIM1 更新请求通过 DMA1 Channel5 写 15 个 GPIOB 输出；内部 CH1 比较请求通过 DMA1 Channel2 写 GPIOA，将逻辑通道 2 输出到 PA8，并保持 GPIOA 其他输出锁存位（包括按键上拉）。PA8 为普通 GPIO，TIM1 CH1 使用 **Output Compare No Output**，不占用引脚复用。两类 DMA 请求来自同一个 TIM1，比较请求比更新请求晚 1 个定时器时钟；实际跨端口偏差仍需示波器测量。
+
+目标载波保持 40 kHz、每周期 64 个相位槽，焦点目标更新率保持 1 kHz。为在 20 KB RAM 内容纳双端口波形，缓冲边界改为 250 μs，双端口双缓冲合计仍为 5120 字节。每个边界保留 25 μs 全低检查窗口，因此连续输出的检查窗口占比由 5% 变为 10%。以较后的 GPIOA DMA 边界回填两组缓冲；任一路 DMA 错误、缓冲欠载、两端口缓冲位置失配、串口错误或失联均关闭全部 16 路。ADC1 仍由 TIM3 触发，以 400 kHz 采集 200 点。以上是配置与代码行为，实际频率、延迟和触觉效果尚未测量。
+
+2026-10-07 优化后，DMA 中断只回填已计算好的波形；主循环提前准备四个焦点，每次后台服务完成一个焦点的 16 路相位。F103 使用整数距离求相位、缓存线段长度和单周期位图，并用固定大小的字拷贝填充缓冲，避免软浮点和逐字节大块拷贝挤占回填时间。只在 F103 启用这些配置，F411 保留原默认计算方式。共享协议/配置临时空间降低 RAM 占用；不改变坐标、驱动引脚或接收前端。
+
+USART2 中断优先级为 0，波形 DMA 为 1，ADC DMA 为 2，均已同步到生成代码和 `.ioc`。输出故障保留正常接收到的串口命令；UART 接收错误才丢弃受损数据并重新同步。焦点未及时准备会报 `FOCUS_UNDERRUN` 并关闭输出，不会用旧焦点静默继续。
+
+相位和状态回传属于数字执行反馈，不能证明手掌处声场或触觉效果。接收 ADC 属于测量链路，需要先核对接线、输入范围及校准。
+
+## 6. CubeMX 再生成与维护
+
+应用入口保存在 `main.c`、中断文件的 `USER CODE` 区域，专用逻辑在 `app_f103.c` / `wave_f103.c`；CubeMX 已验证能保留这些入口。生成时启用 **Keep User Code**。
+
+若 CubeMX 重新生成 IDE 配置，在工程目录运行 `python configure_ide.py`，然后在 CubeIDE 刷新工程。它恢复 `-O2`、newlib-nano、`haptics_memory.ld`、源目录范围和快捷 Run 配置；添加 `--cubeide` 可同时更新 Run/Debug 工具路径。不能改用默认 64 KB 链接脚本，否则会占用预留日志页。
+
+仓库中 F411 的协议和几何核心为共享来源；修改后可执行：
+
+```powershell
+python firmware/stm32f103c8_cube/sync_core.py
+python firmware/stm32f103c8_cube/sync_core.py --project 'D:\STM32Dev\haptics_f103c8'
+```
+
+## 7. 软件验证
+
+你可以在 CubeIDE 自行编译；可选命令行编译和原生检查：
+
+```powershell
+python firmware/stm32f103c8_cube/build.py
+python firmware/stm32f103c8_cube/tests/test_f103.py
+python firmware/nucleo_f411re/tests/test_firmware.py
+```
+
+命令行编译不会自动烧录。2026-10-07 优化版本通过 Arm GNU 编译（`-Wall -Wextra -Werror`）、16 项 F103 检查和 17 项 F411 回归检查。Flash 占用 39,452 / 64,512 字节，RAM 占用 19,184 / 20,480 字节，包含 2 KB 栈和 256 字节堆预留；栈的实际峰值仍需专项测量。自动启动延时由 `app_f103.h` 中的 `F103_AUTOSTART_MS` 设置，当前为 3000。
+
+本机 CubeIDE 工程的源码及 `.ioc` 已同步，优化 ELF 已用 ST-LINK V2 下载并回读校验。真实 USB-UART 连接为 COM4、115200：九组图形的配置、播放、采样、暂停/继续和停止通过；上位机真实 `Session` 连续完成 30 个 ADC 窗口的解析与记录。压力测试使用输出等级 0，输入信号来源未确认，因此不作为超声或触觉验证。详细条件见[实板联调记录](VALIDATION_2026-10-07.md)。
+
+检查覆盖 16 个逻辑通道的相位、PB2 禁用、PA8 映射、GPIOA 其他锁存位保持、双端口检查窗口与 1 kHz 焦点更新。`wave_driver_harness.c` 使用实际驱动源码和模拟 CMSIS 寄存器，检查双 DMA 启停、较后端口边界回填、任一路 DMA 错误、漏回填和缓冲失配关闭输出，以及倒计时完成启动、手动/串口取消、暂停/停止后不自动重启、初始化或输出故障阻止启动；这不代表已测量真实总线同步。
+
+Flash 最后 1 KB（`0x0800FC00`）保留启动日志，共 512 次启动；用尽后禁止输出，不自动擦除。需要维护时应停止并断开驱动电源，手动擦除此页后重新启动；擦除整个芯片会同时删除程序。不应将清空日志作为常规连接操作。
+
+## 8. 首次上板
+
+先仅给 MCU 供电：默认 3 秒后会自动输出，可先保持驱动板电源断开，用逻辑分析仪检查 PA8 与其余 15 个 PB 输出的 40 kHz 波形、相位、停止和失联关闭，特别检查跨端口同步。调试器可查看 `render_max_cycles`（应低于 16,000 周期，即 250 μs）与 `prepare_max_cycles`；这些计数只反映本次运行观察值，不是最坏执行时间证明。串口联调时在倒计时期间发送数据取消自动启动。当前 PA8 自动启动版本已烧录并完成数字/串口联调；输出波形、接收板校准、声场与触觉效果仍需实测。
+
+## 9. 参考资料
+
+- [ST STM32F103C8 官方产品页与数据手册入口](https://www.st.com/en/microcontrollers-microprocessors/stm32f103c8.html)：Flash/RAM、引脚与电气限制。
+- [ST RM0008](https://www.st.com/resource/en/reference_manual/rm0008-stm32f101xx-stm32f102xx-stm32f103xx-stm32f105xx-and-stm32f107xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf)：DMA 请求映射、ADC 外部触发、GPIO 与调试端口配置。
+- [Blue Pill 原始核心板原理图](https://stm32-base.org/assets/pdf/boards/original-schematic-STM32F103C8T6-Blue_Pill.pdf)：2016-01-26 的板卡设计，PB2/BOOT1 经 R4 100 kΩ 接启动跳帽；用于解释未引出 B2 排针的原因，不作为实物变体阻值的测量结论。2026-10-04 核对用户板卡照片的排针、BOOT、SWD、USB 和晶振位置。
+- `haptics_f103c8.ioc` 与 `Drivers/`：本工程使用 STM32CubeMX 6.17.0、STM32Cube F1 V1.8.7；ST HAL/CMSIS 许可证保留在各组件目录。

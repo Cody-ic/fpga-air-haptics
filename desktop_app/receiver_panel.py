@@ -1,6 +1,8 @@
 """Debug-only receiver waveform panel; all widget work stays on the Tk thread."""
 
 import csv
+import os
+from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -20,10 +22,12 @@ class ReceiverPanel(ttk.Frame):
         self.available = False
         self.next_capture = 0.0
         self.last_notice = None
+        self.record_directory = None
+        self.record_line = tk.StringVar(value="采样后自动保存原始数据与分析 CSV。记录默认使用 3300 mV、3.4 倍，可离线重新计算。")
         self.continuous = tk.BooleanVar(value=False)
         self.vref = tk.StringVar(value="3300")
         self.divider = tk.StringVar(value="3.4")
-        self.notice = tk.StringVar(value="连接支持采样的设备后，将接收板输出接到 Nucleo A0 / PA0，并共地。")
+        self.notice = tk.StringVar(value="连接支持采样的设备后，将接收板 ADCV_P 接到 MCU 的 PA0，并共地。接收板独立供 5 V。")
         self.stats = tk.StringVar(value="尚无接收波形。")
         controls = ttk.Frame(self, padding=8)
         controls.pack(fill="x")
@@ -33,6 +37,8 @@ class ReceiverPanel(ttk.Frame):
         self.continuous_check.pack(side="left", padx=8)
         self.export_button = ttk.Button(controls, text="导出波形 CSV", command=self.export, state="disabled")
         self.export_button.pack(side="right")
+        self.record_button = ttk.Button(controls, text="打开测量记录", command=self.open_records, state="disabled")
+        self.record_button.pack(side="right", padx=8)
         settings = ttk.Frame(self, padding=(8, 0))
         settings.pack(fill="x")
         ttk.Label(settings, text="ADC 参考电压 / mV").pack(side="left")
@@ -42,6 +48,7 @@ class ReceiverPanel(ttk.Frame):
         ttk.Button(settings, text="重新计算", command=self.render).pack(side="left")
         ttk.Label(self, textvariable=self.notice, padding=(8, 5), wraplength=780).pack(fill="x")
         ttk.Label(self, textvariable=self.stats, padding=(8, 5), wraplength=780).pack(fill="x")
+        ttk.Label(self, textvariable=self.record_line, padding=(8, 5), wraplength=780).pack(fill="x")
         self.figure = Figure(figsize=(8, 3.5), facecolor="white")
         self.axis = self.figure.add_subplot(111)
         self.figure.subplots_adjust(left=.12, right=.96, bottom=.18, top=.85)
@@ -57,9 +64,27 @@ class ReceiverPanel(ttk.Frame):
         self.received = 0.0
         self.pending = False
         self.last_notice = None
+        self.record_directory = None
+        self.record_button.configure(state="disabled")
+        self.record_line.set("采样后自动保存原始数据与分析 CSV。记录默认使用 3300 mV、3.4 倍，可离线重新计算。")
         self.continuous.set(False)
         self.stats.set("尚无接收波形。")
         self.render()
+
+    def recorded(self, directory, count):
+        self.record_directory = Path(directory)
+        self.record_button.configure(state="normal")
+        self.record_line.set(f"本次连接已保存 {count} 个采样窗口：{directory}")
+
+    def record_failed(self, text):
+        self.record_line.set(text + "。界面采样继续，尚未保存的数据请手动导出。")
+
+    def open_records(self):
+        if self.record_directory is not None:
+            try:
+                os.startfile(self.record_directory)
+            except OSError as error:
+                messagebox.showerror("无法打开记录", str(error), parent=self)
 
     def acquire(self):
         if not self.available or self.pending:
@@ -103,7 +128,7 @@ class ReceiverPanel(ttk.Frame):
                 source = "Demo 合成数据 · 非测量" if self.capture.simulated else "板端 ADC 采样 · 未做声压校准"
                 notice = f"{source} · 距上次采样 {now-self.received:.1f} s · 400 kS/s，200 点"
             else:
-                notice = "点击采集一次。真实连接需将接收板 ADCV_P 接到 A0 / PA0，并共地；悬空输入无测量意义。"
+                notice = "点击采集一次。真实连接需将接收板 ADCV_P 接到 MCU 的 PA0，并共地，接收板独立供 5 V；悬空输入无测量意义。"
             if notice != self.last_notice:
                 self.notice.set(notice)
                 self.last_notice = notice
