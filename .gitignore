@@ -7,3 +7,15 @@ desktop_app/.runtime/
 desktop_app/exports/
 desktop_app/dist/
 desktop_app/build/
+
+# Gowin 工程（板上工具链的临时产物）
+fpga/board/*.gprj.user
+fpga/board/impl/
+fpga/board/temp/
+fpga/board/*.fs
+fpga/board/*.prj
+fpga/board/*.ipc
+fpga/board/*.rpt
+fpga/board/*.log
+fpga/board/*.pnr
+fpga/board/*.gprj

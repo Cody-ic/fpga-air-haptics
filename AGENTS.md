@@ -4,7 +4,9 @@
 
 This repository prepares the 2026 FPGA haptic graphics project. `README.md` is the entry point; `设计思路.md` records current architecture; `FPGA赛道选题建议(1).md` preserves historical research. `CLAUDE.md` provides project context.
 
-`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`. No HDL, PCB, or hardware measurements exist yet.
+`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, `golden.py` exports golden phase vectors for RTL comparison, and `protocol.py`, `controller.py`, `transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`.
+
+`fpga/` contains the HDL: `rtl/` holds the RTL, `tb/` holds the Verilog testbench plus the vector generator and run script, and `fpga/README.md` explains how to simulate. The RTL currently implements HAP2; the desktop app has since moved to HAP3 (see `desktop_app/PROTOCOL.md`), so the firmware needs a version update. No PCB or hardware measurements exist yet, and nothing has run on a board.
 
 ## Build, Test, and Development Commands
 
@@ -24,6 +26,10 @@ Quote PowerShell paths containing spaces or parentheses. PyInstaller uses `touch
 Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial I/O in its worker. Normal interface text should explain user actions; engineering details belong in debug mode.
 
 Write research in Chinese and Markdown in UTF-8. Preserve filenames, numbered sections, and technical abbreviations. Use ATX headings, hyphen bullets, and blank lines. Use absolute dates. Cite new external technical claims in section 9; distinguish vendor publication years and historical rules from confirmed current information.
+
+## Communication
+
+The project owner is a student new to FPGA engineering. Explain every English acronym or abbreviation on first use in each reply, in the form `RTL（Register Transfer Level，寄存器传输级）`. Prefer concrete numbers and everyday comparisons, and keep measured results clearly separate from theory and simulation.
 
 ## Testing Guidelines
 
