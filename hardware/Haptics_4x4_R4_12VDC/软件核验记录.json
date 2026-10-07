@@ -1,0 +1,25 @@
+{
+  "schematic_drc": [],
+  "pcb_drc": [],
+  "components": 78,
+  "pin_net_maps_match": true,
+  "testpads": 19,
+  "testpads_mask_open": true,
+  "testpads_paste_flashes_absent": true,
+  "unchanged_existing_component_pads_excluding_U25": 74,
+  "drill_files": {
+    "Drill_PTH_Through.DRL": 153,
+    "Drill_NPTH_Through.DRL": 4,
+    "Drill_PTH_Through_Via.DRL": 93,
+    "Drill_PTH_Inner1_to_Bottom.DRL": 24,
+    "Drill_PTH_Top_to_Inner1.DRL": 8
+  },
+  "sha256": {
+    "Haptics_4x4_R4_12VDC.epro": "6db452e1232662007770fb011cb73dc6bbf72591aa597d9619b1a8fe7befda3b",
+    "Haptics_4x4_R4_12VDC_Gerber.zip": "c32c5590210c7648dfa1190db989e18cd6e878e8e783a928a8864e0087e643bc"
+  },
+  "reopened_epro_drc": {
+    "schematic": [],
+    "pcb": []
+  }
+}

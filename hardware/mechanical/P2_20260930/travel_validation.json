@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "bolt_height_mm": 82,
+      "modeled_interferences": 0
+    },
+    {
+      "bolt_height_mm": 142,
+      "modeled_interferences": 0
+    }
+  ]
+}

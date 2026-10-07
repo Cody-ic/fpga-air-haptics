@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "fully_defined_sketches": 15,
+  "fixed_sketch_relations": 0,
+  "printable_part_types": 6,
+  "printed_or_load_tested": false,
+  "note": "P3 flat guide without PCB support posts; external PCB holder required; common Z0 datum preserved."
+}

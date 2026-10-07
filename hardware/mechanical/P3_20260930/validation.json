@@ -1,0 +1,247 @@
+{
+  "passed": true,
+  "pcb_mount_pattern_verified": [
+    [
+      -32.5,
+      32.5
+    ],
+    [
+      -18.5,
+      -43.5
+    ],
+    [
+      21.5,
+      -43.5
+    ],
+    [
+      35.5,
+      32.5
+    ]
+  ],
+  "meshes": [
+    {
+      "name": "01_array_alignment_jig.STL",
+      "triangles": 14840,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        87.0,
+        95.0,
+        5.000000000000002
+      ],
+      "volume_mm3": 33121.4393614133,
+      "cad_volume_relative_error": 4.277306958236881e-05,
+      "printable": true
+    },
+    {
+      "name": "02_bore_fit_coupon.STL",
+      "triangles": 2912,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        62.0,
+        20.0,
+        5.0
+      ],
+      "volume_mm3": 4470.59536128147,
+      "cad_volume_relative_error": 7.574118408205161e-05,
+      "printable": true
+    },
+    {
+      "name": "03_wrist_and_board_base.STL",
+      "triangles": 7608,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        150.0,
+        188.0,
+        156.0
+      ],
+      "volume_mm3": 238068.1298483065,
+      "cad_volume_relative_error": 7.819343049143406e-07,
+      "printable": true
+    },
+    {
+      "name": "04_wrist_cradle.STL",
+      "triangles": 1676,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        132.0,
+        41.24678421020508,
+        48.0
+      ],
+      "volume_mm3": 94701.86599819832,
+      "cad_volume_relative_error": 0.00025626059111470966,
+      "printable": true
+    },
+    {
+      "name": "05_pcb_standoff_35.STL",
+      "triangles": 1440,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        8.0,
+        8.0,
+        35.0
+      ],
+      "volume_mm3": 1441.2270601919852,
+      "cad_volume_relative_error": 0.00020306964212720346,
+      "printable": true
+    },
+    {
+      "name": "06_m4_nut_knob.STL",
+      "triangles": 1584,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        22.0,
+        21.999378204345703,
+        9.0
+      ],
+      "volume_mm3": 3156.57352986916,
+      "cad_volume_relative_error": 0.0001575291773269824,
+      "printable": true
+    },
+    {
+      "name": "REF_16_emitters.STL",
+      "triangles": 12928,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 16,
+      "size_mm": [
+        42.900001525878906,
+        42.899696350097656,
+        7.099999904632568
+      ],
+      "volume_mm3": 8743.15392054141,
+      "cad_volume_relative_error": 0.0001622681018104812,
+      "printable": false
+    },
+    {
+      "name": "REF_common_flat_datum.STL",
+      "triangles": 12,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        103.0,
+        111.0,
+        4.0
+      ],
+      "volume_mm3": 45732.0,
+      "cad_volume_relative_error": 0.0,
+      "printable": false
+    },
+    {
+      "name": "REF_pcb_80x88.STL",
+      "triangles": 2924,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        80.0,
+        88.0,
+        1.5999999046325692
+      ],
+      "volume_mm3": 11132.537949790574,
+      "cad_volume_relative_error": 8.806469527360159e-07,
+      "printable": false
+    },
+    {
+      "name": "REF_top_resistor_envelopes.STL",
+      "triangles": 96,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 8,
+      "size_mm": [
+        3.0,
+        19.3799991607666,
+        1.2000000476837158
+      ],
+      "volume_mm3": 46.079978485106494,
+      "cad_volume_relative_error": 4.669030716065845e-07,
+      "printable": false
+    }
+  ],
+  "common_datum": {
+    "reference": "one external unprinted flat plate, top Z=0",
+    "flat_guide_height_mm": 5.0,
+    "pcb_support_posts": false,
+    "external_pcb_holder_required": true,
+    "modeled_face_height_spread_mm": 0.0,
+    "through_bore_vertical_probes": 784,
+    "resistor_checks": [
+      {
+        "designator": "R2",
+        "x_mm": 29.5,
+        "y_mm": -32.444,
+        "window_clear": true
+      },
+      {
+        "designator": "R4",
+        "x_mm": 29.5,
+        "y_mm": -29.904000000000003,
+        "window_clear": true
+      },
+      {
+        "designator": "R6",
+        "x_mm": 29.5,
+        "y_mm": -27.363999999999997,
+        "window_clear": true
+      },
+      {
+        "designator": "R8",
+        "x_mm": 29.5,
+        "y_mm": -24.823999999999998,
+        "window_clear": true
+      },
+      {
+        "designator": "R10",
+        "x_mm": 29.5,
+        "y_mm": -19.744,
+        "window_clear": true
+      },
+      {
+        "designator": "R12",
+        "x_mm": 29.5,
+        "y_mm": -17.204,
+        "window_clear": true
+      },
+      {
+        "designator": "R14",
+        "x_mm": 29.5,
+        "y_mm": -22.284,
+        "window_clear": true
+      },
+      {
+        "designator": "R16",
+        "x_mm": 29.5,
+        "y_mm": -14.664000000000001,
+        "window_clear": true
+      }
+    ],
+    "resistor_envelope_assumed_mm": [
+      3.0,
+      1.6,
+      1.2
+    ],
+    "nominal_resistor_to_guide_top_gap_mm": 4.4,
+    "physical_coplanarity_measured": false
+  },
+  "array_face_above_base_bottom_mm": 53.2,
+  "bare_cradle_center_clearance_mm": [
+    43.8,
+    103.8
+  ],
+  "default_bare_clearance_mm": 69.8,
+  "minimum_guide_web_mm": 0.5999999999999996,
+  "minimum_case_to_pcb_gap_mm": 3.2,
+  "printed_or_load_tested": false
+}
