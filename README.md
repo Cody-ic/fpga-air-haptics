@@ -4,7 +4,7 @@
 
 2026 年全国大学生嵌入式芯片与系统设计竞赛 FPGA 创新设计赛道参赛准备项目。
 
-> 更新于 **2026-09-29**。已有电脑上位机、Windows 便携 EXE、Android 测试应用、Demo、R5 4×4 PCB 打样包及 NUCLEO-F411RE 串口验证固件。MCU 固件已增加接收 ADC 短窗口采集，电脑端提供波形与 CSV；完成编译与软件交叉测试，尚未实板联调。新增可调腕托与 4×4 平面焊装夹具的 SolidWorks/3D 打印设计包，尚未试打。FPGA RTL 仍未实现，HAP3 尚待与 FPGA 端共同定稿；蓝牙模块未选定，暂无硬件实测结果。
+> 更新于 **2026-10-07**。已有电脑上位机、Windows 便携 EXE、Android 测试应用、Demo、R5 4×4 PCB 打样包及 NUCLEO-F411RE 串口验证固件。F103 CubeMX/CubeIDE 工程已完成优化、烧录、USB-UART 通信与 ADC 数据回传联调，电脑端提供波形、JSONL 原码和 CSV 分析；输出波形、声场与触觉效果尚待实测。最新 P4 机械包采用竖直发射板、水平掌面参考与可换腕托/接收架，尚未试打印。FPGA 逻辑已在独立分支提交 [PR #8](https://github.com/Cody-ic/fpga-air-haptics/pull/8)，尚待综合和上板；HAP3 仍需共同定稿，蓝牙模块未选定。
 
 ## 项目简介
 
@@ -35,7 +35,7 @@ Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、�
 | FPGA | 板内相位求解、轨迹播放、同步输出 | 定点位宽、资源占用、实测更新率 |
 | 阵列与驱动 | 从小规模验证扩展至模块化阵列 | 换能器、间距、驱动器、供电与最终通道数 |
 | 本地操作 | PCB 外接按键，选择、播放和停止图形 | 按键数量、状态指示与接口 |
-| 放手引导 | 已完成可调腕托 P1 CAD；操作语音仍为提案 | 实物试打、承重与手型适配、声学工作高度及语音实现 |
+| 放手引导 | 已完成 P4 固定定位架、可换腕托与接收架；操作语音仍为提案 | 实物试打、承重与手型适配、声学工作位置及语音实现 |
 | 电脑软件 | 已实现组合草图、几何关系与尺寸、手掌预览、Demo、串口与 BLE 适配 | 协议共同定稿、蓝牙选型、FPGA 固件与真实板卡联调 |
 | 手机软件 | Android 触屏草图、手掌预览、图形库、JSON 互通、Demo 与 BLE | 手机原生权限、文件选择与真实蓝牙链路联调；暂不支持 iOS |
 | 传感器 | 接收器用于校准；手部跟踪后置 | 接收前端、ADC、手部传感器选型 |
@@ -54,7 +54,9 @@ Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、�
 
 - [设计思路](设计思路.md)：当前架构、按键与串口分工、硬件选型、验证步骤和待决策事项。
 - [交互与放手引导提案](交互与放手引导提案.md)：腕托与语音、使用流程、手掌示意、既定软件交互和实现状态。
-- [腕托与阵列夹具打印包](hardware/mechanical/README.md)：P3 焊装夹具去掉四个支撑凸起，采用共用平整基准板，保留电阻避让窗；含完全定义的 SolidWorks 草图、学校用 STL、孔径试片和装配步骤。尚未实物试打。
+- [腕托与阵列夹具打印包](hardware/mechanical/README.md)：P4 竖装发射板、可换腕托/接收架及背面接线避让；保留 P3 共用平整基准的焊装夹具。包含完全定义的 SolidWorks 草图、学校用 STL 和装配步骤，尚未实物试打。
+- [PCB 版本导航](hardware/README.md)：当前 R5 打样包及早期 R3/R4、15 V 网名修订的历史副本。
+- [FPGA 固件评审](https://github.com/Cody-ic/fpga-air-haptics/pull/8)：独立分支的串口、轨迹、相位、输出及板级约束；验证边界见对应分支文档。
 - [上位机使用说明](desktop_app/README.md)：组合草图、尺寸和顺序、手掌预览、Demo 与数据边界。
 - [Android 应用说明](mobile_app/README.md)：触屏绘图、保存与导入、BLE、APK 构建和验证范围。
 - [HAP3 设备协议草案](desktop_app/PROTOCOL.md)：坐标路径、设备能力声明、完整配置提交、原子状态快照和看门狗。
@@ -70,6 +72,8 @@ Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、�
 
 MCU 先行验证：见 [NUCLEO-F411RE 固件、烧录与接线说明](firmware/nucleo_f411re/README.md)。板载 ST-LINK 虚拟串口使用 115200，支持现有上位机的“发送到设备→播放→状态回传”。PCB 文件见 [R5 首轮打样包](hardware/Haptics_4x4_R5_12VDC/README.md)。
 
+另有 [STM32F103C8T6 CubeMX/CubeIDE 工程](firmware/stm32f103c8_cube/README.md)，包含 `.ioc`、16 路输出与接收 ADC，支持独立 ST-LINK V2 下载和 USB-UART 通信。F103 内存较小，最多接受 64 个坐标、8 段路径；已优化并烧录，通过九组图形和 30 次上位机采样回传测试，详见[2026-10-07 联调记录](firmware/stm32f103c8_cube/VALIDATION_2026-10-07.md)。
+
 使用 Python 3.10+（含 Tk），在仓库根目录执行：
 
 ```powershell
@@ -78,7 +82,7 @@ python -m desktop_app --demo
 python -m unittest discover -s desktop_app/tests -v
 ```
 
-可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 64 位可用 PyInstaller 构建独立 EXE，见[启动与打包说明](desktop_app/README.md#启动)；本机构建产物位于 `desktop_app/dist/`，不提交到 Git。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、pyserial 3.5；实际打包依赖版本记录在 `build-info.json`，截图需要 Pillow。无格式化器、HDL 构建或 RTL 仿真命令。
+可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 64 位可用 PyInstaller 构建独立 EXE，见[启动与打包说明](desktop_app/README.md#启动)；本机构建产物位于 `desktop_app/dist/`，不提交到 Git。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、pyserial 3.5；实际打包依赖版本记录在 `build-info.json`，截图需要 Pillow。当前分支没有 HDL 工程；FPGA 分支的仿真命令见 PR #8，综合与上板尚待完成。
 
 上位机默认打开草图编辑器，支持连续直线、矩形、圆、拖动成圆弧和控制点曲线，可组合多个轮廓、擦除线条、设置必要几何关系与尺寸、整体倍数缩放和指定呈现顺序。原打点操作已并入连续直线工具。公共线按顺序仅呈现一次，段间关闭输出；编译后最多 32 段、256 个坐标。图形按实际坐标保存，换阵列不会改变位置。Demo 可设置 4×4、6×6、8×8、12×12、16×16 及自定义行列；真实硬件规模由 FPGA 握手声明。普通界面保留绘图与播放，勾选“调试模式”查看相位、声场和串口日志。
 

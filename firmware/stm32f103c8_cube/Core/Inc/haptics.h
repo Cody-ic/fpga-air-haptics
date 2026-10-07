@@ -1,0 +1,16 @@
+#ifndef F103_HAPTICS_PROFILE_H
+#define F103_HAPTICS_PROFILE_H
+
+#define HAP_LINE 1920
+#define HAP_POINTS 64
+#define HAP_STROKES 8
+#define HAP_PATH_BYTES 1025
+#define HAP_SCAN_BYTES 1025
+#define HAP_FOCUS_US 1000
+#define HAP_DEVICE_NAME "STM32F103C8T6"
+#define HAP_INTEGER_PHASE 1
+#define HAP_CACHED_SEGMENTS 1
+#define HAP_SHARED_SCRATCH 1
+#include "core_haptics.h"
+
+#endif

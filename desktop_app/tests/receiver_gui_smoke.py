@@ -1,11 +1,14 @@
 """Opt-in real Tk / Demo capture smoke, no hardware access."""
 import csv
+import json
 from pathlib import Path
 import time
 import tkinter as tk
 from unittest.mock import patch
 
 from desktop_app.app import App
+from desktop_app.controller import Session
+from desktop_app.transport import DemoTransport
 
 
 def main():
@@ -32,6 +35,11 @@ def main():
         app.tabs.select(app.measured_tab)
         wait(lambda:str(panel.capture_button["state"])=="normal")
         panel.acquire();wait(lambda:panel.capture is not None)
+        wait(lambda:panel.record_directory is not None)
+        assert str(panel.record_button['state'])=='normal'
+        records = [json.loads(line) for line in (panel.record_directory/'captures.jsonl').read_text(encoding='utf-8').splitlines()]
+        assert len(records)>=1 and records[0]['capture']['raw']==list(panel.capture.raw)
+        assert records[0]['capture']['simulated'] is True
         assert panel.capture.simulated and not panel.capture.tx_running
         assert "Demo" in panel.axis.get_title()
         app.apply_config();wait(app.can_play)
@@ -59,7 +67,21 @@ def main():
         app.update_controls()
         assert str(panel.capture_button['state'])=='disabled'
         assert '历史' in panel.notice.get()
-        print('Receiver GUI: capture before/after play, synthetic label, CSV, capability gate, disconnect passed')
+        class StandaloneDemo(DemoTransport):
+            def __init__(self):
+                super().__init__()
+                self.device.mode,self.device.state='LOCAL','RUNNING'
+        def standalone_session(*args, **kwargs):
+            return Session(*args, **kwargs, factory=StandaloneDemo)
+        with patch('desktop_app.app.Session',side_effect=standalone_session):
+            app.connect()
+        wait(lambda:app.ready and app.state is not None and app.state.mode=='LOCAL')
+        assert app.state.state=='RUNNING'
+        assert str(app.remote_button['state'])=='normal'
+        app.remote_button.invoke()
+        wait(lambda:app.state.mode=='REMOTE' and not app.busy)
+        assert app.state.state=='IDLE' and not app.state.output and not app.can_play()
+        print('Receiver GUI: automatic JSONL/CSV records, capture, source labels, capability gate, disconnect and standalone takeover passed')
     finally:
         with patch('desktop_app.app.messagebox.askyesnocancel',return_value=False):app.close()
         deadline=time.monotonic()+5

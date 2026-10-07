@@ -367,7 +367,7 @@ class App:
         mode_row = ttk.Frame(left)
         mode_row.grid(row=8, column=0, sticky="ew")
         mode_row.columnconfigure((0,1), weight=1)
-        self.local_button = ttk.Button(mode_row, text="设备按键控制", command=lambda: self.send("MODE", value="LOCAL"))
+        self.local_button = ttk.Button(mode_row, text="设备本地控制", command=lambda: self.send("MODE", value="LOCAL"))
         self.local_button.grid(row=0, column=0, sticky="ew", padx=(0,4))
         self.remote_button = ttk.Button(mode_row, text="电脑控制", command=lambda: self.send("MODE", value="REMOTE"))
         self.remote_button.grid(row=0, column=1, sticky="ew", padx=(4,0))
@@ -760,10 +760,12 @@ class App:
             self.status_line.set("Demo 阵列参数无效，请检查行列数和间距。")
             return
         self.hardware_line.set("等待设备报告实际阵列；软件最大容量不代表已安装数量")
+        record_root = (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "TouchSee" / "measurements"
+                       if getattr(sys, "frozen", False) else Path(__file__).resolve().parent / ".runtime" / "receiver")
         if ble:
-            self.session = Session(demo=False, ble_device=peer.device, ble_profile=self.ble_profile)
+            self.session = Session(demo=False, ble_device=peer.device, ble_profile=self.ble_profile, record_root=record_root)
         else:
-            self.session = Session(demo, self.port_choice.get().strip(), baud, demo_array=demo_array)
+            self.session = Session(demo, self.port_choice.get().strip(), baud, demo_array=demo_array, record_root=record_root)
         self.session.start()
         self.update_controls()
 
@@ -928,6 +930,8 @@ class App:
                     self.log(kind, event.get("text", ""))
                 if kind == "opening":
                     self.status_line.set(event["text"])
+                elif kind == "taking_control":
+                    self.status_line.set(event["text"])
                 if kind == "ready":
                     self.ready = True
                     self.hardware = event["array"]
@@ -951,6 +955,11 @@ class App:
                         self.status_line.set("设备已接收，正在确认状态…")
                 elif kind == "capture":
                     self.receiver_panel.accept(event["capture"], event["when"])
+                elif kind == "recording":
+                    self.receiver_panel.recorded(event["directory"], event["count"])
+                elif kind == "recording_error":
+                    self.receiver_panel.record_failed(event["text"])
+                    self.log("error", event["text"])
                 elif kind == "state":
                     self.state, self.received = event["state"], event["when"]
                     if (self.await_sample is not None and self.state.sample > self.await_sample
@@ -966,7 +975,9 @@ class App:
                         self.status_line.set({"CONFIG": "图形发送成功，设备已确认，可以播放。" if self.config_confirmed()
                                               else "设备返回的图形与发送内容不一致，请重新发送。",
                                               "START": "设备已开始播放。", "PAUSE": "设备已暂停。",
-                                              "STOP": "设备已停止。"}.get(completed, "设备已确认。"))
+                                              "STOP": "设备已停止。",
+                                              "MODE": "已切换到电脑控制，发送图形后即可播放。" if self.state.mode == "REMOTE"
+                                              else "已切换到设备本地控制。"}.get(completed, "设备已确认。"))
                 elif kind in ("error", "rejected"):
                     if event.get("verb") == "CAPTURE":
                         self.receiver_panel.reject(event.get("text", "采样失败"))
@@ -1027,7 +1038,7 @@ class App:
         scanning = self.ble_scan is not None
         for button, enabled in ((self.connect_button,not alive and not scanning), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
-                                (self.remote_button,idle and free), (self.copy_button,fresh),
+                                (self.remote_button,fresh and free and (idle or self.state.mode == "LOCAL")), (self.copy_button,fresh),
                                 (self.start_button,self.can_play()),
                                 (self.pause_button,remote and free and self.state.state == "RUNNING" if fresh else False),
                                 (self.stop_button,self.ready), (self.header_stop,self.ready),
@@ -1085,7 +1096,7 @@ class App:
                     self.source_line.set("DEMO 模拟设备 · 数字状态为模拟值，声场为理论预测" if state.simulated else
                                          "设备回读 · 仅确认数字输出状态，不代表换能器实测")
                 else:
-                    mode = "设备按键控制" if state.mode == "LOCAL" else "电脑控制"
+                    mode = "设备本地控制" if state.mode == "LOCAL" else "电脑控制"
                     self.source_line.set(f"{'Demo 路径演示' if state.simulated else '设备已连接'} · {status} · {mode}")
                 self.source_banner.configure(bg="#fff0d5" if state.simulated else "#dff2ed", fg=AMBER if state.simulated else TEAL)
             elif self.ready:

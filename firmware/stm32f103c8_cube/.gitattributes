@@ -1,0 +1,2 @@
+# Keep upstream HAL/CMSIS formatting; exclude vendor code from review statistics.
+Drivers/** -whitespace linguist-vendored
