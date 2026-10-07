@@ -1,0 +1,497 @@
+{
+  "passed": true,
+  "documents": [
+    {
+      "file": "01_array_alignment_jig.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 98,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "02_bore_fit_coupon.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "03_fixed_base.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 31,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 54,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 8,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 8,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "04_wrist_cradle.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 9,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "05_pcb_standoff_10.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "07_vertical_tx_frame.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 86,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "08_tx_fixed_shoe.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 26,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "09_fixed_receiver_arm.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 37,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 36,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "10_receiver_edge_tray.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 35,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 66,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 48,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 29,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "11_receiver_M3_edge_clip.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_16_emitters.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 48,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_common_flat_datum.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M3_nylock.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M3_washer.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M3x25_screw.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M3x30_screw.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M3x90_screw.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M4_nylock.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M4_washer.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M4x20_screw.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M4x25_screw.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_M4x30_screw.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_pcb_80x88.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 31,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_receiver_pcb.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_receiver_U1.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_rubber_foot_16x6.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_top_resistor_envelopes.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 311,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_tx_rear_clearances.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "Array_jig_assembly.SLDASM",
+      "reopened": true,
+      "component_count": 5,
+      "transforms_verified": true,
+      "local_part_references_verified": true,
+      "modeled_interferences": 0
+    },
+    {
+      "file": "Vertical_receiver_assembly.SLDASM",
+      "reopened": true,
+      "component_count": 90,
+      "transforms_verified": true,
+      "local_part_references_verified": true,
+      "modeled_interferences": 0
+    },
+    {
+      "file": "Vertical_wrist_assembly.SLDASM",
+      "reopened": true,
+      "component_count": 64,
+      "transforms_verified": true,
+      "local_part_references_verified": true,
+      "modeled_interferences": 0
+    }
+  ],
+  "scope": "Printed parts; nominal PCB/transducer bodies; C1 and assumed fully wired CN1 keepout; DIN 912 screw, DIN 125 washer and conservative DIN 985 nut envelopes; 6 mm feet. Threads, drive/tool access, wrist padding, actual cable routing and remaining electronics not modeled.",
+  "load_or_physical_fit_tested": false
+}

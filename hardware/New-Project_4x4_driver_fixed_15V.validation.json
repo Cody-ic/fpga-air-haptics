@@ -1,0 +1,31 @@
+{
+  "source": "New-Project_2026-09-24_15-26-25_2026-09-25-19-53-35.zip",
+  "output": "New-Project_4x4_driver_fixed_15V.zip",
+  "status": "Historical net-name repair only; use Haptics_4x4_R5_12VDC for the current prototype.",
+  "documents": [
+    {
+      "doc_type": "SCH_PAGE",
+      "replacements": 20
+    },
+    {
+      "doc_type": "PCB",
+      "replacements": 39
+    }
+  ],
+  "validation": {
+    "SCH_PAGE": {
+      "vcc_drv_15v": 20,
+      "legacy_vcc_exact": 0,
+      "ch_nets": 16,
+      "out_nets": 16,
+      "components": 121
+    },
+    "PCB": {
+      "vcc_drv_15v": 39,
+      "legacy_vcc_exact": 0,
+      "ch_nets": 16,
+      "out_nets": 16,
+      "components": 75
+    }
+  }
+}

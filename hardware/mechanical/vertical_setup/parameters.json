@@ -1,0 +1,114 @@
+{
+  "revision": "P4-20261007",
+  "array_rows": 4,
+  "array_cols": 4,
+  "pitch_mm": 11.0,
+  "body_nominal_diameter_mm": 9.9,
+  "body_nominal_height_mm": 7.1,
+  "guide_bore_mm": 10.4,
+  "guide_depth_mm": 5.0,
+  "resistor_window_mm": [
+    25.5,
+    -36.0,
+    33.5,
+    -11.0
+  ],
+  "resistor_envelope_mm": [
+    3.0,
+    1.6,
+    1.2
+  ],
+  "reference_plate_bounds_mm": [
+    -50.0,
+    -61.0,
+    53.0,
+    50.0
+  ],
+  "reference_plate_thickness_mm": 4.0,
+  "datum_to_pcb_front_mm": 10.6,
+  "pcb_thickness_assumed_mm": 1.6,
+  "pcb_standoff_mm": 10.0,
+  "base_thickness_mm": 6.0,
+  "wrist_bolt_height_mm": 108.0,
+  "wrist_pad_assumed_mm": 3.0,
+  "mount_centers_mm": [
+    [
+      -32.5,
+      32.5
+    ],
+    [
+      35.5,
+      32.5
+    ],
+    [
+      -18.5,
+      -43.5
+    ],
+    [
+      21.5,
+      -43.5
+    ]
+  ],
+  "pcb_bounds_mm": [
+    -38.5,
+    -49.5,
+    41.5,
+    38.5
+  ],
+  "assumed_print_bed_mm": [
+    200,
+    200,
+    200
+  ],
+  "tx_rear_window_mm": [
+    -45,
+    -40.5,
+    43,
+    29
+  ],
+  "palm_forward_from_wrist_mm": 60.0,
+  "receiver": {
+    "source_project_sha256": "5c61ac5ea152b3a138c511866f594c5cae720ccff0e4b62de8f3fce3a2be0a1c",
+    "pcb_bounds_from_U1_mm": [
+      -25.272999999999996,
+      -10.128001079999997,
+      34.726999379999995,
+      24.491000040000003
+    ],
+    "pcb_corner_radius_mm": 5.0,
+    "source_U1_center_mm": [
+      16.002,
+      7.112
+    ],
+    "pcb_back_offset_mm": 10.0,
+    "case_gap_mm": 0.0,
+    "arm_holes_x_mm": [
+      -30.5,
+      41.5
+    ]
+  },
+  "tx_frame_origin_mm": [
+    0.0,
+    80.0,
+    70.0
+  ],
+  "tx_shoe_foot_y_mm": [
+    -38.0,
+    8.0
+  ],
+  "tx_shoe_bolt_y_mm": [
+    -32.0,
+    -22.0
+  ],
+  "tx_wired_relief_mm": [
+    26.5,
+    -46.0
+  ],
+  "tx_wired_connector_keepout_mm": [
+    27.484,
+    -43.554,
+    42.484,
+    -3.554
+  ],
+  "tx_wired_rear_depth_mm": 50.0
+}

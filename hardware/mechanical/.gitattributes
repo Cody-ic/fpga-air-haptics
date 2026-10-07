@@ -3,3 +3,4 @@ P1_20260929/** -text
 # Windows-generated reports retain CRLF so their recorded hashes remain valid.
 P2_20260930/** -text whitespace=cr-at-eol
 P3_20260930/** -text whitespace=cr-at-eol
+P4_20261007/** -text whitespace=cr-at-eol

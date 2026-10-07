@@ -58,7 +58,9 @@ def render(name, entries, camera, target, scale, exploded=False):
             tag in entry['name'] for tag in ('pcb','resistor')) else 0
         part(entry, extra)
     has_datum=any('datum' in entry['name'] for entry in entries)
-    cube('Floor', (0,0,-.006 if has_datum else -.002), (2,2,.002), '#edf1f5')
+    has_feet=any('rubber_foot' in entry['name'] for entry in entries)
+    floor_z=-.008 if has_feet else -.006 if has_datum else -.002
+    cube('Floor', (0,0,floor_z), (2,2,.002), '#edf1f5')
     bpy.ops.object.camera_add(location=camera)
     cam=bpy.context.object
     cam.rotation_euler=(Vector(target)-cam.location).to_track_quat('-Z','Y').to_euler()
@@ -85,8 +87,9 @@ def render(name, entries, camera, target, scale, exploded=False):
     bpy.ops.render.render(write_still=True)
 
 
-render('wrist_support', ASSEMBLIES['Wrist_support_assembly'], (.27,.30,.26), (0,-.036,.078), .285)
-render('alignment_exploded', ASSEMBLIES['Array_jig_assembly'], (.17,-.23,.13), (0,-.003,.030), .175, True)
-render('alignment_jig', [entry for entry in ASSEMBLIES['Array_jig_assembly']
-                        if 'jig' in entry['name'] or 'datum' in entry['name']],
-       (.13,-.18,.18), (0,-.006,.003), .150)
+if __name__ == '__main__':
+    render('wrist_support', ASSEMBLIES['Wrist_support_assembly'], (.27,.30,.26), (0,-.036,.078), .285)
+    render('alignment_exploded', ASSEMBLIES['Array_jig_assembly'], (.17,-.23,.13), (0,-.003,.030), .175, True)
+    render('alignment_jig', [entry for entry in ASSEMBLIES['Array_jig_assembly']
+                            if 'jig' in entry['name'] or 'datum' in entry['name']],
+           (.13,-.18,.18), (0,-.006,.003), .150)
