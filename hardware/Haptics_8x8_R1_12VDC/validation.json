@@ -21,10 +21,11 @@
       151.0
     ],
     "emitter_pitch_mm": 13,
-    "vias_through": 500,
+    "vias_through": 495,
     "npth_mounting_holes": 4,
-    "line_primitives": 1341,
+    "line_primitives": 1344,
     "bottom_readable_labels": 265,
+    "current_pours_with_fill": 5,
     "maximum_single_segment_mm": 105.435,
     "net_total_trace_lengths_mm": {
       "$1N175": 3.642,
@@ -43,7 +44,7 @@
       "$1N41": 4.912,
       "$1N49": 3.642,
       "$1N50": 4.912,
-      "$2N10": 8.302,
+      "$2N10": 5.602,
       "$2N13": 7.528,
       "$2N27": 11.479,
       "$2N28": 10.937,
@@ -96,8 +97,8 @@
       "$5N118": 4.912,
       "$5N119": 4.912,
       "$5N120": 4.912,
-      "12V": 176.041,
-      "3V3": 27.065,
+      "12V": 171.298,
+      "3V3": 29.765,
       "CH0": 47.092,
       "CH0_1": 47.092,
       "CH0_2": 47.092,
@@ -170,7 +171,7 @@
       "DATA5": 111.191,
       "DATA6": 91.791,
       "DATA7": 86.131,
-      "GND": 384.509,
+      "GND": 391.678,
       "OE_N": 200.588,
       "OUT0": 12.702,
       "OUT0_1": 12.702,
@@ -236,27 +237,155 @@
       "OUT7_5": 12.84,
       "OUT7_6": 12.84,
       "OUT7_7": 12.84,
-      "RCLK": 197.827,
-      "SRCLK": 204.016,
+      "RCLK": 160.027,
+      "SRCLK": 141.916,
       "SRCLR_N": 199.762,
       "VIN_12V": 12.551,
       "VIN_FUSED": 42.934
     }
+  },
+  "reviewed_layout": {
+    "clocks": {
+      "SRCLK": {
+        "signal_vias": 9,
+        "nearest_ground_vias": [
+          {
+            "signal_via": "777fd548710f3109",
+            "ground_via": "cd70783847e63860",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "be642bb0fcb58bfb",
+            "ground_via": "759cdeb2fe6b532a",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "00e4f9e632bd9cb2",
+            "ground_via": "029487acb6b4568b",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "66b56170a4a0a7de",
+            "ground_via": "aae639292e9538ac",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "b632be054d04fabf",
+            "ground_via": "6a361a8b140a71e3",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "083813c497cf33b2",
+            "ground_via": "7762d3d283b60181",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "895e50678b800051",
+            "ground_via": "d88fa319e7b4ac4e",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "a1ebacfca40785e8",
+            "ground_via": "c76143fd460eeb07",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "cf5fe4023d3e5019",
+            "ground_via": "dd41bd53c17a648b",
+            "centre_distance_mm": 1.0
+          }
+        ],
+        "source_resistor_to_U1_mm": 135.106,
+        "source_resistor_to_U94_mm": 44.106
+      },
+      "RCLK": {
+        "signal_vias": 11,
+        "nearest_ground_vias": [
+          {
+            "signal_via": "3f97042dd06346eb",
+            "ground_via": "cd70783847e63860",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "3407ae6ffa2d6ed9",
+            "ground_via": "759cdeb2fe6b532a",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "1985221743cbc5c3",
+            "ground_via": "029487acb6b4568b",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "97c260ca5418e194",
+            "ground_via": "aae639292e9538ac",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "bb9f0decc766f88f",
+            "ground_via": "6a361a8b140a71e3",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "1731bcdf8661b132",
+            "ground_via": "7762d3d283b60181",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "f619161fe1bfc345",
+            "ground_via": "d88fa319e7b4ac4e",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "f9bd4b2a19aaca2f",
+            "ground_via": "c76143fd460eeb07",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "ffc9a0a6347cdbe2",
+            "ground_via": "8d1df411bccf1fdd",
+            "centre_distance_mm": 0.8
+          },
+          {
+            "signal_via": "644fcaa4f05609b9",
+            "ground_via": "5e9fd973ccbcda23",
+            "centre_distance_mm": 1.6
+          },
+          {
+            "signal_via": "a3204ff41d76fb78",
+            "ground_via": "7d5f9e502f98b10e",
+            "centre_distance_mm": 1.6
+          }
+        ],
+        "source_resistor_to_U1_mm": 142.3761,
+        "source_resistor_to_U94_mm": 51.3761
+      }
+    },
+    "buck": {
+      "C19_power_to_VIN_straight_mm": 2.5244,
+      "C20_power_to_VIN_straight_mm": 4.6632,
+      "C19_power_to_VIN_trace_mm": 2.645,
+      "C19_ground_to_U27_trace_mm": 3.7692,
+      "SW_to_inductor_straight_mm": 3.3185,
+      "SW_to_inductor_trace_mm": 3.5829
+    },
+    "boundary": "Copper centreline lengths exclude cables, packages, via length and electrical delays; nearest-via distances do not prove high-frequency return impedance."
   },
   "manufacturing": {
     "copper_layers": 4,
     "gerber_layers_checked": 10,
     "coordinate_format": "MM 4:6",
     "drill_coordinate_counts": {
-      "Drill_PTH_Through.DRL": 650,
+      "Drill_PTH_Through.DRL": 645,
       "Drill_NPTH_Through.DRL": 4,
-      "Drill_PTH_Through_Via.DRL": 500
+      "Drill_PTH_Through_Via.DRL": 495
     }
   },
   "checked_date": "2026-10-08",
   "native_ui_checks": {
     "tool": "EasyEDA Pro 3.2.149.88089769",
     "drc_errors_observed": 0,
+    "drc_scope": "After U27/clock edits, silkscreen correction and complete copper rebuild",
     "netlist_comparison": "No differences; all networks and components compared",
     "scope": "Observed in native UI, not computed by verify_release.py"
   },
@@ -264,23 +393,30 @@
     "hardware_measurements": false,
     "firmware_shift_backend_ready": false,
     "routing": "Fixed manually chosen geometry; no automatic routing for this release",
-    "gerber_renderer": "PyGerber 2.4.3; all 10 layers parsed and rendered"
+    "gerber_renderer": "PyGerber 2.4.3; all 10 final layers parsed and rendered"
   },
   "independent_copper_check": {
     "report": "copper_validation.json",
     "effective_nets": 214,
     "shorts": 0,
     "opens": 0,
+    "via_net_mismatches": 0,
     "unassigned_copper_islands": 0,
     "minimum_network_gap_mm": 0.159286,
-    "minimum_drill_wall_gap_mm": 0.495198,
+    "minimum_drill_wall_gap_mm": 0.395199,
     "component_body_overlap_or_outside_board": 0
   },
   "gerber_export": {
     "script": "export_gerber.js",
     "excluded_object": "SolidRegion",
-    "reason": "XT30 layer-49 model marker leaked into top copper; PCB has no standalone copper fills",
-    "removed_copper_disc_mm": 0.06,
-    "other_three_copper_layers_geometry_changed": false
+    "reason": "XT30 layer-49 model marker leaks into top copper; PCB has no standalone copper fills",
+    "document_source_api": "eda.sys_FileManager.getDocumentSource()",
+    "current_pours_with_fill": 5,
+    "guard_checks": [
+      "Selected PCB",
+      "Every current POUR has matching nonempty fill",
+      "No standalone copper region excluded unintentionally"
+    ],
+    "prior_marker_fix": "0.06 mm top-copper disc removed before this U27/clock layout revision"
   }
 }

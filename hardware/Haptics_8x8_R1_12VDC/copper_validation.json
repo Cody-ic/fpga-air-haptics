@@ -1,21 +1,21 @@
 {
   "package_sha256": {
-    "Haptics_8x8_R1_release.epro2": "34c4f18d4724533d012b017430d5b9137b014fc5a45a4ff46933b7734deb0672",
-    "Haptics_8x8_R1_release_Gerber.zip": "fae69622a1246d8ed51e78e58885007ed190cdfa042fe017451b5721b4be7c23"
+    "Haptics_8x8_R1_release.epro2": "51a4c90bac7f6c9fb520f7ea6fc3b27a0d453333a691ba21104c76d8a3b2f378",
+    "Haptics_8x8_R1_release_Gerber.zip": "23f5733246381646035a860842a281e940ec49613436ff632119d4c6cafb084f"
   },
   "mechanical": {
     "component_bodies_checked": 324,
     "body_overlap_or_outside_board": [],
-    "minimum_body_gap_mm": 0.8000009400000181,
+    "minimum_body_gap_mm": 0.4250105800000483,
     "closest_bodies": [
-      "R138",
-      "R135"
+      "U27",
+      "C19"
     ],
-    "holes_checked": 654,
-    "minimum_drill_wall_gap_mm": 0.4951983999999785,
+    "holes_checked": 649,
+    "minimum_drill_wall_gap_mm": 0.39519859999999984,
     "closest_drills": [
-      "via:507f608d8e4a4f40",
-      "via:f40552d8502745d0"
+      "via:eb36af8ef3a9a91f",
+      "via:7ee90b7a47944709"
     ],
     "boundary": "Nominal footprint body layer 48; connector mating/cables/part tolerances are not modeled"
   },
@@ -24,24 +24,26 @@
   "contact_tolerance_mm": 0.002,
   "component_pads_checked": 970,
   "nets_checked": 214,
+  "via_nets_checked": 495,
+  "via_net_mismatches": [],
   "missing_pad_copper": [],
   "shorted_groups": {},
   "open_nets": {},
   "clearance_violations_approx_6mil": [],
   "layer_clearances": {
     "1": {
-      "minimum_gap_mm": 0.19039799999998763,
+      "minimum_gap_mm": 0.1681989999999871,
       "nets": [
         [
-          "DATA2"
+          "SRCLR_N"
         ],
         [
-          "DATA3"
+          "RCLK"
         ]
       ]
     },
     "2": {
-      "minimum_gap_mm": 0.15928570341775408,
+      "minimum_gap_mm": 0.15928570341775491,
       "nets": [
         [
           "GND"

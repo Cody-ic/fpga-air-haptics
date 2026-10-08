@@ -261,6 +261,14 @@ def audit():
             labels[root(i)].add(tag)
             if pad['net']:
                 net_roots[pad['net']].add(root(i))
+    via_mismatches = []
+    for vid, via in entities(pcb, 'VIA').items():
+        ids = contacts(via['centerX']*MIL, via['centerY']*MIL, LAYERS)
+        actual = labels[root(ids[0])]
+        expected = {via['netName'].upper()}
+        if actual != expected:
+            via_mismatches.append({'id': vid, 'expected': sorted(expected),
+                                   'actual': sorted(actual)})
     shorts = {str(k): sorted(v) for k, v in labels.items() if len(v) > 1}
     opens = {k: sorted(v) for k, v in net_roots.items() if len(v) != 1}
     clearances, violations, unassigned = {}, [], []
@@ -289,6 +297,8 @@ def audit():
             'algorithm': 'Gerber polygon union + PTH/via layer graph, read-only',
             'arc_sagitta_mm': 0.0002, 'contact_tolerance_mm': TOL,
             'component_pads_checked': len(pads), 'nets_checked': len(net_roots),
+            'via_nets_checked': len(entities(pcb, 'VIA')),
+            'via_net_mismatches': via_mismatches,
             'missing_pad_copper': missing, 'shorted_groups': shorts, 'open_nets': opens,
             'clearance_violations_approx_6mil': violations,
             'layer_clearances': clearances, 'unassigned_copper': unassigned}
@@ -300,6 +310,6 @@ if __name__ == '__main__':
     if args.output:
         args.output.write_bytes(source.encode('utf8'))
     print(source, flush=True)
-    assert not any(result[key] for key in ('missing_pad_copper', 'shorted_groups', 'open_nets',
+    assert not any(result[key] for key in ('missing_pad_copper', 'shorted_groups', 'open_nets', 'via_net_mismatches',
                                          'clearance_violations_approx_6mil', 'unassigned_copper'))
     assert not result['mechanical']['body_overlap_or_outside_board']
