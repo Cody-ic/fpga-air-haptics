@@ -55,7 +55,7 @@ Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、�
 - [设计思路](设计思路.md)：当前架构、按键与串口分工、硬件选型、验证步骤和待决策事项。
 - [交互与放手引导提案](交互与放手引导提案.md)：腕托与语音、使用流程、手掌示意、既定软件交互和实现状态。
 - [腕托与阵列夹具打印包](hardware/mechanical/README.md)：P4 竖装发射板、可换腕托/接收架及背面接线避让；保留 P3 共用平整基准的焊装夹具。包含完全定义的 SolidWorks 草图、学校用 STL 和装配步骤，尚未实物试打。
-- [PCB 版本导航](hardware/README.md)：当前 R5 打样包及早期 R3/R4、15 V 网名修订的历史副本。
+- [PCB 版本导航](hardware/README.md)：4×4 R5 打样包、8×8 R1 手工布线扩展板及历史副本；8×8 尚待移位输出后端与实板验证。
 - [FPGA 固件评审](https://github.com/Cody-ic/fpga-air-haptics/pull/8)：独立分支的串口、轨迹、相位、输出及板级约束；验证边界见对应分支文档。
 - [上位机使用说明](desktop_app/README.md)：组合草图、尺寸和顺序、手掌预览、Demo 与数据边界。
 - [Android 应用说明](mobile_app/README.md)：触屏绘图、保存与导入、BLE、APK 构建和验证范围。
