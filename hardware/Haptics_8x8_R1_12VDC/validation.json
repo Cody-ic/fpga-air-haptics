@@ -265,5 +265,22 @@
     "firmware_shift_backend_ready": false,
     "routing": "Fixed manually chosen geometry; no automatic routing for this release",
     "gerber_renderer": "PyGerber 2.4.3; all 10 layers parsed and rendered"
+  },
+  "independent_copper_check": {
+    "report": "copper_validation.json",
+    "effective_nets": 214,
+    "shorts": 0,
+    "opens": 0,
+    "unassigned_copper_islands": 0,
+    "minimum_network_gap_mm": 0.159286,
+    "minimum_drill_wall_gap_mm": 0.495198,
+    "component_body_overlap_or_outside_board": 0
+  },
+  "gerber_export": {
+    "script": "export_gerber.js",
+    "excluded_object": "SolidRegion",
+    "reason": "XT30 layer-49 model marker leaked into top copper; PCB has no standalone copper fills",
+    "removed_copper_disc_mm": 0.06,
+    "other_three_copper_layers_geometry_changed": false
   }
 }

@@ -14,6 +14,7 @@
 | [transducer_map.json](transducer_map.json) | 64 路位置、驱动器、移位寄存器与串行位映射；不是上位机图形文件 |
 | [routing_geometry.json](routing_geometry.json) | 从最终工程提取的线段和过孔，便于逐条审查；不生成走线 |
 | [核验报告.md](核验报告.md) / [validation.json](validation.json) | 检查结果、修改与待实测事项 |
+| [copper_validation.json](copper_validation.json) | Gerber 实际铜形状的连通、间距及封装外形复核 |
 | [SHA256SUMS.txt](SHA256SUMS.txt) | 交付文件校验值 |
 
 ## 接口与软件
@@ -38,7 +39,7 @@ H1 为底面 2×7 接口。**按方形焊盘的 1 脚及原生工程编号接线
 
 ## 检查与预览
 
-原生 DRC 为 0；原生网表对比无差异，独立检查确认 324 个器件、214 个有效网络一致。尚未制作实板，输出时序、功耗、温升、声场及触觉均未实测。
+原生 DRC 重跑为 0；原生网表对比无差异。独立铜几何检查覆盖 970 个器件焊盘、214 个有效网络及 500 个过孔，未发现断路、短接或孤立铜；最小网络间距约 0.159 mm。324 个封装外形未重叠或越界，654 个孔的最小孔壁间距约 0.495 mm。尚未制作实板，输出时序、功耗、温升、声场及触觉均未实测。
 
 在仓库根目录复核文件与连接：
 
@@ -46,7 +47,16 @@ H1 为底面 2×7 接口。**按方形焊盘的 1 脚及原生工程编号接线
 python hardware/Haptics_8x8_R1_12VDC/verify_release.py
 ```
 
-脚本只读文件，不修改或布线；不替代原生 DRC。`export_tables.py` 可重新提取表格；`render_previews.py` 需 PyGerber 2.4.3 与 Pillow，只渲染 Gerber。
+复核实际铜形状需另外安装审计依赖，建议使用独立虚拟环境：
+
+```powershell
+python -m pip install -r hardware/Haptics_8x8_R1_12VDC/requirements-audit.txt
+python hardware/Haptics_8x8_R1_12VDC/verify_copper.py
+```
+
+脚本只读文件，不修改或布线；不替代原生 DRC。铜检查考虑各层实际铜形状及全通孔连接，曲线采用近似多边形；器件外形来自封装外形层，不包含连接器插头与线缆。`export_tables.py` 可重新提取表格；`render_previews.py` 需 PyGerber 2.4.3 与 Pillow，只渲染 Gerber。
+
+重新导出请使用 [export_gerber.js](export_gerber.js)，在 EDA「高级 → 运行脚本」中执行。此版没有独立铜填充区域，排除 `SolidRegion` 可避免 XT30 模型标识被错误导出为铜点；若以后添加铜填充区域，脚本会要求重新审查导出设置。铺铜、焊盘、过孔和导线均正常导出。
 
 以下为实际导出文件渲染，底面已翻转为从背面观看。颜色仅用于区分铜、阻焊开窗和丝印，钻孔以 DRL 为准。
 

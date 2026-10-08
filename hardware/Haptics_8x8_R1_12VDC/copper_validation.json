@@ -1,0 +1,78 @@
+{
+  "package_sha256": {
+    "Haptics_8x8_R1_release.epro2": "34c4f18d4724533d012b017430d5b9137b014fc5a45a4ff46933b7734deb0672",
+    "Haptics_8x8_R1_release_Gerber.zip": "fae69622a1246d8ed51e78e58885007ed190cdfa042fe017451b5721b4be7c23"
+  },
+  "mechanical": {
+    "component_bodies_checked": 324,
+    "body_overlap_or_outside_board": [],
+    "minimum_body_gap_mm": 0.8000009400000181,
+    "closest_bodies": [
+      "R138",
+      "R135"
+    ],
+    "holes_checked": 654,
+    "minimum_drill_wall_gap_mm": 0.4951983999999785,
+    "closest_drills": [
+      "via:507f608d8e4a4f40",
+      "via:f40552d8502745d0"
+    ],
+    "boundary": "Nominal footprint body layer 48; connector mating/cables/part tolerances are not modeled"
+  },
+  "algorithm": "Gerber polygon union + PTH/via layer graph, read-only",
+  "arc_sagitta_mm": 0.0002,
+  "contact_tolerance_mm": 0.002,
+  "component_pads_checked": 970,
+  "nets_checked": 214,
+  "missing_pad_copper": [],
+  "shorted_groups": {},
+  "open_nets": {},
+  "clearance_violations_approx_6mil": [],
+  "layer_clearances": {
+    "1": {
+      "minimum_gap_mm": 0.19039799999998763,
+      "nets": [
+        [
+          "DATA2"
+        ],
+        [
+          "DATA3"
+        ]
+      ]
+    },
+    "2": {
+      "minimum_gap_mm": 0.15928570341775408,
+      "nets": [
+        [
+          "GND"
+        ],
+        [
+          "$2N13"
+        ]
+      ]
+    },
+    "15": {
+      "minimum_gap_mm": 0.19039799999998763,
+      "nets": [
+        [
+          "DATA2"
+        ],
+        [
+          "DATA3"
+        ]
+      ]
+    },
+    "16": {
+      "minimum_gap_mm": 0.19039799999998763,
+      "nets": [
+        [
+          "DATA2"
+        ],
+        [
+          "DATA3"
+        ]
+      ]
+    }
+  },
+  "unassigned_copper": []
+}
