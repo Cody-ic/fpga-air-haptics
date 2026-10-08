@@ -1,6 +1,10 @@
 # 硬件文件导航
 
-更新于 **2026-10-07**。当前 4×4 发射板使用 [R5 12 V DC 打样包](Haptics_4x4_R5_12VDC/README.md)，接收板说明见 [接收板调整建议](receiver/PCB调整建议.md)。机械定位与打印文件见 [机械设计说明](mechanical/README.md)，最新竖装方案为 P4。
+更新于 **2026-10-08**。当前 4×4 发射板使用 [R5 12 V DC 打样包](Haptics_4x4_R5_12VDC/README.md)，接收板说明见 [接收板调整建议](receiver/PCB调整建议.md)。机械定位与打印文件见 [机械设计说明](mechanical/README.md)，最新竖装方案为 P4。
+
+## 8×8 扩展板
+
+[R1 12 V DC 手工布线包](Haptics_8x8_R1_12VDC/README.md)包含四层 141×151 mm 的可编辑 EPRO2、Gerber、BOM、坐标与 64 路映射。原生 DRC 为 0，网表一致；尚未制作和实测。该板使用 8 路并行移位接口，现有直接 GPIO 固件需另行适配；4×4 机械件不能直接套用。
 
 ## 历史 PCB 副本
 

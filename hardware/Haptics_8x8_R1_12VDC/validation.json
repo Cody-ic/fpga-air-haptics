@@ -1,0 +1,434 @@
+{
+  "connectivity": {
+    "components": 324,
+    "component_pads": 970,
+    "connected_pads": 896,
+    "effective_nets": 214,
+    "differing_connectivity_groups": 0,
+    "schematic_alias_notices": [
+      {
+        "page": "042841ef44e21c39",
+        "aliases": [
+          "12v",
+          "VCC"
+        ]
+      }
+    ]
+  },
+  "geometry": {
+    "board_mm": [
+      141.0,
+      151.0
+    ],
+    "emitter_pitch_mm": 13,
+    "vias_through": 495,
+    "npth_mounting_holes": 4,
+    "line_primitives": 1344,
+    "bottom_readable_labels": 265,
+    "current_pours_with_fill": 5,
+    "maximum_single_segment_mm": 105.435,
+    "net_total_trace_lengths_mm": {
+      "$1N175": 3.642,
+      "$1N176": 3.642,
+      "$1N177": 3.642,
+      "$1N178": 3.642,
+      "$1N179": 4.912,
+      "$1N180": 4.912,
+      "$1N181": 4.912,
+      "$1N182": 4.912,
+      "$1N22": 3.642,
+      "$1N23": 4.912,
+      "$1N31": 3.642,
+      "$1N32": 4.912,
+      "$1N40": 3.642,
+      "$1N41": 4.912,
+      "$1N49": 3.642,
+      "$1N50": 4.912,
+      "$2N10": 5.602,
+      "$2N13": 7.528,
+      "$2N27": 11.479,
+      "$2N28": 10.937,
+      "$2N9": 2.019,
+      "$3N122": 3.642,
+      "$3N123": 3.642,
+      "$3N124": 3.642,
+      "$3N125": 3.642,
+      "$3N126": 4.912,
+      "$3N127": 4.912,
+      "$3N128": 4.912,
+      "$3N129": 4.912,
+      "$3N53": 3.642,
+      "$3N54": 3.642,
+      "$3N55": 3.642,
+      "$3N56": 3.642,
+      "$3N57": 4.912,
+      "$3N58": 4.912,
+      "$3N59": 4.912,
+      "$3N60": 4.912,
+      "$4N105": 3.642,
+      "$4N106": 3.642,
+      "$4N107": 3.642,
+      "$4N108": 3.642,
+      "$4N109": 3.642,
+      "$4N110": 3.642,
+      "$4N111": 3.642,
+      "$4N112": 3.642,
+      "$4N113": 4.912,
+      "$4N114": 4.912,
+      "$4N115": 4.912,
+      "$4N116": 4.912,
+      "$4N117": 4.912,
+      "$4N118": 4.912,
+      "$4N119": 4.912,
+      "$4N120": 4.912,
+      "$5N105": 3.642,
+      "$5N106": 3.642,
+      "$5N107": 3.642,
+      "$5N108": 3.642,
+      "$5N109": 3.642,
+      "$5N110": 3.642,
+      "$5N111": 3.642,
+      "$5N112": 3.642,
+      "$5N113": 4.912,
+      "$5N114": 4.912,
+      "$5N115": 4.912,
+      "$5N116": 4.912,
+      "$5N117": 4.912,
+      "$5N118": 4.912,
+      "$5N119": 4.912,
+      "$5N120": 4.912,
+      "12V": 171.298,
+      "3V3": 29.765,
+      "CH0": 47.092,
+      "CH0_1": 47.092,
+      "CH0_2": 47.092,
+      "CH0_3": 47.092,
+      "CH0_4": 47.092,
+      "CH0_5": 47.092,
+      "CH0_6": 47.092,
+      "CH0_7": 47.092,
+      "CH1": 40.351,
+      "CH1_1": 40.351,
+      "CH1_2": 40.351,
+      "CH1_3": 40.351,
+      "CH1_4": 40.351,
+      "CH1_5": 40.351,
+      "CH1_6": 40.351,
+      "CH1_7": 40.351,
+      "CH2": 67.621,
+      "CH2_1": 67.621,
+      "CH2_2": 67.621,
+      "CH2_3": 67.621,
+      "CH2_4": 67.621,
+      "CH2_5": 67.621,
+      "CH2_6": 67.621,
+      "CH2_7": 67.621,
+      "CH3": 63.811,
+      "CH3_1": 63.811,
+      "CH3_2": 63.811,
+      "CH3_3": 63.811,
+      "CH3_4": 63.811,
+      "CH3_5": 63.811,
+      "CH3_6": 63.811,
+      "CH3_7": 63.811,
+      "CH4": 91.081,
+      "CH4_1": 91.081,
+      "CH4_2": 91.081,
+      "CH4_3": 91.081,
+      "CH4_4": 91.081,
+      "CH4_5": 91.081,
+      "CH4_6": 91.081,
+      "CH4_7": 91.081,
+      "CH5": 87.271,
+      "CH5_1": 87.271,
+      "CH5_2": 87.271,
+      "CH5_3": 87.271,
+      "CH5_4": 87.271,
+      "CH5_5": 87.271,
+      "CH5_6": 87.271,
+      "CH5_7": 87.271,
+      "CH6": 114.541,
+      "CH6_1": 114.541,
+      "CH6_2": 114.541,
+      "CH6_3": 114.541,
+      "CH6_4": 114.541,
+      "CH6_5": 114.541,
+      "CH6_6": 114.541,
+      "CH6_7": 114.541,
+      "CH7": 111.881,
+      "CH7_1": 111.881,
+      "CH7_2": 111.881,
+      "CH7_3": 111.881,
+      "CH7_4": 111.881,
+      "CH7_5": 111.881,
+      "CH7_6": 111.881,
+      "CH7_7": 111.881,
+      "DATA0": 166.971,
+      "DATA1": 161.311,
+      "DATA2": 141.911,
+      "DATA3": 136.251,
+      "DATA4": 116.851,
+      "DATA5": 111.191,
+      "DATA6": 91.791,
+      "DATA7": 86.131,
+      "GND": 391.678,
+      "OE_N": 200.588,
+      "OUT0": 12.702,
+      "OUT0_1": 12.702,
+      "OUT0_2": 12.702,
+      "OUT0_3": 12.702,
+      "OUT0_4": 12.702,
+      "OUT0_5": 12.702,
+      "OUT0_6": 12.702,
+      "OUT0_7": 12.702,
+      "OUT1": 12.84,
+      "OUT1_1": 12.84,
+      "OUT1_2": 12.84,
+      "OUT1_3": 12.84,
+      "OUT1_4": 12.84,
+      "OUT1_5": 12.84,
+      "OUT1_6": 12.84,
+      "OUT1_7": 12.84,
+      "OUT2": 12.702,
+      "OUT2_1": 12.702,
+      "OUT2_2": 12.702,
+      "OUT2_3": 12.702,
+      "OUT2_4": 12.702,
+      "OUT2_5": 12.702,
+      "OUT2_6": 12.702,
+      "OUT2_7": 12.702,
+      "OUT3": 12.84,
+      "OUT3_1": 12.84,
+      "OUT3_2": 12.84,
+      "OUT3_3": 12.84,
+      "OUT3_4": 12.84,
+      "OUT3_5": 12.84,
+      "OUT3_6": 12.84,
+      "OUT3_7": 12.84,
+      "OUT4": 12.702,
+      "OUT4_1": 12.702,
+      "OUT4_2": 12.702,
+      "OUT4_3": 12.702,
+      "OUT4_4": 12.702,
+      "OUT4_5": 12.702,
+      "OUT4_6": 12.702,
+      "OUT4_7": 12.702,
+      "OUT5": 12.84,
+      "OUT5_1": 12.84,
+      "OUT5_2": 12.84,
+      "OUT5_3": 12.84,
+      "OUT5_4": 12.84,
+      "OUT5_5": 12.84,
+      "OUT5_6": 12.84,
+      "OUT5_7": 12.84,
+      "OUT6": 12.702,
+      "OUT6_1": 12.702,
+      "OUT6_2": 12.702,
+      "OUT6_3": 12.702,
+      "OUT6_4": 12.702,
+      "OUT6_5": 12.702,
+      "OUT6_6": 12.702,
+      "OUT6_7": 12.702,
+      "OUT7": 12.84,
+      "OUT7_1": 12.84,
+      "OUT7_2": 12.84,
+      "OUT7_3": 12.84,
+      "OUT7_4": 12.84,
+      "OUT7_5": 12.84,
+      "OUT7_6": 12.84,
+      "OUT7_7": 12.84,
+      "RCLK": 160.027,
+      "SRCLK": 141.916,
+      "SRCLR_N": 199.762,
+      "VIN_12V": 12.551,
+      "VIN_FUSED": 42.934
+    }
+  },
+  "reviewed_layout": {
+    "clocks": {
+      "SRCLK": {
+        "signal_vias": 9,
+        "nearest_ground_vias": [
+          {
+            "signal_via": "777fd548710f3109",
+            "ground_via": "cd70783847e63860",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "be642bb0fcb58bfb",
+            "ground_via": "759cdeb2fe6b532a",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "00e4f9e632bd9cb2",
+            "ground_via": "029487acb6b4568b",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "66b56170a4a0a7de",
+            "ground_via": "aae639292e9538ac",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "b632be054d04fabf",
+            "ground_via": "6a361a8b140a71e3",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "083813c497cf33b2",
+            "ground_via": "7762d3d283b60181",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "895e50678b800051",
+            "ground_via": "d88fa319e7b4ac4e",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "a1ebacfca40785e8",
+            "ground_via": "c76143fd460eeb07",
+            "centre_distance_mm": 1.0844
+          },
+          {
+            "signal_via": "cf5fe4023d3e5019",
+            "ground_via": "dd41bd53c17a648b",
+            "centre_distance_mm": 1.0
+          }
+        ],
+        "source_resistor_to_U1_mm": 135.106,
+        "source_resistor_to_U94_mm": 44.106
+      },
+      "RCLK": {
+        "signal_vias": 11,
+        "nearest_ground_vias": [
+          {
+            "signal_via": "3f97042dd06346eb",
+            "ground_via": "cd70783847e63860",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "3407ae6ffa2d6ed9",
+            "ground_via": "759cdeb2fe6b532a",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "1985221743cbc5c3",
+            "ground_via": "029487acb6b4568b",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "97c260ca5418e194",
+            "ground_via": "aae639292e9538ac",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "bb9f0decc766f88f",
+            "ground_via": "6a361a8b140a71e3",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "1731bcdf8661b132",
+            "ground_via": "7762d3d283b60181",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "f619161fe1bfc345",
+            "ground_via": "d88fa319e7b4ac4e",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "f9bd4b2a19aaca2f",
+            "ground_via": "c76143fd460eeb07",
+            "centre_distance_mm": 0.8957
+          },
+          {
+            "signal_via": "ffc9a0a6347cdbe2",
+            "ground_via": "8d1df411bccf1fdd",
+            "centre_distance_mm": 0.8
+          },
+          {
+            "signal_via": "644fcaa4f05609b9",
+            "ground_via": "5e9fd973ccbcda23",
+            "centre_distance_mm": 1.6
+          },
+          {
+            "signal_via": "a3204ff41d76fb78",
+            "ground_via": "7d5f9e502f98b10e",
+            "centre_distance_mm": 1.6
+          }
+        ],
+        "source_resistor_to_U1_mm": 142.3761,
+        "source_resistor_to_U94_mm": 51.3761
+      }
+    },
+    "buck": {
+      "C19_power_to_VIN_straight_mm": 2.5244,
+      "C20_power_to_VIN_straight_mm": 4.6632,
+      "C19_power_to_VIN_trace_mm": 2.645,
+      "C19_ground_to_U27_trace_mm": 3.7692,
+      "SW_to_inductor_straight_mm": 3.3185,
+      "SW_to_inductor_trace_mm": 3.5829
+    },
+    "boundary": "Copper centreline lengths exclude cables, packages, via length and electrical delays; nearest-via distances do not prove high-frequency return impedance."
+  },
+  "manufacturing": {
+    "copper_layers": 4,
+    "gerber_layers_checked": 10,
+    "coordinate_format": "MM 4:6",
+    "drill_coordinate_counts": {
+      "Drill_PTH_Through.DRL": 645,
+      "Drill_NPTH_Through.DRL": 4,
+      "Drill_PTH_Through_Via.DRL": 495
+    }
+  },
+  "checked_date": "2026-10-08",
+  "native_ui_checks": {
+    "tool": "EasyEDA Pro 3.2.149.88089769",
+    "drc_errors_observed": 0,
+    "drc_scope": "After U27/clock edits and copper rebuild; rerun after importing the corrected paste-mask footprints",
+    "netlist_comparison": "No differences; all networks and components compared",
+    "scope": "Observed in native UI, not computed by verify_release.py"
+  },
+  "validation_boundary": {
+    "hardware_measurements": false,
+    "firmware_shift_backend_ready": false,
+    "routing": "Fixed manually chosen geometry; no automatic routing for this release",
+    "gerber_renderer": "PyGerber 2.4.3; all 10 final layers parsed and rendered"
+  },
+  "independent_copper_check": {
+    "report": "copper_validation.json",
+    "effective_nets": 214,
+    "shorts": 0,
+    "opens": 0,
+    "via_net_mismatches": 0,
+    "unassigned_copper_islands": 0,
+    "minimum_network_gap_mm": 0.159286,
+    "minimum_drill_wall_gap_mm": 0.395199,
+    "component_body_overlap_or_outside_board": 0
+  },
+  "gerber_export": {
+    "script": "export_gerber.js",
+    "excluded_object": "SolidRegion",
+    "reason": "XT30 layer-49 model marker leaks into top copper; PCB has no standalone copper fills",
+    "document_source_api": "eda.sys_FileManager.getDocumentSource()",
+    "current_pours_with_fill": 5,
+    "guard_checks": [
+      "Selected PCB",
+      "Every current POUR has matching nonempty fill",
+      "No standalone copper region excluded unintentionally"
+    ],
+    "prior_marker_fix": "0.06 mm top-copper disc removed before this U27/clock layout revision"
+  },
+  "independent_manufacturing_check": {
+    "report": "manufacturing_validation.json",
+    "holes_checked": 649,
+    "smd_pads_checked": 820,
+    "drill_position_or_size_errors": 0,
+    "missing_mask_centres": 0,
+    "missing_paste_centres": 0,
+    "repaired_paste_pads": 422,
+    "affected_passive_components": 211,
+    "regression": "Same checker rejects prior release with exactly 422 missing paste openings",
+    "boundary": "Nominal round drill position/diameter and SMD opening centre coverage; no assembly, stencil thickness, paste volume or fabrication tolerance validation."
+  }
+}
