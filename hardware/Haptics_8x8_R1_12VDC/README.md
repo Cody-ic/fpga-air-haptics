@@ -6,6 +6,8 @@
 
 本次复核缩短了 U27 的输入电容局部回路与 SW 到电感的连接；公共时钟主干移至顶层，SRCLK/RCLK 信号过孔由各 18 个减至 9/11 个，并在换层处补充地过孔。具体位置及实际线长见核验报告。
 
+进一步自检修复了 211 个电阻、电容共 422 个焊盘缺少焊膏开窗的问题。已重新导入、明确打开修正版工程，并从 EDA 重新导出制造文件；不要使用之前缺少开窗的 Gerber 制作钢网。
+
 ## 文件
 
 | 文件 | 用途 |
@@ -17,6 +19,7 @@
 | [routing_geometry.json](routing_geometry.json) | 从最终工程提取的线段和过孔，便于逐条审查；不生成走线 |
 | [核验报告.md](核验报告.md) / [validation.json](validation.json) | 检查结果、修改与待实测事项 |
 | [copper_validation.json](copper_validation.json) | Gerber 实际铜形状的连通、间距及封装外形复核 |
+| [manufacturing_validation.json](manufacturing_validation.json) | 钻孔位置/孔径与贴片焊盘开窗中心覆盖检查 |
 | [SHA256SUMS.txt](SHA256SUMS.txt) | 交付文件校验值 |
 
 ## 接口与软件
@@ -54,9 +57,12 @@ python hardware/Haptics_8x8_R1_12VDC/verify_release.py
 ```powershell
 python -m pip install -r hardware/Haptics_8x8_R1_12VDC/requirements-audit.txt
 python hardware/Haptics_8x8_R1_12VDC/verify_copper.py
+python hardware/Haptics_8x8_R1_12VDC/verify_manufacturing.py
 ```
 
 脚本只读文件，不修改或布线；不替代原生 DRC。铜检查考虑各层实际铜形状及全通孔连接，曲线采用近似多边形；器件外形来自封装外形层，不包含连接器插头与线缆。`export_tables.py` 可重新提取表格；`render_previews.py` 需 PyGerber 2.4.3 与 Pillow，只渲染 Gerber。
+
+制造检查逐一核对 649 个钻孔的位置与孔径，以及 820 个贴片焊盘中心是否有阻焊、焊膏开窗；包括偏心孔的焊盘旋转和底面镜像。它不评估钢网厚度、焊膏量、开窗工艺或装配公差。
 
 重新导出前，在 PCB 画布按 **Shift+B 重建全部铺铜并保存**，再用 [export_gerber.js](export_gerber.js) 在 EDA「高级 → 运行脚本」中执行。脚本逐个检查当前铺铜区域是否有填充结果，缺失时停止导出。此版没有独立铜填充区域，排除 `SolidRegion` 可避免 XT30 模型标识被错误导出为铜点；若以后添加铜填充区域，脚本会要求重新审查导出设置。铺铜、焊盘、过孔和导线均正常导出。
 

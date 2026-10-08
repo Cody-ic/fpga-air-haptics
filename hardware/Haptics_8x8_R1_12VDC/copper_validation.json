@@ -1,7 +1,7 @@
 {
   "package_sha256": {
-    "Haptics_8x8_R1_release.epro2": "51a4c90bac7f6c9fb520f7ea6fc3b27a0d453333a691ba21104c76d8a3b2f378",
-    "Haptics_8x8_R1_release_Gerber.zip": "23f5733246381646035a860842a281e940ec49613436ff632119d4c6cafb084f"
+    "Haptics_8x8_R1_release.epro2": "d59a5173c7a7d10d6f889b0d26eec94ea50bd67ed0a983006c6bb8510237170e",
+    "Haptics_8x8_R1_release_Gerber.zip": "5d7a17bea2ca0411eeaf96f2e93fda2713f377a3ce03ce8ec85afc30fd29a628"
   },
   "mechanical": {
     "component_bodies_checked": 324,
@@ -32,7 +32,7 @@
   "clearance_violations_approx_6mil": [],
   "layer_clearances": {
     "1": {
-      "minimum_gap_mm": 0.1681989999999871,
+      "minimum_gap_mm": 0.16819799999998963,
       "nets": [
         [
           "SRCLR_N"

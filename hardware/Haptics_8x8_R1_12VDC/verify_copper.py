@@ -110,7 +110,7 @@ def command_shape(command, aperture_cache):
     return LineString(curve(command)).buffer(scalar(command.aperture.diameter)/2, quad_segs=128)
 
 
-def copper(source):
+def copper(source, shape_fn=command_shape):
     parsed = GerberFile.from_str(source).parse()
     shape, batch, polarity, cache = GeometryCollection(), [], None, {}
     for command in parsed._command_buffer:
@@ -120,7 +120,7 @@ def copper(source):
             shape = shape.union(group) if polarity == 'D' else shape.difference(group)
             batch = []
         polarity = current
-        batch.append(command_shape(command, cache))
+        batch.append(shape_fn(command, cache))
     group = union_all(batch)
     return polygonal(shape.union(group) if polarity == 'D' else shape.difference(group))
 

@@ -385,7 +385,7 @@
   "native_ui_checks": {
     "tool": "EasyEDA Pro 3.2.149.88089769",
     "drc_errors_observed": 0,
-    "drc_scope": "After U27/clock edits, silkscreen correction and complete copper rebuild",
+    "drc_scope": "After U27/clock edits and copper rebuild; rerun after importing the corrected paste-mask footprints",
     "netlist_comparison": "No differences; all networks and components compared",
     "scope": "Observed in native UI, not computed by verify_release.py"
   },
@@ -418,5 +418,17 @@
       "No standalone copper region excluded unintentionally"
     ],
     "prior_marker_fix": "0.06 mm top-copper disc removed before this U27/clock layout revision"
+  },
+  "independent_manufacturing_check": {
+    "report": "manufacturing_validation.json",
+    "holes_checked": 649,
+    "smd_pads_checked": 820,
+    "drill_position_or_size_errors": 0,
+    "missing_mask_centres": 0,
+    "missing_paste_centres": 0,
+    "repaired_paste_pads": 422,
+    "affected_passive_components": 211,
+    "regression": "Same checker rejects prior release with exactly 422 missing paste openings",
+    "boundary": "Nominal round drill position/diameter and SMD opening centre coverage; no assembly, stencil thickness, paste volume or fabrication tolerance validation."
   }
 }
