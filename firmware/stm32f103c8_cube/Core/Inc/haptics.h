@@ -1,9 +1,7 @@
 #ifndef F103_HAPTICS_PROFILE_H
 #define F103_HAPTICS_PROFILE_H
 
-#ifndef F103_CHANNEL_TEST
-#define F103_CHANNEL_TEST 0 /* Business firmware unless explicitly built for diagnosis. */
-#endif
+#include "firmware_mode.h"
 
 #define HAP_LINE 1920
 #define HAP_POINTS 64

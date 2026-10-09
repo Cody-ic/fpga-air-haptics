@@ -24,8 +24,16 @@ class IDEProfileTests(unittest.TestCase):
                     settings.remove(config)
             for option in tree.getroot().iter("option"):
                 for item in list(option):
-                    if item.get("value", "").split("=",1)[0] in ("F103_CHANNEL_TEST", "F103_PIN_TEST"):
+                    if item.get("value", "").split("=",1)[0] in ("F103_CHANNEL_TEST", "F103_PIN_TEST", "F103_FIRMWARE_MODE"):
                         option.remove(item)
+            # Existing projects may still force business via old -D options.
+            # Regeneration must migrate them so editing the header can work.
+            debug = next(c for c in settings.findall("cconfiguration")
+                         if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "Debug")
+            symbols = next(o for o in debug.iter("option")
+                           if o.get("superClass") == module.BASE+"compiler.option.definedsymbols")
+            for value in ("F103_CHANNEL_TEST=0", "F103_PIN_TEST=0", "F103_FIRMWARE_MODE=0"):
+                ET.SubElement(symbols, "listOptionValue", builtIn="false", value=value)
             module.configure_profiles(tree.getroot())
             tree.write(project / ".cproject")
             module.ROOT = project
@@ -42,11 +50,9 @@ class IDEProfileTests(unittest.TestCase):
                                  "org.eclipse.cdt.core.ELF")
             for name, config in configs.items():
                 defines = [v.get("value") for v in config.iter("listOptionValue")
-                           if v.get("value", "").startswith("F103_CHANNEL_TEST")]
-                self.assertEqual(defines, ["F103_CHANNEL_TEST="+str(int(name in ("ChannelTest","PinTest")))])
-                pin_defines = [v.get("value") for v in config.iter("listOptionValue")
-                               if v.get("value", "").startswith("F103_PIN_TEST=")]
-                self.assertEqual(pin_defines,["F103_PIN_TEST="+str(int(name=="PinTest"))])
+                           if v.get("value", "").split("=", 1)[0] in
+                           ("F103_CHANNEL_TEST", "F103_PIN_TEST", "F103_FIRMWARE_MODE")]
+                self.assertEqual(defines, [])
                 for builder in config.iter("builder"):
                     self.assertTrue(builder.get("buildPath").endswith("/"+name))
             for name, filename, local in (
@@ -59,10 +65,15 @@ class IDEProfileTests(unittest.TestCase):
                 self.assertEqual(values[prefix+"PROJECT_BUILD_CONFIG_ID_ATTR"], configs[name].get("id"))
                 self.assertEqual(values[prefix+"ATTR_BUILD_BEFORE_LAUNCH_ATTR"], "1")
                 self.assertEqual(values[prefix+"PROGRAM_ARGUMENTS"], "-f "+local)
-            # Regeneration must preserve a user's selected PinTest channel.
+                favorites = launch.find("listAttribute[@key='org.eclipse.debug.ui.favoriteGroups']")
+                self.assertEqual(favorites is not None, name == "Debug")
+            # Old PinTest overrides must not hide an edit in the shared header.
             symbols=next(o for o in configs["PinTest"].iter("option")
                          if o.get("superClass")==module.BASE+"compiler.option.definedsymbols")
             ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_PIN_TEST_CHANNEL=2")
+            ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_PIN_TEST_ON_MS=1000")
+            module.configure_profiles(tree.getroot())
+            self.assertFalse(any(v.get("value", "").startswith("F103_") for v in symbols))
             before = ET.tostring(tree.getroot())
             module.configure_profiles(tree.getroot())
             self.assertEqual(before, ET.tostring(tree.getroot()))

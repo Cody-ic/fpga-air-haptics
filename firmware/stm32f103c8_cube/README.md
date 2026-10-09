@@ -1,6 +1,6 @@
 # STM32F103C8T6 验证工程
 
-更新于 **2026-10-09**。此工程用于替代 F411 做 4×4 阵列的串口、相位输出与接收 ADC 验证。最终控制平台仍为 Tang Mega 60K。
+更新于 **2026-10-10**。此工程用于替代 F411 做 4×4 阵列的串口、相位输出与接收 ADC 验证。最终控制平台仍为 Tang Mega 60K。
 
 ## 1. 打开工程
 
@@ -24,7 +24,7 @@
 
 串口使用 **115200、8N1、无流控、3.3 V 逻辑**。独立 ST-LINK V2 通常没有虚拟串口，上位机通信需另接 USB-UART。板卡电源只选一个来源；不要将多个供电输出直接并联。
 
-**快捷烧录（绿色 Run）**：使用 **Run → Run Configurations → C/C++ Application → haptics_f103c8**。第一次选择并 Run 后，工具栏绿色 Run 按钮会复用它。该配置先增量编译 Debug，再由 OpenOCD 下载、回读校验、复位运行并释放 ST-LINK；无需额外手动转换 HEX/BIN。控制台出现 `Verified OK` 表示校验通过；`<terminated> (exit value: 0)` 表示下载工具正常退出，板上程序继续运行。源码调试会占用 ST-LINK，应先结束调试再 Run。
+**快捷烧录（绿色 Run）**：使用 **Run → Run Configurations → C/C++ Application → haptics_f103c8**。第一次选择并 Run 后，工具栏绿色 Run 按钮会复用它。所有模式共用 `Core/Src/main.c`，只需修改 `Core/Inc/firmware_mode.h` 中的 `F103_FIRMWARE_MODE`，再点同一个 Run。该配置先增量编译 Debug，再由 OpenOCD 下载、回读校验、复位运行并释放 ST-LINK；Debug 表示构建类型，不再强制选择业务模式。无需更换源文件、ELF 路径或烧录配置。控制台出现 `Verified OK` 表示校验通过；`<terminated> (exit value: 0)` 表示下载工具正常退出，板上程序继续运行。源码调试会占用 ST-LINK，应先结束调试再 Run。
 
 本机源码调试使用 **GDB Hardware Debugging → OpenOCD (pipe)**，与 Run 共用 SWD、100 kHz 和软件复位，不依赖 NRST 接线。在 **Run → Debug Configurations → GDB Hardware Debugging** 中选择：
 
@@ -129,7 +129,7 @@ USART2 中断优先级为 0，波形 DMA 为 1，ADC DMA 为 2，均已同步到
 
 应用入口保存在 `main.c`、中断文件的 `USER CODE` 区域，专用逻辑在 `app_f103.c` / `wave_f103.c`；CubeMX 已验证能保留这些入口。生成时启用 **Keep User Code**。
 
-若 CubeMX 重新生成 IDE 配置，在工程目录运行 `python configure_ide.py`，然后在 CubeIDE 刷新工程。它恢复 `-O2`、newlib-nano、`haptics_memory.ld`、源目录范围、ChannelTest/PinTest 编译配置及三种快捷 Run 配置；添加 `--cubeide` 可同时更新 Run/Debug 工具路径。不能改用默认 64 KB 链接脚本，否则会占用预留日志页。
+若 CubeMX 重新生成 IDE 配置，在工程目录运行 `python configure_ide.py`，然后在 CubeIDE 刷新工程。它恢复 `-O2`、newlib-nano、`haptics_memory.ld`、源目录范围及快捷 Run 配置，清除所有构建配置中会覆盖模式、通道、时长的旧宏；添加 `--cubeide` 可同时更新 Run/Debug 工具路径。不能改用默认 64 KB 链接脚本，否则会占用预留日志页。旧 ChannelTest/PinTest 名称仅兼容既有入口，行为也遵从头文件，不需要切换配置。
 
 仓库中 F411 的协议和几何核心为共享来源；修改后可执行：
 
@@ -140,52 +140,70 @@ python firmware/stm32f103c8_cube/sync_core.py --project 'D:\STM32Dev\haptics_f10
 
 ### 6.1 逐通道调试版本
 
-`Core/Inc/haptics.h` 中 `F103_CHANNEL_TEST` 默认为 0，编译时可覆盖。`app_f103.c` 使用 `#if F103_CHANNEL_TEST` 分隔诊断序列、静态载波与业务图形、动态波形，两者不会同时执行；串口解析和故障停机仍共用。
+统一模式选择位于 `Core/Inc/firmware_mode.h`，`F103_FIRMWARE_MODE` 自动派生原有 `F103_CHANNEL_TEST` 和 `F103_PIN_TEST`。`app_f103.c` 使用 `#if` 分隔诊断序列、静态载波与业务图形、动态波形；所有模式共用同一 `main.c`、串口解析和故障停机。所有 CubeIDE 构建配置均不再传入模式或测试参数宏，因此修改头文件即可生效。
 
-| CubeIDE 编译配置 | 宏 | 行为 |
+| `F103_FIRMWARE_MODE` | 模式 | 行为 |
 |---|---|---|
-| Debug / Release | `F103_CHANNEL_TEST=0` | 业务图形、按键和串口控制，自动运行有 10 秒期限 |
-| ChannelTest | `F103_CHANNEL_TEST=1` | 等待 3 秒，逻辑通道 0→15 各输出 2 秒、全关 1 秒；约 51 秒后停止 |
+| `0` / `F103_MODE_BUSINESS` | 业务 | 图形、按键和串口控制，自动运行有 10 秒期限 |
+| `1` / `F103_MODE_CHANNEL_TEST` | 逐通道 | 等待 3 秒，逻辑通道 0→15 各输出 2 秒、全关 1 秒；约 51 秒后停止 |
+| `2` / `F103_MODE_PIN_TEST`（当前默认） | 固定引脚 | 等待 3 秒，只输出参数指定通道，默认 PB11 持续输出 |
 
 调试版本关闭调制、等级 100%，每次仅一个掩码位有效。2026-10-09 的源码改为静态循环 DMA：TIM1 `PSC=0、ARR=799`，按 64 MHz 定时器时钟每 12.5 μs 交替写高、低两个字，目标为连续 40 kHz、50% 占空比；不再动态回填，也不插入每 250 μs 的 25 μs 全低保护。两路 DMA 只开启传输错误中断，错误、串口故障及 STOP 仍关闭全部输出。此改动尚未烧录，实际载波、占空比与声音变化需示波器验证。掩码对应逻辑编号，物理换能器顺序必须查第 3 节。
 
 调试 ON 阶段 STATE 使用固定 `POINT(0,0,150 mm)` 作为协议参考，电气相位固定为 0，不求解聚焦声场；单个换能器不能据此认定形成触觉焦点。此时 `output=1、drive_on=1` 表示载波门控开启，正常低半周期不会改变它；`elapsed_us` 来自软件毫秒计时。这些是数字配置与状态回读，不能作为实际引脚波形或声压测量。业务模式仍使用独立的动态波形路径。
 
-任意时刻串口 STOP、PA5 短按或故障都会取消整轮，停顿期间也有效；不会自动继续，重测需复位。看门狗复位与初始化错误禁止开始。HELLO/PING/SNAP 只观察，不取消序列；调试固件声明 `profile=CHANNEL_TEST`，允许 STOP、GEOMETRY、CAPTURE，图形 CONFIG/START/MODE 等返回 `CHANNEL_TEST_ONLY`。
+任意时刻串口 STOP、PA5 短按或故障都会取消整轮，停顿期间也有效；不会自动继续，重测需复位。看门狗复位与初始化错误禁止开始。HELLO/PING/SNAP 只观察，不取消序列；调试固件保留 `profile=CHANNEL_TEST`，另用 `firmware_mode` 区分两种测试，允许 STOP、GEOMETRY、CAPTURE，图形 CONFIG/START/MODE 等返回 `CHANNEL_TEST_ONLY`。
 
 串口格式化或发送跨过 2 秒截止时，后台服务先关闭输出，主循环随后进入 GAP；不会因为持续读取状态而延长 ON，也不会在发送回调中启动下一路。`.ioc` 保留业务 TIM1 配置，诊断的 `ARR=799` 由宏分支在启动静态 DMA 时设置；引脚、串口、ADC 和 CubeMX 配置不变。
 
-在 **Run → Run Configurations → C/C++ Application** 选择 **haptics_f103c8 Channel Test**，该快捷方式先编译 ChannelTest，再下载其专属 ELF。原 **haptics_f103c8** 仍编译并下载 Debug 业务版本。不要用原 OpenOCD Debug 配置下载旧 Debug ELF 来测试逐通道版本。更新后刷新工程；若未出现 ChannelTest，运行 `configure_ide.py --cubeide <安装目录>` 恢复配置。
+逐通道测试只需将 `F103_FIRMWARE_MODE` 改为 `F103_MODE_CHANNEL_TEST`，保存后使用原来的 Run。切回业务改为 `F103_MODE_BUSINESS`，无需替换引用文件。旧 **Channel Test / Pin Test** 入口仍保留对应构建目录，但不再强制模式，也遵从同一个头文件。
 
 普通图形上位机要求业务控制能力，不能连接此只读诊断配置。使用 `channel_monitor.py --port COM4` 观察，记录逻辑/PCB 通道、掩码及状态，退出时发送 STOP 并确认输出关闭；默认不启用 ADC。接收板正确连接后才加 `--capture` 保存原码窗口与电压分析。脚本不会复位或启动输出，因此连接前已完成的通道不会自动补测。
 
 ### 6.2 固定引脚测试 PinTest
 
-2026-10-09 新增独立 **PinTest** 编译配置和 **haptics_f103c8 Pin Test** 快捷 Run。原 Debug/Release 业务与 ChannelTest 逐通道序列保留原行为；PinTest 复用静态 40 kHz、50% 方波后端，默认持续测试指定的一路，不切换到其他通道。
+固定引脚模式复用静态 40 kHz、50% 方波后端，默认持续测试指定的一路，不切换到其他通道。将 `F103_FIRMWARE_MODE` 设为 `F103_MODE_PIN_TEST`，使用统一 **haptics_f103c8** Run 即可。
 
-默认 **PB11 → CN1-18 → PCB CH15**，对应软件通道 11、掩码 `2048`（`0x0800`）。初始化后等待 3 秒，进入 `RUNNING/PIN_TEST_ON` 并持续输出，直到 STOP、故障或断电；测试期间其余 15 路保持低。看门狗复位仍禁止自动启动。普通业务 Run 不会选择此固件；在 Run Configurations 中明确选择 **haptics_f103c8 Pin Test**。
+默认 **PB11 → CN1-18 → PCB CH15**，对应软件通道 11、掩码 `2048`（`0x0800`）。初始化后等待 3 秒，进入 `RUNNING/PIN_TEST_ON` 并持续输出，直到 STOP、故障或断电；测试期间其余 15 路保持低。看门狗复位仍禁止自动启动。
 
-编译、下载时使用 PinTest 配置及其 ELF；`Debug/haptics_f103c8.elf` 仍为有扫描与调制的业务固件。测 PB11 对 MCU GND 可先用 10 μs/格、1 V/格、DC 耦合和约 1.5 V 上升沿触发；目标周期 25 μs，高低各约 12.5 μs。
+统一 Run 始终编译并下载 `Debug/haptics_f103c8.elf`，其行为由模式头文件决定。测 PB11 对 MCU GND 可先用 10 μs/格、1 V/格、DC 耦合和约 1.5 V 上升沿触发；目标周期 25 μs，高低各约 12.5 μs。
 
-参数位于 `Core/Inc/pin_test_config.h`，修改后重新编译 PinTest：
+**手动修改入口：[Core/Inc/firmware_mode.h](Core/Inc/firmware_mode.h) 顶部的【手动配置区】。换通道只改 `#define F103_PIN_TEST_CHANNEL 11` 中的 `11`，保存后点同一个 Run。** 模式和输出时长也集中在这里；`pin_test_config.h` 只负责参数校验。
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
 | `F103_PIN_TEST_CHANNEL` | `11` | 测试软件通道，允许 0–15；第 3 节接线表可查对应引脚 |
 | `F103_PIN_TEST_ON_MS` | `0u` | `0` 表示持续输出；正数表示输出时长（ms），最大 `0x7fffffff` |
 
-例如 `10` 选择 PB10/CN1-17/CH14，`2` 选择 PA8/CN1-9/CH6；不存在 PB2 输出。PinTest 使用 `F103_CHANNEL_TEST=1、F103_PIN_TEST=1`，其他配置的 `F103_PIN_TEST=0`。也可在 PinTest 的编译宏中覆盖上述参数，IDE 配置恢复脚本保留自定义参数。
+例如 `10` 选择 PB10/CN1-17/CH14，`2` 选择 PA8/CN1-9/CH6；不存在 PB2 输出。模式头文件统一派生两个内部宏，不需要手动同时修改它们。自动检查也可使用 CLI 显式覆盖模式或参数：
 
 ```powershell
 python firmware/stm32f103c8_cube/build.py --pin-test
 python firmware/stm32f103c8_cube/build.py --pin-test --test-channel 2 --test-on-ms 1500
+python firmware/stm32f103c8_cube/build.py --business
 ```
 
-命令行产物独立保存到 `build/pin_test/`；CubeIDE 保存到 `PinTest/`，不会覆盖原版本。`channel_monitor.py --port COM4` 同样可观察并保存此模式，默认监听 65 秒后或按 Ctrl+C 退出时会发送 STOP 并确认关闭；这是工具发出的停止命令，固件本身不设持续模式截止。时长设置为正数时，到期进入 `IDLE/PIN_TEST_DONE`；发包跨截止也会关闭输出。方波频率与占空比仍需实测；参数选择不改变引脚或 `.ioc`。
+不带模式参数的 CLI 构建遵从头文件，保存到 `build/`；显式 `--pin-test` 产物保存到 `build/pin_test/`。可选 PinTest 构建保留独立目录，但正常 CubeIDE Run 无需切换到它。`channel_monitor.py --port COM4` 同样可观察并保存此模式，默认监听 65 秒后或按 Ctrl+C 退出时会发送 STOP 并确认关闭；这是工具发出的停止命令，固件本身不设持续模式截止。时长设置为正数时，到期进入 `IDLE/PIN_TEST_DONE`；发包跨截止也会关闭输出。方波频率与占空比仍需实测；参数选择不改变引脚或 `.ioc`。
 
-本次检查：F103 22 项通过，原业务与逐通道回归保持通过；持续 PinTest 通过严格 Arm GNU 编译，Flash/RAM 为 37,640/13,464 字节，含原堆栈预留。回归覆盖 PB11 持续、PA8 持续、PB10/PA8 定时、1 ms 和最大有效时长、HAL tick 回绕、非法参数、单路隔离及 STOP/故障关闭。串口工具 11 项和 IDE 配置 1 项在新增 PinTest 时已通过，本次不改其配置。
+2026-10-09 检查：F103 22 项通过，原业务与逐通道回归保持通过；持续 PinTest 通过严格 Arm GNU 编译，Flash/RAM 为 37,640/13,464 字节，含原堆栈预留。回归覆盖 PB11 持续、PA8 持续、PB10/PA8 定时、1 ms 和最大有效时长、HAL tick 回绕、非法参数、单路隔离及 STOP/故障关闭。当天串口工具 11 项和 IDE 配置 1 项通过。
 
 2026-10-09 已通过 ST-LINK V2 下载持续 PB11 版本并校验成功。运行超过 3 分钟后读到 `PIN_TEST_ON`、掩码 `2048`、无待处理故障，TIM1 与 DMA 保持启用，`ARR=799`。这是数字运行状态核验，实际引脚的频率、幅度与占空比仍需示波器确认。
+
+### 6.3 双向串口与诊断日志
+
+测试和业务共用 USART2 的接收 IRQ、HAP3 命令解析与 CRC 回传；不用另一份 `main.c`。`HELLO/PING/SNAP` 原本已可用，2026-10-10 在 HELLO 增加 `fw_id=F103_SERIAL_20261010`、`firmware_mode=0/1/2`；固定通道模式还回报 `pin_channel/on_ms`，可以确认实际烧录模式。STATE 已回传通道掩码、输出、运行时间和故障原因，不新增寄存器诊断命令。协议字段见[串口协议](../../desktop_app/PROTOCOL.md)。
+
+在仓库根目录运行（需安装 `desktop_app/requirements.txt`）：
+
+```powershell
+python firmware/stm32f103c8_cube/serial_diagnostics.py --port COM4 --seconds 10
+```
+
+默认保存到 `desktop_app/.runtime/serial_diagnostics/` 下的新时间目录：`states.csv` 整理通道、MCU 引脚、CN1、PCB 通道和输出状态；`frames.jsonl`、`received.bin/sent.bin` 保留完整报文；`summary.json` 记录握手、CRC、应答超时和最终状态。可用 `--output-dir` 指定新的空目录；旧日志不会被覆盖。
+
+此工具仅发送 HELLO/PING/SNAP，退出或异常仅释放串口，保留持续测试输出；与 `channel_monitor.py` 退出发 STOP 的行为不同。REMOTE 业务会话中的 HELLO 会结束原控制会话；此工具主要用于本地测试。不会主动采 ADC，接收板未接时不能作声学结论。
+
+2026-10-10 初次串口检查：COM4 / CH343、115200 8N1 完成 HELLO/PING/SNAP 双向应答，59 帧解析无 CRC 错误；已烧录的旧固定通道版本回报 PB11、输出开启、无故障。新模式配置与 HELLO 标识版本已通过本机 CubeIDE Debug 编译，串口日志工具 12 项、IDE 配置检查 1 项通过；新版本尚未烧录验证。
 
 ## 7. 软件验证
 
@@ -198,6 +216,7 @@ python firmware/stm32f103c8_cube/build.py --pin-test
 python firmware/stm32f103c8_cube/tests/test_f103.py
 python firmware/stm32f103c8_cube/tests/test_ide_profiles.py
 python firmware/stm32f103c8_cube/tests/test_channel_monitor.py
+python firmware/stm32f103c8_cube/tests/test_serial_diagnostics.py
 python firmware/nucleo_f411re/tests/test_firmware.py
 ```
 

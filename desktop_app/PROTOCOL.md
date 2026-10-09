@@ -157,6 +157,12 @@ STOP/本地停止/心跳停止/REMOTE 新握手撤销临时 trial、恢复已有
 
 STATE 可选字段 `channel_mask`（十进制）与 `phase_offsets`（逐路码）说明实际门控与修正；缺省按全通道、零修正处理。`phases` 必须是叠加修正后的实际相位，不能再次由客户端加修正。详见[校准流程及边界](ARRAY_CALIBRATION.md)。
 
+### 4.3 F103 测试模式识别
+
+2026-10-10 新增可选 HELLO 字段：`fw_id` 标明固件标识，`firmware_mode=0/1/2` 分别为业务、逐通道、固定引脚；固定引脚模式还回传 `pin_channel` 和 `on_ms`（0 表示持续）。测试固件保留 `profile=CHANNEL_TEST` 以兼容旧监视器，仍使用 HELLO/PING/SNAP 和 STATE，不新增寄存器诊断命令。旧客户端忽略这些可选字段。
+
+`serial_diagnostics.py` 保存原始收发字节、带时间报文和包含 MCU/CN1/PCB 通道的状态 CSV；退出仅释放串口，不发送 STOP。REMOTE 业务会话中的 HELLO 仍遵守第 2 节会话规则，会停止旧控制会话，此工具主要用于本地测试。STATE 是数字状态回传，不能替代引脚波形或声压测量。
+
 ## 5. STATE：原子数字快照
 
 STATE 包含完整 CONFIG 字段、实际阵列字段以及：

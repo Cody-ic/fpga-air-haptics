@@ -297,6 +297,13 @@ static void process(Device *d)
         if (d->hw.capture_start && d->hw.capture_poll && d->hw.capture_cancel)
             append(" adc_capture=1");
         append(" x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000 z_min_um=20000 z_max_um=300000 carrier_hz=40000 phase_steps=64 focus_hz=%u",1000000u/HAP_FOCUS_US);
+#ifdef F103_FIRMWARE_MODE
+        append(" fw_id=F103_SERIAL_20261010 firmware_mode=%u", F103_FIRMWARE_MODE);
+#if F103_PIN_TEST
+        append(" pin_channel=%u on_ms=%lu", F103_PIN_TEST_CHANNEL,
+               (unsigned long)F103_PIN_TEST_ON_MS);
+#endif
+#endif
         send_frame(d); snapshot(d); return;
     }
     if (!d->connected) error = "HANDSHAKE_REQUIRED";

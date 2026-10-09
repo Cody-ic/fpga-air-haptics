@@ -34,7 +34,7 @@ class F103Tests(unittest.TestCase):
         output.mkdir(exist_ok=True)
         library = output / ("test_f103.dll" if os.name == "nt" else "test_f103.so")
         subprocess.run([compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror","-shared","-fPIC",
-            "-ICore/Inc","Core/Src/haptics.c","Core/Src/geometry.c","Core/Src/wave_f103.c",
+            "-DF103_FIRMWARE_MODE=0","-ICore/Inc","Core/Src/haptics.c","Core/Src/geometry.c","Core/Src/wave_f103.c",
             "tests/harness.c","-lm","-static-libgcc","-o",str(library.relative_to(ROOT))],cwd=ROOT,check=True)
         cls.dll=ct.CDLL(str(library))
         cls.dll.test_feed.argtypes=(ct.c_char_p,ct.c_size_t,ct.c_uint64)
@@ -379,7 +379,7 @@ class F103Tests(unittest.TestCase):
         subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
             "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
             "-ffunction-sections","-fdata-sections",
-            "-DSTM32F103xB","-DUSE_HAL_DRIVER",*("-I"+p for p in includes),
+            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=0",*("-I"+p for p in includes),
             "tests/wave_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
             "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
             "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
@@ -393,7 +393,7 @@ class F103Tests(unittest.TestCase):
         subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
             "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
             "-ffunction-sections","-fdata-sections",
-            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_CHANNEL_TEST=1",*("-I"+p for p in includes),
+            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=1",*("-I"+p for p in includes),
             "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
             "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
             "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
@@ -425,7 +425,7 @@ class F103Tests(unittest.TestCase):
             subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
                 "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
                 "-ffunction-sections","-fdata-sections","-DSTM32F103xB","-DUSE_HAL_DRIVER",
-                "-DF103_CHANNEL_TEST=1","-DF103_PIN_TEST=1",*extra,*("-I"+p for p in includes),
+                "-DF103_FIRMWARE_MODE=2",*extra,*("-I"+p for p in includes),
                 "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
                 "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
                 "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
@@ -434,13 +434,37 @@ class F103Tests(unittest.TestCase):
     def test_invalid_pin_profile_parameters_fail_before_build(self):
         for extra in (("-DF103_PIN_TEST_CHANNEL=-1",),("-DF103_PIN_TEST_CHANNEL=16",),
                       ("-DF103_PIN_TEST_ON_MS=-1",),("-DF103_PIN_TEST_ON_MS=-1u",),
-                      ("-DF103_PIN_TEST_ON_MS=0x80000000u",),
-                      ("-DF103_CHANNEL_TEST=0",)):
+                      ("-DF103_PIN_TEST_ON_MS=0x80000000u",)):
             result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
-                "-DF103_CHANNEL_TEST=1","-DF103_PIN_TEST=1",*extra,"-x","c","-"],cwd=ROOT,
+                "-DF103_FIRMWARE_MODE=2",*extra,"-x","c","-"],cwd=ROOT,
                 input='#include "app_f103.h"\n',text=True,capture_output=True)
             self.assertNotEqual(result.returncode,0,extra)
             self.assertIn("PinTest",result.stderr)
+
+    def test_single_firmware_mode_selects_shared_translation_units(self):
+        # All application files include haptics.h; mode must be known before
+        # the shared protocol core, even where app_f103.h is not included.
+        for mode in (None, 0, 1, 2):
+            expected=2 if mode is None else mode
+            defines=[] if mode is None else ["-DF103_FIRMWARE_MODE="+str(mode)]
+            source=(
+                '#include "haptics.h"\n'
+                '#include "app_f103.h"\n'
+                f'_Static_assert(F103_FIRMWARE_MODE=={expected}, "mode");\n'
+                f'_Static_assert(F103_CHANNEL_TEST=={int(expected!=0)}, "backend");\n'
+                f'_Static_assert(F103_PIN_TEST=={int(expected==2)}, "fixed pin");\n'
+            )
+            subprocess.run([self.compiler,"-std=c11","-Wall","-Wextra","-Werror",
+                "-fsyntax-only","-ICore/Inc",*defines,"-x","c","-"],cwd=ROOT,
+                input=source,text=True,check=True)
+        for defines in (("-DF103_FIRMWARE_MODE=-1",), ("-DF103_FIRMWARE_MODE=3",),
+                        ("-DF103_FIRMWARE_MODE=-1u",), ("-DF103_CHANNEL_TEST=0",),
+                        ("-DF103_PIN_TEST=1",)):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                *defines,"-x","c","-"],cwd=ROOT,input='#include "haptics.h"\n',
+                text=True,capture_output=True)
+            self.assertNotEqual(result.returncode,0,defines)
+            self.assertIn("F103_FIRMWARE_MODE",result.stderr)
 
     def test_desktop_takeover_and_logged_adc_at_serial_wire_speed(self):
         # Actual F103 C core, with synthetic GPIO/ADC callbacks, not a board test.

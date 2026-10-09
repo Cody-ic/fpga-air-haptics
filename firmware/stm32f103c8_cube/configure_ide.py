@@ -11,12 +11,12 @@ BASE = "com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c."
 
 
 def configure_profiles(root):
-    """Keep business and diagnosis in separate CDT build directories."""
+    """All IDE builds follow firmware_mode.h, including legacy profile names."""
     settings = root.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']")
     debug = next(c for c in settings.findall("cconfiguration")
                  if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "Debug")
-    for mode, description in (("ChannelTest", "Sequential single-channel diagnostic firmware"),
-                              ("PinTest", "Fixed-pin diagnostic firmware; parameters in pin_test_config.h")):
+    for mode, description in (("ChannelTest", "Legacy build directory; mode selected in firmware_mode.h"),
+                              ("PinTest", "Legacy build directory; mode selected in firmware_mode.h")):
         channel = next((c for c in settings.findall("cconfiguration")
                         if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == mode), None)
         if channel is not None:
@@ -45,16 +45,18 @@ def configure_profiles(root):
         settings.append(channel)
     for config in settings.findall("cconfiguration"):
         mode = config.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")
+        if mode in ("ChannelTest", "PinTest"):
+            config.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set(
+                "description", "Legacy build directory; mode selected in firmware_mode.h")
         for option in config.iter("option"):
             if option.get("superClass") == BASE+"compiler.option.definedsymbols":
-                for name, enabled in (("F103_CHANNEL_TEST", mode in ("ChannelTest", "PinTest")),
-                                      ("F103_PIN_TEST", mode == "PinTest")):
-                    matches = [v for v in option if v.get("value", "").split("=",1)[0] == name]
-                    item = matches[0] if matches else ET.SubElement(option,"listOptionValue")
-                    item.set("builtIn","false")
-                    item.set("value",name+"="+str(int(enabled)))
-                    for duplicate in matches[1:]:
-                        option.remove(duplicate)
+                # The header is the sole user-facing mode/channel selection.
+                # Also migrate old launch defaults so they cannot override it.
+                for item in list(option):
+                    if item.get("value", "").split("=", 1)[0] in (
+                            "F103_CHANNEL_TEST", "F103_PIN_TEST", "F103_FIRMWARE_MODE",
+                            "F103_PIN_TEST_CHANNEL", "F103_PIN_TEST_ON_MS"):
+                        option.remove(item)
         for chain in config.iter("toolChain"):
             for option in chain.findall("option"):
                 if option.get("superClass") == "com.st.stm32cube.ide.mcu.gnu.managedbuild.option.runtimelibrary_c":
@@ -79,11 +81,15 @@ def configure_run(profile="Debug"):
     )
     for kind, key, value in attributes:
         ET.SubElement(launch, kind+"Attribute", key=key, value=value)
-    for key, value in (
+    mappings = [
         ("org.eclipse.debug.core.MAPPED_RESOURCE_PATHS", "/"+NAME),
         ("org.eclipse.debug.core.MAPPED_RESOURCE_TYPES", "4"),
-        ("org.eclipse.debug.ui.favoriteGroups", "org.eclipse.debug.ui.launchGroup.run"),
-    ):
+    ]
+    # The ordinary and legacy Run entries all follow the shared mode header.
+    # Retain old names for existing toolbar defaults, without adding favorites.
+    if profile == "Debug":
+        mappings.append(("org.eclipse.debug.ui.favoriteGroups", "org.eclipse.debug.ui.launchGroup.run"))
+    for key, value in mappings:
         field = ET.SubElement(launch, "listAttribute", key=key)
         ET.SubElement(field, "listEntry", value=value)
     ET.indent(launch)
