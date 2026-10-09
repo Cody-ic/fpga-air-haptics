@@ -12,4 +12,11 @@
 #error "PinTest duration must be 0 (continuous) or positive and less than 2^31 milliseconds."
 #endif
 
+#if F103_GROUP_TEST && (F103_GROUP_TEST_MASK <= 0 || F103_GROUP_TEST_MASK > 0xffffu)
+#error "GroupTest mask must select at least one logical channel within bits 0..15."
+#endif
+#if F103_GROUP_TEST && (F103_GROUP_TEST_ON_MS < 0 || F103_GROUP_TEST_ON_MS > 0x7fffffff)
+#error "GroupTest duration must be 0 (continuous) or positive and less than 2^31 milliseconds."
+#endif
+
 #endif

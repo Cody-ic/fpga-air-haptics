@@ -27,7 +27,7 @@ class MockSerial:
     def __init__(self, clock, *, hello=True, bad_crc=False,
                  restart_at=None, fault=False, lost_ack=None, wrong_ack=False,
                  no_state=False, io_failure_at=None,
-                 interrupt_at=None, device="STM32F103C8T6", simulated=0):
+                 interrupt_at=None, device="STM32F103C8T6", simulated=0, group_mask=None):
         self.clock = clock
         self.hello = hello
         self.bad_crc = bad_crc
@@ -40,6 +40,7 @@ class MockSerial:
         self.interrupt_at = interrupt_at
         self.device = device
         self.simulated = simulated
+        self.group_mask = group_mask
         self.commands = []
         self.writes = bytearray()
         self.buffer = bytearray()
@@ -56,7 +57,9 @@ class MockSerial:
                     rev=1, simulated=self.simulated, mode="LOCAL",
                     state="FAULT" if self.fault else "RUNNING",
                     output=0 if self.fault else 1, drive_on=0 if self.fault else 1,
-                    channel_mask=2048, reason="DMA_TRANSFER_ERROR" if self.fault else "PIN_TEST_ON",
+                    channel_mask=2048 if self.group_mask is None else self.group_mask,
+                    reason="DMA_TRANSFER_ERROR" if self.fault else
+                           ("PIN_TEST_ON" if self.group_mask is None else "GROUP_TEST_ON"),
                     carrier_hz=40000, phase_steps=64, mod_hz=0, level=100, shape="POINT")
 
     def state(self):
@@ -81,9 +84,11 @@ class MockSerial:
             if self.wrong_ack:
                 self.append("ACK", frame.seq + 17, "HELLO", proto=3, boot=self.boot)
                 self.append("ACK", frame.seq, "PING", applied=1)
+            test_fields = (dict(firmware_mode=2, pin_channel=11) if self.group_mask is None
+                           else dict(firmware_mode=3, group_mask=self.group_mask))
             self.append("ACK", frame.seq, "HELLO", proto=3, boot=self.boot,
                         device=self.device, simulated=self.simulated, profile="CHANNEL_TEST",
-                        fw_id="F103_20261010", firmware_mode=2, pin_channel=11, on_ms=0)
+                        fw_id="F103_20261010", on_ms=0, **test_fields)
             self.state()
         else:
             self.append("ACK", frame.seq, frame.verb, boot=self.boot, applied=1)
@@ -154,6 +159,16 @@ class SerialDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["decode_errors"], 1)
         self.assertIn(b"STATE*0000", raw)
         self.assertTrue(any("error" in frame for frame in frames))
+
+    def test_group_readback_preserves_all_four_cn1_mappings(self):
+        _, result, states, *_ = self.run_diagnostics(group_mask=0x3300)
+        self.assertEqual(result["outcome"], "completed")
+        self.assertEqual((result["firmware_mode"], result["group_mask"], result["pin_channel"]),
+                         ("3", "13056", None))
+        self.assertEqual((states[0]["mcu_pins"], states[0]["pcb_channels"], states[0]["cn1_pins"]),
+                         ("PB8;PB9;PB12;PB13", "CH12;CH13;CH8;CH9", "CN1-11;CN1-12;CN1-13;CN1-14"))
+        self.assertEqual(states[0]["channel_mask"], "0x3300")
+        self.assertEqual(states[0]["reason"], "GROUP_TEST_ON")
 
     def test_no_response_is_bounded_and_never_stops(self):
         transport, result, *_ = self.run_diagnostics(hello=False)

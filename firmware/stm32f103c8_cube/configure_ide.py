@@ -55,7 +55,9 @@ def configure_profiles(root):
                 for item in list(option):
                     if item.get("value", "").split("=", 1)[0] in (
                             "F103_CHANNEL_TEST", "F103_PIN_TEST", "F103_FIRMWARE_MODE",
-                            "F103_PIN_TEST_CHANNEL", "F103_PIN_TEST_ON_MS"):
+                            "F103_PIN_TEST_CHANNEL", "F103_PIN_TEST_ON_MS",
+                            "F103_GROUP_TEST", "F103_FIXED_TEST", "F103_GROUP_TEST_MASK",
+                            "F103_GROUP_TEST_ON_MS", "F103_FIXED_TEST_MASK", "F103_FIXED_TEST_ON_MS"):
                         option.remove(item)
         for chain in config.iter("toolChain"):
             for option in chain.findall("option"):

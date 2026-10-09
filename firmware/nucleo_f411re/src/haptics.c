@@ -302,6 +302,9 @@ static void process(Device *d)
 #if F103_PIN_TEST
         append(" pin_channel=%u on_ms=%lu", F103_PIN_TEST_CHANNEL,
                (unsigned long)F103_PIN_TEST_ON_MS);
+#elif F103_GROUP_TEST
+        append(" group_mask=%u on_ms=%lu", (unsigned)F103_GROUP_TEST_MASK,
+               (unsigned long)F103_GROUP_TEST_ON_MS);
 #endif
 #endif
         send_frame(d); snapshot(d); return;

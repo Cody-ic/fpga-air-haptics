@@ -72,6 +72,8 @@ class IDEProfileTests(unittest.TestCase):
                          if o.get("superClass")==module.BASE+"compiler.option.definedsymbols")
             ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_PIN_TEST_CHANNEL=2")
             ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_PIN_TEST_ON_MS=1000")
+            ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_GROUP_TEST_MASK=4")
+            ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_GROUP_TEST_ON_MS=1000")
             module.configure_profiles(tree.getroot())
             self.assertFalse(any(v.get("value", "").startswith("F103_") for v in symbols))
             before = ET.tostring(tree.getroot())

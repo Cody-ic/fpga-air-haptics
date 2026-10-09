@@ -167,7 +167,8 @@ def observe(transport, output_dir, *, max_seconds=10.0, reply_timeout=2.0,
                 raise DiagnosticError("握手不是有效的真实 F103 HAP3 设备")
             stats.update(handshake=True, boot=fields["boot"], profile=fields.get("profile", "BUSINESS"),
                          fw_id=fields.get("fw_id"), firmware_mode=fields.get("firmware_mode"),
-                         pin_channel=fields.get("pin_channel"), on_ms=fields.get("on_ms"))
+                         pin_channel=fields.get("pin_channel"), group_mask=fields.get("group_mask"),
+                         on_ms=fields.get("on_ms"))
             if latest_state is not None:
                 check_boot(latest_state)
 

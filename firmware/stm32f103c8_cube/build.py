@@ -30,13 +30,23 @@ def main():
                           help="Build the existing sequential diagnostic profile")
     profiles.add_argument("--pin-test", action="store_true",
                           help="Build the parameterized fixed-pin diagnostic profile")
+    profiles.add_argument("--group-test", action="store_true",
+                          help="Build simultaneous fixed-mask outputs (mode 3)")
     parser.add_argument("--test-channel", type=int, choices=range(16),
                         help="PinTest logical channel (2=PA8, 11=PB11); default from firmware_mode.h")
     parser.add_argument("--test-on-ms", type=int,
-                        help="PinTest duration in ms (0=continuous); default from firmware_mode.h")
+                        help="Fixed test duration in ms (0=continuous); default from firmware_mode.h")
+    parser.add_argument("--test-mask", type=lambda value: int(value, 0),
+                        help="GroupTest logical-channel bitmask, e.g. 0x3300; default from firmware_mode.h")
     args = parser.parse_args()
-    if not args.pin_test and (args.test_channel is not None or args.test_on_ms is not None):
-        parser.error("--test-channel/--test-on-ms require --pin-test")
+    if args.test_channel is not None and not args.pin_test:
+        parser.error("--test-channel requires --pin-test")
+    if args.test_mask is not None and not args.group_test:
+        parser.error("--test-mask requires --group-test")
+    if args.test_mask is not None and not 1 <= args.test_mask <= 0xffff:
+        parser.error("--test-mask must be 1..0xffff")
+    if args.test_on_ms is not None and not (args.pin_test or args.group_test):
+        parser.error("--test-on-ms requires --pin-test or --group-test")
     if args.test_on_ms is not None and not 0 <= args.test_on_ms <= 0x7fffffff:
         parser.error("--test-on-ms must be 0 (continuous) or positive and less than 2^31 milliseconds")
     gcc = find_gcc(args.gcc)
@@ -45,6 +55,8 @@ def main():
         output /= "business"
     elif args.pin_test:
         output /= "pin_test"
+    elif args.group_test:
+        output /= "group_test"
     elif args.channel_test:
         output /= "channel_test"
     output.mkdir(parents=True, exist_ok=True)
@@ -52,13 +64,16 @@ def main():
              "-std=c11", "-Wall", "-Wextra", "-Werror", "-fno-common",
              "-ffunction-sections", "-fdata-sections", "-fno-math-errno", "-fstack-usage",
              "-DUSE_HAL_DRIVER", "-DSTM32F103xB"]
-    for selected, mode in ((args.business, 0), (args.channel_test, 1), (args.pin_test, 2)):
+    for selected, mode in ((args.business, 0), (args.channel_test, 1), (args.pin_test, 2), (args.group_test, 3)):
         if selected:
             flags.append("-DF103_FIRMWARE_MODE=" + str(mode))
     if args.test_channel is not None:
         flags.append("-DF103_PIN_TEST_CHANNEL=" + str(args.test_channel))
     if args.test_on_ms is not None:
-        flags.append("-DF103_PIN_TEST_ON_MS=" + str(args.test_on_ms))
+        name = "F103_GROUP_TEST_ON_MS" if args.group_test else "F103_PIN_TEST_ON_MS"
+        flags.append("-D" + name + "=" + str(args.test_on_ms))
+    if args.test_mask is not None:
+        flags.append("-DF103_GROUP_TEST_MASK=" + str(args.test_mask))
     includes = ["Core/Inc", "Drivers/STM32F1xx_HAL_Driver/Inc",
                 "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
                 "Drivers/CMSIS/Device/ST/STM32F1xx/Include", "Drivers/CMSIS/Include"]

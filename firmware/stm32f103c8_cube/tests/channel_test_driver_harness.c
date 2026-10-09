@@ -151,16 +151,22 @@ static void off(void)
     assert(port_a.BRR == F103_GPIOA_MASK && port_b.BRR == F103_GPIOB_MASK);
 }
 
-#if F103_PIN_TEST
+#if F103_GROUP_TEST
+#define TEST_WAIT_REASON "GROUP_TEST_WAIT"
+#define TEST_ON_REASON "GROUP_TEST_ON"
+#define TEST_DONE_REASON "GROUP_TEST_DONE"
+#elif F103_PIN_TEST
+#define TEST_WAIT_REASON "PIN_TEST_WAIT"
 #define TEST_ON_REASON "PIN_TEST_ON"
+#define TEST_DONE_REASON "PIN_TEST_DONE"
 #else
 #define TEST_ON_REASON "CHANNEL_TEST_ON"
 #endif
 
-static void one_channel(unsigned index)
+static void enabled_channels(uint16_t expected_mask)
 {
     assert(playing && device.state == RUNNING && device.local);
-    assert(device.config.channel_mask == (uint16_t)(1u << index));
+    assert(device.config.channel_mask == expected_mask);
     assert(device.config.shape == POINT && !device.config.mod_hz && device.config.level == 100);
     assert(!device.config.cx_um && !device.config.cy_um && device.config.z_um == 150000);
     assert(!strcmp(device.reason, TEST_ON_REASON));
@@ -175,11 +181,12 @@ static void one_channel(unsigned index)
     uint32_t expected_ccr = DMA_CCR_EN | DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
         DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL | DMA_CCR_TEIE;
     assert(channel_a.CCR == expected_ccr && channel_b.CCR == expected_ccr);
+    assert(gpioa_idle == (0xa5e7u & (uint16_t)~F103_GPIOA_MASK));
     for (unsigned i = 0; i < HAP_CHANNELS; ++i) assert(channel_sample.phases[i] == 0);
     for (unsigned word = 0; word < 400; ++word) {
         bool high = (word & 1u) == 0;
-        uint16_t expected_b = index == 2u || !high ? 0u : (uint16_t)(1u << index);
-        uint16_t expected_a = gpioa_idle | (index == 2u && high ? F103_GPIOA_MASK : 0u);
+        uint16_t expected_b = high ? expected_mask & 0xfffbu : 0u;
+        uint16_t expected_a = gpioa_idle | (expected_mask & 4u && high ? (1u << 8u) : 0u);
         assert(channel_words_b[word & 1u] == expected_b);
         assert(channel_words_a[word & 1u] == expected_a);
     }
@@ -201,7 +208,7 @@ static void one_channel(unsigned index)
     }
     command(10, "SNAP");
     char mask[32];
-    snprintf(mask, sizeof(mask), "channel_mask=%u", 1u << index);
+    snprintf(mask, sizeof(mask), "channel_mask=%u", expected_mask);
     assert(strstr(serial_reply, mask) && strstr(serial_reply, TEST_ON_REASON));
 }
 
@@ -226,7 +233,7 @@ static void reject_controls(void)
     }
 }
 
-#if !F103_PIN_TEST
+#if !F103_FIXED_TEST
 int main(void)
 {
     fresh(0);
@@ -242,7 +249,7 @@ int main(void)
     for (unsigned index = 0; index < HAP_CHANNELS; ++index) {
         uint64_t start = F103_AUTOSTART_MS + index * (F103_CHANNEL_ON_MS + F103_CHANNEL_GAP_MS);
         poll(start);
-        one_channel(index);
+        enabled_channels((uint16_t)(1u << index));
         if (index == 0 || index == HAP_CHANNELS - 1u) reject_controls();
         assert(device.revision == index * 2u + 1u);
         command(2, "HELLO");
@@ -301,7 +308,7 @@ int main(void)
     service(); /* Servicing expired GAP must never start the next channel. */
     off();
     poll(channel_test_deadline_ms + 100u);
-    one_channel(1);
+    enabled_channels(2u);
 
     for (unsigned canceled = 0; canceled < 2; ++canceled) {
         fresh(0);
@@ -456,27 +463,35 @@ int main(void)
 #else
 int main(void)
 {
-    const unsigned target = F103_PIN_TEST_CHANNEL;
-    uint64_t late = F103_AUTOSTART_MS + (uint64_t)F103_PIN_TEST_ON_MS + 100000u;
-#if F103_PIN_TEST_ON_MS > 0
-    uint64_t done = F103_AUTOSTART_MS + (uint64_t)F103_PIN_TEST_ON_MS;
+    const uint16_t target = (uint16_t)F103_FIXED_TEST_MASK;
+    uint64_t late = F103_AUTOSTART_MS + (uint64_t)F103_FIXED_TEST_ON_MS + 100000u;
+#if F103_FIXED_TEST_ON_MS > 0
+    uint64_t done = F103_AUTOSTART_MS + (uint64_t)F103_FIXED_TEST_ON_MS;
 #endif
     fresh(0);
-    assert(channel_test_pending && !strcmp(device.reason,"PIN_TEST_WAIT"));
+    assert(channel_test_pending && !strcmp(device.reason,TEST_WAIT_REASON));
     command(1,"HELLO");
+    char selected[48], duration[48];
+#if F103_GROUP_TEST
+    snprintf(selected,sizeof(selected),"group_mask=%u",target);
+#else
+    snprintf(selected,sizeof(selected),"pin_channel=%u",F103_PIN_TEST_CHANNEL);
+#endif
+    snprintf(duration,sizeof(duration),"on_ms=%lu",(unsigned long)F103_FIXED_TEST_ON_MS);
+    assert(strstr(serial_reply,selected) && strstr(serial_reply,duration));
     reject_controls();
     poll(F103_AUTOSTART_MS-1u);
     off();
     poll(F103_AUTOSTART_MS);
-    one_channel(target);
+    enabled_channels(target);
     assert(device.revision==1);
-#if F103_PIN_TEST_ON_MS > 0
+#if F103_FIXED_TEST_ON_MS > 0
     assert(channel_test_deadline_ms==done);
 #endif
     command(2,"HELLO");
     command(3,"PING");
     reject_controls();
-#if F103_PIN_TEST_ON_MS > 0
+#if F103_FIXED_TEST_ON_MS > 0
     /* Timed profiles still close at their deadline while sending serial data. */
     poll(done-1u);
     service();
@@ -487,22 +502,22 @@ int main(void)
     tick_step_ms=0;
     off();
     assert(channel_test_expired && channel_test_pending && device.revision==1);
-    assert(device.config.channel_mask==(uint16_t)(1u<<target));
+    assert(device.config.channel_mask==target);
     Sample sample;
     assert(output_readback(&sample) && !sample.output && !sample.drive_on);
     channel_test_poll(device.now_ms);
     assert(!channel_test_pending && !channel_test_expired && !channel_test_on);
     assert(device.state==IDLE && device.revision==2 && !device.config.channel_mask);
-    assert(!strcmp(device.reason,"PIN_TEST_DONE"));
+    assert(!strcmp(device.reason,TEST_DONE_REASON));
     reject_controls();
     poll(late);
     off();
 #else
     /* The default never ends after the old 10-second burst or late polls. */
     poll(F103_AUTOSTART_MS + 10000u);
-    one_channel(target);
+    enabled_channels(target);
     poll(late);
-    one_channel(target);
+    enabled_channels(target);
     assert(channel_test_pending && channel_test_on && !channel_test_expired);
     assert(device.revision==1);
     serial_port.SR=USART_SR_TXE;
@@ -514,7 +529,7 @@ int main(void)
     /* Cross the actual 32-bit HAL tick boundary in service(), while the
      * foreground's extended uptime remains just before the wrap. */
     poll((uint64_t)UINT32_MAX - 1000u);
-    one_channel(target);
+    enabled_channels(target);
     interrupt_mask=1;
     virtual_tick=500u;
     service();
@@ -526,18 +541,18 @@ int main(void)
     assert(device.revision==1);
     interrupt_mask=0;
     poll(after_wrap);
-    one_channel(target);
+    enabled_channels(target);
     poll((uint64_t)UINT32_MAX * 2u + 100000u);
-    one_channel(target);
+    enabled_channels(target);
 #endif
 
-    /* STOP in WAIT, ON and late/deferred completion never restarts the pin. */
+    /* STOP in WAIT, ON and late/deferred completion never restarts the configured outputs. */
     for (unsigned stage=0;stage<3;++stage) {
         fresh(0);
         command(1,"HELLO");
         if (stage) poll(F103_AUTOSTART_MS);
         if (stage==2) {
-#if F103_PIN_TEST_ON_MS > 0
+#if F103_FIXED_TEST_ON_MS > 0
             virtual_tick=(uint32_t)done;
             service();
             assert(channel_test_expired);
@@ -548,7 +563,7 @@ int main(void)
         }
         command(2,"STOP");
         assert(!channel_test_pending && !channel_test_expired);
-#if F103_PIN_TEST_ON_MS > 0
+#if F103_FIXED_TEST_ON_MS > 0
         poll(late);
 #else
         poll(stage==2 ? (uint64_t)UINT32_MAX+200000u : late);
@@ -594,7 +609,7 @@ int main(void)
     device.config.shape=POINT;
     device.config.mod_hz=0;
     device.config.level=100;
-    device.config.channel_mask=(uint16_t)(1u<<target);
+    device.config.channel_mask=target;
     assert(!output_start(&device.config,0)); /* Cannot bypass mode ownership. */
     off();
     fresh(0);
@@ -602,14 +617,30 @@ int main(void)
     device.config.shape=POINT;
     device.config.mod_hz=0;
     device.config.level=100;
-    device.config.channel_mask=(uint16_t)(1u<<((target+1u)%HAP_CHANNELS));
-    assert(!output_start(&device.config,0)); /* Only the selected pin is allowed. */
+    device.config.channel_mask=(uint16_t)(target ^ 1u);
+    assert(!output_start(&device.config,0)); /* Only the configured mask is allowed. */
     channel_test_internal=false;
     off();
-#if F103_PIN_TEST_ON_MS > 0
-    printf("PinTest channel %u: static pair, timed burst, TX deadline and STOP/fault isolation passed\n",target);
+    for (unsigned invalid=0;invalid<5;++invalid) {
+        fresh(0);
+        channel_test_internal=true;
+        device.config.shape=POINT;
+        device.config.mod_hz=0;
+        device.config.level=100;
+        device.config.channel_mask=target;
+        if (invalid==0) device.config.channel_mask=0;
+        if (invalid==1) device.config.shape=CIRCLE;
+        if (invalid==2) device.config.mod_hz=200;
+        if (invalid==3) device.config.level=30;
+        if (invalid==4) device.config.cx_um=1000;
+        assert(!output_start(&device.config,0));
+        channel_test_internal=false;
+        off();
+    }
+#if F103_FIXED_TEST_ON_MS > 0
+    printf("FixedTest mask 0x%04X: static pair, timed burst, TX deadline and STOP/fault isolation passed\n",target);
 #else
-    printf("PinTest channel %u: static pair, continuous output/tick wrap and STOP/fault isolation passed\n",target);
+    printf("FixedTest mask 0x%04X: static pair, continuous output/tick wrap and STOP/fault isolation passed\n",target);
 #endif
     return 0;
 }

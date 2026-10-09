@@ -121,7 +121,7 @@ static void service(void)
 {
     IWDG->KR = 0xaaaau;
 #if F103_CHANNEL_TEST
-#if !F103_PIN_TEST || F103_PIN_TEST_ON_MS > 0
+#if !F103_FIXED_TEST || F103_FIXED_TEST_ON_MS > 0
     /* Formatting/transmission can span the ON deadline. Close the pins here,
      * without reentering protocol or changing a partially serialized config. */
     uint64_t now_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
@@ -175,12 +175,13 @@ static bool output_start(const Config *c, uint64_t us)
 {
     app_f103_shutdown();
 #if F103_CHANNEL_TEST
-    if (!channel_test_internal || !c->channel_mask ||
-        (c->channel_mask & (c->channel_mask - 1u)) || c->shape != POINT ||
+    if (!channel_test_internal || !c->channel_mask || c->shape != POINT ||
         c->mod_hz || c->level != 100 || c->cx_um || c->cy_um || c->z_um != 150000)
         return false;
-#if F103_PIN_TEST
-    if (c->channel_mask != (uint16_t)(1u << F103_PIN_TEST_CHANNEL)) return false;
+#if F103_FIXED_TEST
+    if (c->channel_mask != (uint16_t)F103_FIXED_TEST_MASK) return false;
+#else
+    if (c->channel_mask & (c->channel_mask - 1u)) return false;
 #endif
 #endif
     if (pending_fault || !boot_ok || SystemCoreClock != 64000000u) return false;
@@ -425,8 +426,8 @@ static void channel_test_poll(uint64_t now_ms)
         app_f103_shutdown();
         return;
     }
-#if F103_PIN_TEST && F103_PIN_TEST_ON_MS == 0
-    /* Continuous PinTest has no ON deadline; STOP/fault still cancels it. */
+#if F103_FIXED_TEST && F103_FIXED_TEST_ON_MS == 0
+    /* Continuous fixed tests have no ON deadline; STOP/fault still cancels. */
     if (channel_test_on) return;
 #endif
     if (!channel_test_expired && now_ms < channel_test_deadline_ms) return;
@@ -445,9 +446,9 @@ static void channel_test_poll(uint64_t now_ms)
         channel_test_on = false;
         device.config.channel_mask = 0;
         ++device.revision;
-#if F103_PIN_TEST
+#if F103_FIXED_TEST
         channel_test_pending = false;
-        device.reason = "PIN_TEST_DONE";
+        device.reason = F103_FIXED_TEST_DONE_REASON;
 #else
         device.reason = "CHANNEL_TEST_GAP";
         channel_test_deadline_ms = now_ms + F103_CHANNEL_GAP_MS;
@@ -462,23 +463,23 @@ static void channel_test_poll(uint64_t now_ms)
         device.config.z_um = 150000;
         device.config.mod_hz = 0;
         device.config.level = 100;
-#if F103_PIN_TEST
-        device.config.channel_mask = (uint16_t)(1u << F103_PIN_TEST_CHANNEL);
+#if F103_FIXED_TEST
+        device.config.channel_mask = (uint16_t)F103_FIXED_TEST_MASK;
 #else
         device.config.channel_mask = (uint16_t)(1u << channel_test_index);
 #endif
         const char *error = config_compile(&device.config);
         if (error) fail(error);
         else {
-            /* No focusing/phase solver in the single-channel electrical test. */
+            /* Static electrical tests do not use the focusing/phase solver. */
             ++device.revision;
             if (output_start(&device.config, 0)) {
                 device.state = RUNNING;
                 channel_test_on = true;
                 ++channel_test_index;
-#if F103_PIN_TEST
-                device.reason = "PIN_TEST_ON";
-                channel_test_deadline_ms = now_ms + F103_PIN_TEST_ON_MS;
+#if F103_FIXED_TEST
+                device.reason = F103_FIXED_TEST_ON_REASON;
+                channel_test_deadline_ms = now_ms + F103_FIXED_TEST_ON_MS;
 #else
                 device.reason = "CHANNEL_TEST_ON";
                 channel_test_deadline_ms = now_ms + F103_CHANNEL_ON_MS;
@@ -514,8 +515,8 @@ static void startup_schedule(uint64_t now_ms)
     device.local = true; /* Observing the test via HELLO must not stop it. */
     device.config.channel_mask = 0;
     if (channel_test_pending) {
-#if F103_PIN_TEST
-        device.reason = "PIN_TEST_WAIT";
+#if F103_FIXED_TEST
+        device.reason = F103_FIXED_TEST_WAIT_REASON;
 #else
         device.reason = "CHANNEL_TEST_WAIT";
 #endif

@@ -441,11 +441,42 @@ class F103Tests(unittest.TestCase):
             self.assertNotEqual(result.returncode,0,extra)
             self.assertIn("PinTest",result.stderr)
 
+    def test_group_profile_simultaneous_channels_and_pa8_mapping(self):
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        for label, extra in (("rows_6_7",()),
+                             ("rows_6_7_timed",("-DF103_GROUP_TEST_ON_MS=2000",)),
+                             ("pa8_pb11",("-DF103_GROUP_TEST_MASK=0x0804u",
+                                           "-DF103_GROUP_TEST_ON_MS=1500")),
+                             ("pa8_pb11_continuous",("-DF103_GROUP_TEST_MASK=0x0804u",
+                                                      "-DF103_GROUP_TEST_ON_MS=0"))):
+            executable=ROOT/"build"/("test_group_"+label+(".exe" if os.name=="nt" else ""))
+            subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+                "-ffunction-sections","-fdata-sections","-DSTM32F103xB","-DUSE_HAL_DRIVER",
+                "-DF103_FIRMWARE_MODE=3",*extra,*("-I"+p for p in includes),
+                "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+                "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+                "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+            subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_invalid_group_profile_parameters_fail_before_build(self):
+        for extra in (("-DF103_GROUP_TEST_MASK=0",),("-DF103_GROUP_TEST_MASK=0x10000u",),
+                      ("-DF103_GROUP_TEST_MASK=-1",),("-DF103_GROUP_TEST_MASK=-1u",),
+                      ("-DF103_GROUP_TEST_ON_MS=-1",),("-DF103_GROUP_TEST_ON_MS=-1u",),
+                      ("-DF103_GROUP_TEST_ON_MS=0x80000000u",)):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                "-DF103_FIRMWARE_MODE=3",*extra,"-x","c","-"],cwd=ROOT,
+                input='#include "app_f103.h"\n',text=True,capture_output=True)
+            self.assertNotEqual(result.returncode,0,extra)
+            self.assertIn("GroupTest",result.stderr)
+
     def test_single_firmware_mode_selects_shared_translation_units(self):
         # All application files include haptics.h; mode must be known before
         # the shared protocol core, even where app_f103.h is not included.
-        for mode in (None, 0, 1, 2):
-            expected=2 if mode is None else mode
+        for mode in (None, 0, 1, 2, 3):
+            expected=3 if mode is None else mode
             defines=[] if mode is None else ["-DF103_FIRMWARE_MODE="+str(mode)]
             source=(
                 '#include "haptics.h"\n'
@@ -453,11 +484,13 @@ class F103Tests(unittest.TestCase):
                 f'_Static_assert(F103_FIRMWARE_MODE=={expected}, "mode");\n'
                 f'_Static_assert(F103_CHANNEL_TEST=={int(expected!=0)}, "backend");\n'
                 f'_Static_assert(F103_PIN_TEST=={int(expected==2)}, "fixed pin");\n'
+                f'_Static_assert(F103_GROUP_TEST=={int(expected==3)}, "group");\n'
+                f'_Static_assert(F103_FIXED_TEST=={int(expected in (2,3))}, "fixed backend");\n'
             )
             subprocess.run([self.compiler,"-std=c11","-Wall","-Wextra","-Werror",
                 "-fsyntax-only","-ICore/Inc",*defines,"-x","c","-"],cwd=ROOT,
                 input=source,text=True,check=True)
-        for defines in (("-DF103_FIRMWARE_MODE=-1",), ("-DF103_FIRMWARE_MODE=3",),
+        for defines in (("-DF103_FIRMWARE_MODE=-1",), ("-DF103_FIRMWARE_MODE=4",),
                         ("-DF103_FIRMWARE_MODE=-1u",), ("-DF103_CHANNEL_TEST=0",),
                         ("-DF103_PIN_TEST=1",)):
             result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
