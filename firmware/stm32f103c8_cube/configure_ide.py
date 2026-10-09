@@ -1,20 +1,69 @@
 """Restore application build options after CubeMX regenerates IDE metadata."""
 import argparse
+import copy
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import zlib
 
 ROOT = Path(__file__).resolve().parent
 NAME = "haptics_f103c8"
 BASE = "com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c."
 
 
-def configure_run():
+def configure_profiles(root):
+    """Keep business and diagnosis in separate CDT build directories."""
+    settings = root.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']")
+    debug = next(c for c in settings.findall("cconfiguration")
+                 if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "Debug")
+    channel = next((c for c in settings.findall("cconfiguration")
+                    if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "ChannelTest"), None)
+    if channel is None:
+        channel = copy.deepcopy(debug)
+        ids = {}
+        for element in channel.iter():
+            old = element.get("id")
+            if old and element.tag != "extension":
+                base = old.rstrip(".").rsplit(".", 1)[0]
+                ids[old] = base+"."+str(zlib.crc32((old+"ChannelTest").encode("utf-8")))
+        for element in channel.iter():
+            for key, value in list(element.attrib.items()):
+                # Replace references as well as IDs, including folderInfo's final dot.
+                for old in sorted(ids, key=len, reverse=True):
+                    if value == old:
+                        value = ids[old]
+                        break
+                element.set(key, value)
+        channel.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").set("name", "ChannelTest")
+        channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set("name", "ChannelTest")
+        channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set(
+            "description", "Single-channel diagnostic firmware; no graphics commands")
+        for builder in channel.iter("builder"):
+            builder.set("buildPath", "${workspace_loc:/"+NAME+"}/ChannelTest")
+        settings.append(channel)
+    for config in settings.findall("cconfiguration"):
+        mode = config.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")
+        for option in config.iter("option"):
+            if option.get("superClass") == BASE+"compiler.option.definedsymbols":
+                for item in list(option):
+                    if item.get("value", "").split("=", 1)[0] == "F103_CHANNEL_TEST":
+                        option.remove(item)
+                ET.SubElement(option, "listOptionValue", builtIn="false",
+                              value="F103_CHANNEL_TEST="+str(int(mode == "ChannelTest")))
+        for chain in config.iter("toolChain"):
+            for option in chain.findall("option"):
+                if option.get("superClass") == "com.st.stm32cube.ide.mcu.gnu.managedbuild.option.runtimelibrary_c":
+                    option.set("id", option.get("superClass")+"."+chain.get("id").rsplit(".", 1)[-1])
+
+
+def configure_run(profile="Debug"):
     """Restore the green Run button after CubeMX creates its ST-only launch."""
-    configuration = next(ET.parse(ROOT / ".cproject").getroot().iter("cconfiguration"))
+    configuration = next(c for c in ET.parse(ROOT / ".cproject").getroot().iter("cconfiguration")
+                         if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == profile)
+    local_config = "haptics_channel_test.local.cfg" if profile == "ChannelTest" else "haptics_run.local.cfg"
     launch = ET.Element("launchConfiguration", type="org.eclipse.cdt.launch.applicationLaunchType")
     attributes = (
         ("string", "org.eclipse.cdt.launch.PROGRAM_NAME", "${stm32cubeide_openocd_path}/openocd.exe"),
-        ("string", "org.eclipse.cdt.launch.PROGRAM_ARGUMENTS", "-f haptics_run.local.cfg"),
+        ("string", "org.eclipse.cdt.launch.PROGRAM_ARGUMENTS", "-f "+local_config),
         ("string", "org.eclipse.cdt.launch.PROJECT_ATTR", NAME),
         ("string", "org.eclipse.cdt.launch.WORKING_DIRECTORY", "${workspace_loc:/"+NAME+"}"),
         ("int", "org.eclipse.cdt.launch.ATTR_BUILD_BEFORE_LAUNCH_ATTR", "1"),
@@ -31,7 +80,8 @@ def configure_run():
         field = ET.SubElement(launch, "listAttribute", key=key)
         ET.SubElement(field, "listEntry", value=value)
     ET.indent(launch)
-    (ROOT / (NAME+".launch")).write_text(
+    launch_name = NAME+" Channel Test" if profile == "ChannelTest" else NAME
+    (ROOT / (launch_name+".launch")).write_text(
         '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
         + ET.tostring(launch, encoding="unicode")+"\n", encoding="utf-8")
 
@@ -60,18 +110,20 @@ def configure_debug(ide_root):
             raise SystemExit("Unsupported character in tool/project path: " + value)
         return "{" + value + "}"
 
-    (ROOT / "haptics_run.local.cfg").write_text(
-        f"add_script_search_dir {tcl_path(scripts[-1])}\n"
-        f"source {tcl_path(ROOT / (NAME + '.cfg'))}\n"
-        "gdb_port disabled\ntcl_port disabled\ntelnet_port disabled\n"
-        f"set elf {tcl_path(ROOT / 'Debug' / (NAME + '.elf'))}\n"
-        f"set image {tcl_path(ROOT / 'Debug' / (NAME + '.flash.bin'))}\n"
-        "if {![file exists $elf]} { error {Build the Debug configuration first.} }\n"
-        f"exec {tcl_path(objcopies[-1])} -O binary --gap-fill 0xff $elf $image\n"
-        "if {[file size $image] <= 0 || [file size $image] > 0xfc00} {\n"
-        "    error {Firmware exceeds the 63 KB application area; boot journal preserved.}\n"
-        "}\n"
-        "program $image verify reset exit 0x08000000\n", encoding="utf-8")
+    for profile, filename in (("Debug", "haptics_run.local.cfg"),
+                              ("ChannelTest", "haptics_channel_test.local.cfg")):
+        (ROOT / filename).write_text(
+            f"add_script_search_dir {tcl_path(scripts[-1])}\n"
+            f"source {tcl_path(ROOT / (NAME + '.cfg'))}\n"
+            "gdb_port disabled\ntcl_port disabled\ntelnet_port disabled\n"
+            f"set elf {tcl_path(ROOT / profile / (NAME + '.elf'))}\n"
+            f"set image {tcl_path(ROOT / profile / (NAME + '.flash.bin'))}\n"
+            f"if {{![file exists $elf]}} {{ error {{Build the {profile} configuration first.}} }}\n"
+            f"exec {tcl_path(objcopies[-1])} -O binary --gap-fill 0xff $elf $image\n"
+            "if {[file size $image] <= 0 || [file size $image] > 0xfc00} {\n"
+            "    error {Firmware exceeds the 63 KB application area; boot journal preserved.}\n"
+            "}\n"
+            "program $image verify reset exit 0x08000000\n", encoding="utf-8")
 
 
 def main():
@@ -96,6 +148,7 @@ def main():
                 option.set("id", key+"."+chain.get("id").rsplit(".", 1)[-1])
                 option.set("valueType", "enumerated")
                 option.set("value", key+".value.nano_c")
+            configure_profiles(root)
             for option in root.iter("option"):
                 super_class = option.get("superClass", "")
                 if super_class == BASE+"compiler.option.optimization.level":
@@ -122,6 +175,7 @@ def main():
             prolog += '<?fileVersion 4.0.0?>\n'
         path.write_text(prolog+ET.tostring(root,encoding="unicode"),encoding="utf-8")
     configure_run()
+    configure_run("ChannelTest")
     if args.cubeide:
         configure_debug(args.cubeide)
 

@@ -9,6 +9,9 @@
 #define F103_GPIOB_MASK 0xfffbu /* PB2/BOOT1 is not an array output. */
 #define F103_GPIOA_MASK (1u << 8u) /* Logical channel 2 uses exposed PA8. */
 #define F103_AUTOSTART_MS 3000u
+#define F103_AUTO_RUN_LIMIT_MS 10000u /* Bound unattended prototype startup. */
+#define F103_CHANNEL_ON_MS 2000u
+#define F103_CHANNEL_GAP_MS 1000u
 #define F103_LOOKAHEAD 4u
 
 void app_f103_init(void);

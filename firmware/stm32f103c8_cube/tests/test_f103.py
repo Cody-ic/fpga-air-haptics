@@ -298,6 +298,20 @@ class F103Tests(unittest.TestCase):
             "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
         subprocess.run([str(executable)],cwd=ROOT,check=True)
 
+    def test_channel_diagnostic_profile(self):
+        executable=ROOT/"build"/("test_channel_driver.exe" if os.name == "nt" else "test_channel_driver")
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+            "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+            "-ffunction-sections","-fdata-sections",
+            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_CHANNEL_TEST=1",*("-I"+p for p in includes),
+            "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+            "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+            "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+        subprocess.run([str(executable)],cwd=ROOT,check=True)
+
     def test_adc_and_uptime_format(self):
         self.configure()
         self.command("CAPTURE")

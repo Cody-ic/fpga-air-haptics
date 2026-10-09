@@ -27,8 +27,19 @@ static volatile int adc_result;
 static bool adc_busy;
 static uint32_t last_tick;
 static uint64_t uptime_ms;
+#if F103_CHANNEL_TEST
+static volatile bool channel_test_pending;
+static volatile bool channel_test_internal;
+static bool channel_test_on;
+static unsigned channel_test_index;
+static uint64_t channel_test_deadline_ms;
+#else
 static uint64_t autostart_deadline_ms;
 static bool autostart_pending;
+static uint64_t auto_run_deadline_ms;
+static volatile bool auto_run_pending;
+#endif
+static uint32_t startup_reset_flags;
 volatile uint32_t render_max_cycles;
 volatile uint32_t prepare_max_cycles;
 static void service(void);
@@ -50,11 +61,19 @@ void app_f103_shutdown(void)
     NVIC_ClearPendingIRQ(DMA1_Channel5_IRQn);
     playing = false; refill = false;
     ready[0] = ready[1] = false;
+#if F103_CHANNEL_TEST
+    if (!channel_test_internal) channel_test_pending = false;
+#else
+    auto_run_pending = false;
+#endif
     unlock(p);
 }
 
 static void fail(const char *reason)
 {
+#if F103_CHANNEL_TEST
+    channel_test_pending = false; /* IRQ faults override internal transitions too. */
+#endif
     app_f103_shutdown();
     pending_fault = reason;
 }
@@ -117,6 +136,12 @@ static void service(void)
 static bool output_start(const Config *c, uint64_t us)
 {
     app_f103_shutdown();
+#if F103_CHANNEL_TEST
+    if (!channel_test_internal || !c->channel_mask ||
+        (c->channel_mask & (c->channel_mask - 1u)) || c->shape != POINT ||
+        c->mod_hz || c->level != 100 || c->cx_um || c->cy_um || c->z_um != 150000)
+        return false;
+#endif
     if (pending_fault || !boot_ok || SystemCoreClock != 64000000u) return false;
     playing_config = c;
     /* Keep button pull-ups and every non-array GPIOA output latch unchanged. */
@@ -149,12 +174,20 @@ static bool output_start(const Config *c, uint64_t us)
     DMA1_Channel2->CCR = DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
         DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL |
         DMA_CCR_HTIE | DMA_CCR_TCIE | DMA_CCR_TEIE;
+    uint32_t p = lock();
+    /* A UART/DMA fault may have arrived while both banks were rendered. */
+    if (pending_fault || !boot_ok || SystemCoreClock != 64000000u) {
+        app_f103_shutdown();
+        unlock(p);
+        return false;
+    }
     __DMB();
     playing = true;
     DMA1_Channel5->CCR |= DMA_CCR_EN;
     DMA1_Channel2->CCR |= DMA_CCR_EN;
     TIM1->DIER = TIM_DIER_UDE | TIM_DIER_CC1DE;
     TIM1->CR1 = TIM_CR1_CEN;
+    unlock(p);
     return true;
 }
 
@@ -276,6 +309,7 @@ static unsigned buttons(uint64_t now)
     return events;
 }
 
+#if !F103_CHANNEL_TEST
 static void autostart_poll(uint64_t now_ms, bool user_action)
 {
     if (!autostart_pending) return;
@@ -289,10 +323,106 @@ static void autostart_poll(uint64_t now_ms, bool user_action)
     autostart_pending = false; /* STOP, PAUSE and faults never schedule a retry. */
     hap_toggle_mode(&device);
     hap_local_button(&device, false);
+    if (playing && device.state == RUNNING) {
+        auto_run_deadline_ms = now_ms + F103_AUTO_RUN_LIMIT_MS;
+        auto_run_pending = true;
+    }
+}
+
+static void auto_run_poll(uint64_t now_ms)
+{
+    if (!auto_run_pending || now_ms < auto_run_deadline_ms) return;
+    /* Every explicit stop, pause, fault or new start cancels this deadline. */
+    hap_local_stop(&device);
+    device.reason = "AUTO_RUN_LIMIT";
+}
+#else
+static void channel_test_poll(uint64_t now_ms)
+{
+    if (!channel_test_pending) return;
+    if (!boot_ok || pending_fault || device.state == FAULT) {
+        channel_test_pending = false;
+        app_f103_shutdown();
+        return;
+    }
+    if (now_ms < channel_test_deadline_ms) return;
+    /* The permission spans only our synchronous off/configure/start transition. */
+    channel_test_internal = true;
+    app_f103_shutdown();
+    device.state = IDLE;
+    device.elapsed_us = 0;
+    device.latched.output = device.latched.drive_on = false;
+    if (channel_test_on) {
+        channel_test_on = false;
+        device.config.channel_mask = 0;
+        ++device.revision;
+        device.reason = "CHANNEL_TEST_GAP";
+        channel_test_deadline_ms = now_ms + F103_CHANNEL_GAP_MS;
+    } else if (channel_test_index == HAP_CHANNELS) {
+        channel_test_pending = false;
+        device.reason = "CHANNEL_TEST_DONE";
+    } else {
+        config_default(&device.config);
+        device.config.shape = POINT;
+        device.config.cx_um = device.config.cy_um = 0;
+        device.config.z_um = 150000;
+        device.config.mod_hz = 0;
+        device.config.level = 100;
+        device.config.channel_mask = (uint16_t)(1u << channel_test_index);
+        const char *error = config_compile(&device.config);
+        if (error) fail(error);
+        else {
+            Sample sample;
+            float remaining;
+            geometry_sample(&device.config, 0, &sample, &remaining);
+            for (unsigned i = 0; i < HAP_CHANNELS; ++i)
+                device.config.phase_offsets[i] = (uint8_t)((64u - phase_solve_channel(&sample, i)) & 63u);
+            ++device.revision;
+            if (output_start(&device.config, 0)) {
+                device.state = RUNNING;
+                device.reason = "CHANNEL_TEST_ON";
+                channel_test_on = true;
+                ++channel_test_index;
+                channel_test_deadline_ms = now_ms + F103_CHANNEL_ON_MS;
+            } else if (!pending_fault) fail("OUTPUT_START_FAILED");
+        }
+    }
+    channel_test_internal = false;
+}
+#endif
+
+static void capture_reset_flags(void)
+{
+    startup_reset_flags = RCC->CSR;
+    RCC->CSR |= RCC_CSR_RMVF; /* Clear sticky reset flags only after capturing. */
+}
+
+static void startup_schedule(uint64_t now_ms)
+{
+    /* Preserve boot-journal/ADC faults instead of replacing their diagnosis. */
+    if (!pending_fault && (startup_reset_flags & (RCC_CSR_IWDGRSTF | RCC_CSR_WWDGRSTF))) {
+        pending_fault = "WATCHDOG_RESET";
+        /* LOCAL HELLO preserves FAULT; the host must send STOP to acknowledge. */
+        device.local = true;
+    }
+#if F103_CHANNEL_TEST
+    channel_test_on = false;
+    channel_test_index = 0;
+    channel_test_internal = false;
+    channel_test_deadline_ms = now_ms + F103_AUTOSTART_MS;
+    channel_test_pending = boot_ok && !pending_fault;
+    device.local = true; /* Observing the test via HELLO must not stop it. */
+    device.config.channel_mask = 0;
+    if (channel_test_pending) device.reason = "CHANNEL_TEST_WAIT";
+#else
+    autostart_deadline_ms = now_ms + F103_AUTOSTART_MS;
+    autostart_pending = boot_ok && !pending_fault;
+#endif
 }
 
 void app_f103_init(void)
 {
+    capture_reset_flags();
     app_f103_shutdown();
     /* 50 MHz GPIO mode for 2.56 MHz DMA slot writes; keep SWD on PA13/PA14. */
     GPIOB->CRL = 0x33333433u; GPIOB->CRH = 0x33333333u; /* PB2 stays floating input. */
@@ -320,8 +450,7 @@ void app_f103_init(void)
     IWDG->KR = 0xaaaau;
     hap_init(&device, (Hardware){output_start, app_f103_shutdown, output_readback,
         send_bytes, service, capture_start, capture_poll, capture_cancel}, boot);
-    autostart_deadline_ms = (uint64_t)HAL_GetTick() + F103_AUTOSTART_MS;
-    autostart_pending = true;
+    startup_schedule(HAL_GetTick());
 }
 
 static void report_fault(void)
@@ -350,6 +479,9 @@ void app_f103_poll(void)
     uint32_t tick = HAL_GetTick();
     uptime_ms += (uint32_t)(tick-last_tick); last_tick = tick;
     report_fault();
+#if !F103_CHANNEL_TEST
+    auto_run_poll(uptime_ms);
+#endif
     hap_poll(&device, uptime_ms, false);
     bool command_received = rx_head != rx_tail;
     if (command_received) {
@@ -360,12 +492,16 @@ void app_f103_poll(void)
     }
     unsigned event = buttons(uptime_ms);
     if (event&1u) hap_local_stop(&device);
+#if F103_CHANNEL_TEST
+    channel_test_poll(uptime_ms);
+#else
     else {
         if (event&2u) hap_local_button(&device, true);
         if (event&4u) hap_local_button(&device, false);
     }
     if (event&8u) hap_toggle_mode(&device);
     autostart_poll(uptime_ms, command_received || event);
+#endif
     /* Reply serialization blocks foreground parsing, but continuously services DMA. */
     hap_poll(&device, uptime_ms, rx_head == rx_tail);
     HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, device.state == RUNNING ? GPIO_PIN_RESET : GPIO_PIN_SET);

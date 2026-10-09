@@ -11,6 +11,7 @@ static TIM_TypeDef timer;
 static DMA_TypeDef dma;
 static DMA_Channel_TypeDef channel_a, channel_b;
 static IWDG_TypeDef watchdog;
+static RCC_TypeDef reset_clock;
 static DWT_Type cycle_counter;
 static unsigned cleared_irqs;
 static char serial_reply[8192];
@@ -32,6 +33,7 @@ static void serial_send(const char *bytes, size_t size)
 #undef DMA1_Channel5
 #undef IWDG
 #undef DWT
+#undef RCC
 #define GPIOA (&port_a)
 #define GPIOB (&port_b)
 #define TIM1 (&timer)
@@ -40,6 +42,7 @@ static void serial_send(const char *bytes, size_t size)
 #define DMA1_Channel5 (&channel_b)
 #define IWDG (&watchdog)
 #define DWT (&cycle_counter)
+#define RCC (&reset_clock)
 #define __get_PRIMASK() 0u
 #define __disable_irq() ((void)0)
 #define __set_PRIMASK(value) ((void)(value))
@@ -76,12 +79,15 @@ static void fresh(void)
     memset(&dma, 0, sizeof(dma));
     memset(&channel_a, 0, sizeof(channel_a));
     memset(&channel_b, 0, sizeof(channel_b));
+    memset(&reset_clock, 0, sizeof(reset_clock));
     port_a.ODR = 0xa5e7u;
     pending_fault = NULL;
     boot_ok = true;
     SystemCoreClock = 64000000u;
     cleared_irqs = 0;
     serial_size = 0;
+    auto_run_pending = autostart_pending = false;
+    startup_reset_flags = 0;
     hap_init(&device, (Hardware){.start = output_start, .stop = app_f103_shutdown,
              .readback = output_readback, .send = serial_send}, "dma-register-test");
     device.config.level = 100;
@@ -112,6 +118,25 @@ static void off(const char *reason)
     assert(cleared_irqs & (1u << DMA1_Channel2_IRQn));
     assert(cleared_irqs & (1u << DMA1_Channel5_IRQn));
     if (reason) assert(pending_fault && !strcmp(pending_fault, reason));
+}
+
+static void command(unsigned seq, const char *verb)
+{
+    char frame[HAP_LINE + 1];
+    int size = snprintf(frame, sizeof(frame), "HAP3 CMD %u %s", seq, verb);
+    assert(size > 0 && size < (int)sizeof(frame) - 7);
+    uint16_t crc = hap_crc(frame, (size_t)size);
+    snprintf(frame + size, sizeof(frame) - (size_t)size, "*%04X\n", crc);
+    for (const char *p = frame; *p; ++p) hap_feed(&device, (uint8_t)*p);
+}
+
+static void configure_point(unsigned seq)
+{
+    command(seq, "CONFIG carrier_hz=40000 phase_steps=64 cx_um=0 cy_um=0 z_um=150000 "
+            "radius_um=20000 repeat_millihz=500 mod_hz=0 level=100 shape=POINT "
+            "path_xy_um=NONE path_closed=1 scan_paths=NONE blank_us=2000 "
+            "hw_rows=4 hw_cols=4 hw_pitch_um=11000 mapping=ROW_MAJOR_XY");
+    assert(device.configured && device.state == IDLE);
 }
 
 int main(void)
@@ -228,15 +253,105 @@ int main(void)
     assert(!playing && device.state == IDLE && !device.local);
     autostart_poll(F103_AUTOSTART_MS, false);
     assert(playing && device.state == RUNNING && device.local && !autostart_pending);
+    assert(auto_run_pending && auto_run_deadline_ms == F103_AUTOSTART_MS + F103_AUTO_RUN_LIMIT_MS);
+    auto_run_poll(auto_run_deadline_ms - 1u);
+    assert(playing && device.state == RUNNING);
+    auto_run_poll(auto_run_deadline_ms);
+    off(NULL);
+    assert(device.state == IDLE && !device.latched.output && !device.elapsed_us);
+    assert(!strcmp(device.reason, "AUTO_RUN_LIMIT") && !auto_run_pending);
+    autostart_poll(auto_run_deadline_ms + 1000u, false);
+    assert(!playing && !strcmp(device.reason, "AUTO_RUN_LIMIT"));
+
+    boot_wait();
+    autostart_poll(F103_AUTOSTART_MS, false);
     hap_local_button(&device, false);
-    assert(!playing && device.state == PAUSED);
+    assert(!playing && device.state == PAUSED && !auto_run_pending);
     autostart_poll(F103_AUTOSTART_MS + 10000u, false);
     assert(!playing && device.state == PAUSED);
     hap_local_button(&device, false);
     assert(playing && device.state == RUNNING);
+    auto_run_poll(F103_AUTOSTART_MS + F103_AUTO_RUN_LIMIT_MS + 1000u);
+    assert(playing && device.state == RUNNING && !auto_run_pending);
     hap_local_stop(&device);
     autostart_poll(F103_AUTOSTART_MS + 20000u, false);
     assert(!playing && device.state == IDLE);
+
+    boot_wait();
+    autostart_poll(F103_AUTOSTART_MS, false);
+    command(1, "HELLO");
+    command(2, "STOP");
+    assert(!playing && device.state == IDLE && !auto_run_pending);
+    command(3, "MODE value=REMOTE");
+    configure_point(4);
+    command(5, "START");
+    assert(playing && !device.local && device.state == RUNNING);
+    auto_run_poll(F103_AUTOSTART_MS + F103_AUTO_RUN_LIMIT_MS + 1000u);
+    assert(playing && device.state == RUNNING && !auto_run_pending);
+
+    boot_wait();
+    autostart_poll(F103_AUTOSTART_MS, false);
+    assert(output_start(&device.config, 0)); /* Any new start cancels the old limit. */
+    auto_run_poll(F103_AUTOSTART_MS + F103_AUTO_RUN_LIMIT_MS);
+    assert(playing && !auto_run_pending);
+
+    boot_wait();
+    autostart_poll(F103_AUTOSTART_MS, false);
+    fail("DMA_UNDERRUN");
+    assert(!auto_run_pending);
+    report_fault();
+    auto_run_poll(F103_AUTOSTART_MS + F103_AUTO_RUN_LIMIT_MS);
+    assert(device.state == FAULT && !strcmp(device.reason, "DMA_UNDERRUN"));
+
+    for (unsigned watchdog_kind = 0; watchdog_kind < 2; ++watchdog_kind) {
+        boot_wait();
+        reset_clock.CSR = RCC_CSR_LSION | RCC_CSR_PINRSTF |
+                          (watchdog_kind ? RCC_CSR_WWDGRSTF : RCC_CSR_IWDGRSTF);
+        uint32_t original = reset_clock.CSR;
+        capture_reset_flags();
+        assert(startup_reset_flags == original);
+        /* Fake RCC has no side effects: verify the flag-clear request preserves LSI. */
+        assert(reset_clock.CSR == (original | RCC_CSR_RMVF));
+        startup_schedule(17);
+        assert(!autostart_pending && !strcmp(pending_fault, "WATCHDOG_RESET"));
+        report_fault();
+        autostart_poll(17 + F103_AUTOSTART_MS, false);
+        assert(!playing && device.state == FAULT && !strcmp(device.reason, "WATCHDOG_RESET"));
+        command(1, "HELLO");
+        assert(device.state == FAULT && !strcmp(device.reason, "WATCHDOG_RESET"));
+        command(2, "MODE value=REMOTE");
+        assert(device.state == FAULT && strstr(serial_reply, "code=BUSY"));
+        hap_local_button(&device, false);
+        assert(!playing && device.state == FAULT);
+        command(3, "STOP");
+        assert(device.state == IDLE && !strcmp(device.reason, "NONE") && !autostart_pending);
+        command(4, "MODE value=REMOTE");
+        configure_point(5);
+        command(6, "START");
+        assert(playing && device.state == RUNNING && !auto_run_pending);
+    }
+
+    const char *init_faults[] = {"BOOT_JOURNAL_ERROR", "ADC_CALIBRATION_ERROR"};
+    for (unsigned i = 0; i < 2; ++i) {
+        boot_wait();
+        pending_fault = init_faults[i];
+        reset_clock.CSR = RCC_CSR_IWDGRSTF;
+        capture_reset_flags();
+        startup_schedule(0);
+        assert(!autostart_pending && pending_fault == init_faults[i]);
+        report_fault();
+        assert(device.state == FAULT && device.reason == init_faults[i]);
+    }
+
+    boot_wait();
+    reset_clock.CSR = RCC_CSR_PINRSTF | RCC_CSR_PORRSTF | RCC_CSR_SFTRSTF;
+    capture_reset_flags();
+    startup_schedule(17);
+    assert(autostart_pending && !pending_fault);
+    autostart_poll(17 + F103_AUTOSTART_MS - 1u, false);
+    assert(!playing);
+    autostart_poll(17 + F103_AUTOSTART_MS, false);
+    assert(playing && auto_run_pending);
 
     boot_wait();
     hap_local_stop(&device);
@@ -302,6 +417,6 @@ int main(void)
     hap_feed(&device, '\n');
     for (const char *p = hello; *p; ++p) hap_feed(&device, (uint8_t)*p);
     assert(device.connected && strstr(serial_reply, "ACK 1 HELLO"));
-    puts("Dual-port DMA, failures, first-HELLO recovery, readback and delayed startup passed");
+    puts("Dual-port DMA, failures, first-HELLO recovery, readback, bounded startup and watchdog reset passed");
     return 0;
 }

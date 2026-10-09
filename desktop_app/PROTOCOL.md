@@ -47,6 +47,8 @@ z = 0
 
 阵列中心为原点，列向 +x、行向 +y、发射方向为 +z。半间距位置可能包含 0.5 µm，板端定点实现需正确表示。
 
+F103 的专用逐通道诊断固件可返回 `profile=CHANNEL_TEST`，仅声明 `STOP,STATE,PHASE,GEOMETRY` 能力，另以 `adc_capture=1` 声明采样。HELLO/PING/SNAP 不干预板上有限测试序列，STOP 取消整轮；CONFIG/MODE/START/PAUSE/CALIBRATION 等返回 `CHANNEL_TEST_ONLY`。等待、停顿和完成状态允许 `channel_mask=0`，同时 `output=0`。普通图形客户端仍要求业务能力，应明确拒绝此固件；使用 F103 的专用只读监视脚本，不将零掩码当作业务配置导入。
+
 ### 2.1 可选三维坐标扩展
 
 三维设备使用 `mapping=EXPLICIT_XYZ geometry_id=<24位小写十六进制>`，声明 `GEOMETRY` 能力。`hw_rows*hw_cols` 仍为通道数，但行列与间距不能替代实际坐标。HELLO、CONFIG、STATE 均带同一标识，固件拒绝不匹配的 CONFIG。

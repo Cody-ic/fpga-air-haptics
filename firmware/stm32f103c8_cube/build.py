@@ -22,14 +22,17 @@ def find_gcc(explicit=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gcc")
+    parser.add_argument("--channel-test", action="store_true",
+                        help="Build the isolated single-channel diagnostic profile")
     args = parser.parse_args()
     gcc = find_gcc(args.gcc)
-    output = ROOT / "build"
-    output.mkdir(exist_ok=True)
+    output = ROOT / "build" / "channel_test" if args.channel_test else ROOT / "build"
+    output.mkdir(parents=True, exist_ok=True)
     flags = ["-mcpu=cortex-m3", "-mthumb", "-mfloat-abi=soft", "-O2", "-g3",
              "-std=c11", "-Wall", "-Wextra", "-Werror", "-fno-common",
              "-ffunction-sections", "-fdata-sections", "-fno-math-errno", "-fstack-usage",
-             "-DUSE_HAL_DRIVER", "-DSTM32F103xB"]
+             "-DUSE_HAL_DRIVER", "-DSTM32F103xB",
+             "-DF103_CHANNEL_TEST=" + str(int(args.channel_test))]
     includes = ["Core/Inc", "Drivers/STM32F1xx_HAL_Driver/Inc",
                 "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
                 "Drivers/CMSIS/Device/ST/STM32F1xx/Include", "Drivers/CMSIS/Include"]
@@ -45,7 +48,8 @@ def main():
         objects.append(str(obj.relative_to(ROOT)))
     elf = output / "haptics_f103c8.elf"
     subprocess.run([str(gcc), *flags, "-Thaptics_memory.ld", "--specs=nosys.specs", "--specs=nano.specs",
-                    "-Wl,--gc-sections,-Map=build/haptics_f103c8.map,--print-memory-usage",
+                    "-Wl,--gc-sections,-Map=" + (output / "haptics_f103c8.map").relative_to(ROOT).as_posix()
+                    + ",--print-memory-usage",
                     *objects, "-Wl,--start-group", "-lc", "-lm", "-Wl,--end-group", "-o", str(elf.relative_to(ROOT))],
                    cwd=ROOT, check=True)
     subprocess.run([str(gcc.with_name("arm-none-eabi-size" + gcc.suffix)), str(elf.relative_to(ROOT))],
