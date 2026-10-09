@@ -84,6 +84,30 @@ class F103Tests(unittest.TestCase):
         # Reconstruct logical channels from physical PB pins and PA8.
         return [b|(((a>>8)&1)<<2) for b,a in zip(words_b,words_a)],sample
 
+    def reference_wave(self, config, sample, start_us, mask=0xffff):
+        # Independent per-channel edge state machine; not cached carrier copies.
+        high = [False]*16
+        words = []
+        for index in range(self.half_words):
+            cycle, slot = divmod(index, 64)
+            time_us = start_us + cycle*25
+            density = ((time_us//25 % 100)*config.level) % 100 + config.level >= 100
+            modulation = not config.mod_hz or ((time_us % 1000000)*config.mod_hz) % 1000000 < 500000
+            enabled = sample.scan_on and config.level > 0 and density and modulation
+            for channel, phase in enumerate(sample.phases):
+                position = (slot + phase) % 64
+                if not cycle or not mask & (1 << channel) or position == 32:
+                    high[channel] = False
+                elif position == 0:
+                    high[channel] = enabled
+            words.append(sum(1 << ch for ch, value in enumerate(high) if value))
+        return words
+
+    def assert_cycle_readback(self, words):
+        expected = sum(1 << cycle for cycle in range(self.half_words//64)
+                       if any(words[cycle*64:(cycle+1)*64]))
+        self.assertEqual(self.dll.test_active_cycles(), expected)
+
     def test_limits_and_handshake(self):
         fields=self.command("HELLO")[0].fields
         self.assertEqual(fields["device"],"STM32F103C8T6")
@@ -135,9 +159,11 @@ class F103Tests(unittest.TestCase):
         expected=tuple(focus_phases(Config(shape="POINT",level=100,mod_hz=0),(0,0,150),self.array))
         self.assertEqual(tuple(sample.phases),expected)
         for channel,phase in enumerate(sample.phases):
-            bits=[(w>>channel)&1 for w in words[64:128]]
+            bits=[(w>>channel)&1 for w in words[128:192]]
             self.assertEqual(sum(bits),32)
             self.assertEqual(bits,[int(((slot+phase)&63)<32) for slot in range(64)])
+        self.assertEqual(words,self.reference_wave(Config(shape="POINT",level=100,mod_hz=0),sample,0))
+        self.assert_cycle_readback(words)
 
     def test_modulation_level_channel_mask_and_blanking(self):
         c=Config(shape="POINT",level=100,mod_hz=0)
@@ -174,7 +200,7 @@ class F103Tests(unittest.TestCase):
                 self.assertTrue(all(a&~0x100 == baseline for a in words_a))
                 self.assertEqual(words_b[:64],[0]*64)
                 self.assertEqual(words_a[:64],[baseline]*64)
-                bits=[(a>>8)&1 for a in words_a[64:128]]
+                bits=[(a>>8)&1 for a in words_a[128:192]]
                 expected=[int(bool(mask&4) and ((slot+sample.phases[2])&63)<32)
                           for slot in range(64)]
                 self.assertEqual(bits,expected)
@@ -204,20 +230,81 @@ class F103Tests(unittest.TestCase):
                 for offset in (0, self.half_us, 2*self.half_us):
                     us = start + offset
                     words_b, words_a, sample = self.ports(us)
-                    for cycle in range(self.half_words // 64):
-                        time_us = us + cycle*25
-                        index = time_us // 25
-                        density = ((index % 100)*level) % 100 + level >= 100
-                        modulation = not mod_hz or ((time_us % 1000000)*mod_hz) % 1000000 < 500000
-                        on = cycle > 0 and level > 0 and density and modulation
-                        for slot in range(64):
-                            logical = 0
-                            if on:
-                                logical = sum(1 << ch for ch, phase in enumerate(sample.phases)
-                                              if ((slot + phase) & 63) < 32)
-                            k = cycle*64 + slot
-                            self.assertEqual(words_b[k], logical & 0xfffb)
-                            self.assertEqual(words_a[k], 0xe0 | (0x100 if logical & 4 else 0))
+                    reference = self.reference_wave(c,sample,us)
+                    self.assertEqual(words_b,[w & 0xfffb for w in reference])
+                    self.assertEqual(words_a,[0xe0 | (0x100 if w & 4 else 0) for w in reference])
+                    self.assert_cycle_readback(reference)
+
+    def test_all_phase_enables_start_only_at_natural_rising_edges(self):
+        # Sweep all phases, including the old short 58/39-slot PB0 intervals.
+        point = Config(shape="POINT",level=100,mod_hz=0)
+        self.configure(point)
+        initial = Sample()
+        self.dll.test_geometry(0,ct.byref(initial))
+        self.dll.test_phase(ct.byref(initial))
+        nominal = list(initial.phases)
+        for level, mod in ((100,0),(30,200),(73,997),(1,1000),(0,0)):
+            c = replace(point,level=level,mod_hz=mod)
+            self.configure(c)
+            for phase in range(64):
+                offsets = ",".join(str((phase-p)%64) for p in nominal)
+                result = self.command("CALIBRATION",action="store",mask=0xffff,offsets=offsets,
+                                      geometry_id=self.array.resolved_geometry().identity)
+                self.assertEqual(result[0].kind,"ACK",result)
+                self.dll.test_reset_wave()
+                stream = []
+                for us in (0,250,2500,999750):
+                    words,sample = self.wave(us)
+                    self.assertEqual(list(sample.phases),[phase]*16)
+                    self.assertEqual(words,self.reference_wave(c,sample,us))
+                    self.assert_cycle_readback(words)
+                    if us <= 250:
+                        stream += words
+                rises = [i for i,w in enumerate(stream) if w & 1 and (i==0 or not stream[i-1]&1)]
+                self.assertTrue(all(b-a >= 64 for a,b in zip(rises,rises[1:])),(phase,level,mod))
+
+    def test_scanned_circle_has_no_subperiod_rising_edges(self):
+        # This is the real default configuration, tested as a digital stream.
+        c = Config(shape="CIRCLE",level=30,mod_hz=200)
+        self.configure(c)
+        last_rise = [-64]*16
+        previous = 0
+        for us in range(0,2000000,self.half_us):
+            words,sample = self.wave(us)
+            self.assert_cycle_readback(words)
+            for slot,value in enumerate(words):
+                rising = value & ~previous
+                index = us//25*64 + slot
+                while rising:
+                    bit = rising & -rising
+                    channel = bit.bit_length()-1
+                    self.assertGreaterEqual(index-last_rise[channel],64,(us,channel,sample.phases[channel]))
+                    last_rise[channel] = index
+                    rising ^= bit
+                previous = value
+
+    def test_guard_resets_phase_and_can_truncate_final_pulse(self):
+        c = Config(shape="POINT",level=100,mod_hz=0)
+        self.configure(c)
+        sample = Sample()
+        self.dll.test_geometry(0,ct.byref(sample))
+        self.dll.test_phase(ct.byref(sample))
+        nominal = list(sample.phases)
+        stream = []
+        for us, phase in ((0,1),(250,63),(500,25),(750,6)):
+            self.assertEqual(self.command("CALIBRATION",action="trial",mask=1,
+                offsets=",".join(str((phase-p)%64) for p in nominal),
+                geometry_id=self.array.resolved_geometry().identity)[0].kind,"ACK")
+            self.dll.test_reset_wave()
+            words,sample = self.wave(us)
+            self.assertEqual(list(sample.phases),[phase]*16)
+            self.assertEqual(words[:64],[0]*64)
+            if us == 0:
+                # Explicit exception: the guard cuts this final pulse after one slot.
+                self.assertEqual(words[-2:],[0,1])
+            stream += words
+        rises = [i for i,w in enumerate(stream) if w and (i==0 or not stream[i-1])]
+        self.assertTrue(all(b-a >= 64 for a,b in zip(rises,rises[1:])))
 
     def test_integer_phase_against_double_precision_reference(self):
         self.configure(Config(shape="POINT"))

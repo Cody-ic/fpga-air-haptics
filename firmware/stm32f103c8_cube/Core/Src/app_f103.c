@@ -10,14 +10,23 @@
 #define BOOT_JOURNAL ((volatile uint16_t *)0x0800fc00u)
 
 static Device device;
+#if F103_CHANNEL_TEST
+/* A fixed high/low pair needs no producer, refill IRQ or low guard window. */
+static uint16_t channel_words_b[F103_CHANNEL_DMA_WORDS], channel_words_a[F103_CHANNEL_DMA_WORDS];
+static Sample channel_sample;
+static uint64_t channel_started_ms;
+#else
 /* Two ports, two 250 us banks: same 5120-byte waveform budget as before. */
 static uint16_t waves_b[2][F103_HALF_WORDS], waves_a[2][F103_HALF_WORDS];
-static uint16_t gpioa_idle;
 static Sample samples[2];
+static uint16_t drive_cycles[2];
 static uint64_t bank_us[2], next_us;
-static volatile bool playing, refill, ready[2];
+static volatile bool refill, ready[2];
 static volatile unsigned free_bank;
 static const Config *playing_config;
+#endif
+static uint16_t gpioa_idle;
+static volatile bool playing;
 static const char *volatile pending_fault;
 static bool boot_ok;
 static uint8_t rx[RX_SIZE];
@@ -30,6 +39,7 @@ static uint64_t uptime_ms;
 #if F103_CHANNEL_TEST
 static volatile bool channel_test_pending;
 static volatile bool channel_test_internal;
+static volatile bool channel_test_expired;
 static bool channel_test_on;
 static unsigned channel_test_index;
 static uint64_t channel_test_deadline_ms;
@@ -59,11 +69,15 @@ void app_f103_shutdown(void)
     DMA1->IFCR = DMA_IFCR_CGIF5 | DMA_IFCR_CGIF2;
     NVIC_ClearPendingIRQ(DMA1_Channel2_IRQn);
     NVIC_ClearPendingIRQ(DMA1_Channel5_IRQn);
-    playing = false; refill = false;
-    ready[0] = ready[1] = false;
+    playing = false;
 #if F103_CHANNEL_TEST
-    if (!channel_test_internal) channel_test_pending = false;
+    if (!channel_test_internal) {
+        channel_test_pending = false;
+        channel_test_expired = false;
+    }
 #else
+    refill = false;
+    ready[0] = ready[1] = false;
     auto_run_pending = false;
 #endif
     unlock(p);
@@ -83,6 +97,7 @@ void app_f103_wave_irq(void)
     uint32_t flags = DMA1->ISR;
     DMA1->IFCR = DMA_IFCR_CGIF5 | DMA_IFCR_CGIF2;
     if (flags & (DMA_ISR_TEIF5 | DMA_ISR_TEIF2)) { fail("DMA_ERROR"); return; }
+#if !F103_CHANNEL_TEST
     if (!playing) return;
     /* Port A transfers after port B, so its boundary releases both buffers. */
     unsigned boundaries = flags & (DMA_ISR_HTIF2 | DMA_ISR_TCIF2);
@@ -99,11 +114,28 @@ void app_f103_wave_irq(void)
     ready[free_bank] = false;
     __DMB(); refill = true;
     service(); /* Refill is bounded: geometry/phase solving stays in foreground. */
+#endif
 }
 
 static void service(void)
 {
     IWDG->KR = 0xaaaau;
+#if F103_CHANNEL_TEST
+    /* Formatting/transmission can span the ON deadline. Close the pins here,
+     * without reentering protocol or changing a partially serialized config. */
+    uint64_t now_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
+    uint32_t p = lock();
+    if (playing && channel_test_pending && channel_test_on && !pending_fault &&
+        now_ms >= channel_test_deadline_ms) {
+        bool internal = channel_test_internal;
+        channel_test_internal = true;
+        app_f103_shutdown();
+        channel_test_internal = internal;
+        channel_test_expired = true;
+        device.latched.output = device.latched.drive_on = false;
+    }
+    unlock(p);
+#else
     if (!playing) return;
     if (!refill) {
         /* Finish one complete focus between protocol operations. A single
@@ -120,17 +152,21 @@ static void service(void)
     unsigned bank = free_bank;
     uint32_t started = DWT->CYCCNT;
     Sample sample;
-    f103_wave_render(playing_config, next_us, waves_b[bank], waves_a[bank], gpioa_idle, &sample);
+    uint16_t active_cycles;
+    f103_wave_render(playing_config, next_us, waves_b[bank], waves_a[bank], gpioa_idle,
+                     &sample, &active_cycles);
     uint32_t cycles = DWT->CYCCNT-started;
     if (cycles > render_max_cycles) render_max_cycles = cycles;
     uint32_t p = lock();
     if (playing) {
         samples[bank] = sample; bank_us[bank] = next_us;
+        drive_cycles[bank] = active_cycles;
         next_us += F103_HALF_US;
         refill = false;
         __DMB(); ready[bank] = true;
     }
     unlock(p);
+#endif
 }
 
 static bool output_start(const Config *c, uint64_t us)
@@ -143,39 +179,68 @@ static bool output_start(const Config *c, uint64_t us)
         return false;
 #endif
     if (pending_fault || !boot_ok || SystemCoreClock != 64000000u) return false;
-    playing_config = c;
     /* Keep button pull-ups and every non-array GPIOA output latch unchanged. */
     gpioa_idle = (uint16_t)GPIOA->ODR & (uint16_t)~F103_GPIOA_MASK;
+#if F103_CHANNEL_TEST
+    (void)us;
+    float remaining;
+    geometry_sample(c, 0, &channel_sample, &remaining);
+    /* Electrical phase is fixed by the static pair, independent of distance. */
+    memset(channel_sample.phases, 0, sizeof(channel_sample.phases));
+    channel_sample.output = channel_sample.scan_on = channel_sample.drive_on = true;
+    channel_started_ms = device.now_ms;
+    channel_words_b[0] = c->channel_mask & F103_GPIOB_MASK;
+    channel_words_b[1] = 0;
+    channel_words_a[0] = gpioa_idle | ((c->channel_mask & 4u) ? F103_GPIOA_MASK : 0u);
+    channel_words_a[1] = gpioa_idle;
+    TIM1->PSC = 0; TIM1->ARR = F103_CHANNEL_TIMER_ARR; TIM1->RCR = 0;
+#else
+    playing_config = c;
     us = us/25u*25u;
     f103_wave_reset();
     for (unsigned i = 0; i < 2; ++i) {
         bank_us[i] = us+i*F103_HALF_US;
-        f103_wave_render(c, bank_us[i], waves_b[i], waves_a[i], gpioa_idle, &samples[i]);
+        f103_wave_render(c, bank_us[i], waves_b[i], waves_a[i], gpioa_idle,
+                         &samples[i], &drive_cycles[i]);
     }
     for (unsigned step = 0; step < F103_LOOKAHEAD * (HAP_CHANNELS + 1u); ++step)
         f103_wave_prepare(c);
     next_us = us+2u*F103_HALF_US;
     ready[0] = ready[1] = true;
     TIM1->PSC = 0; TIM1->ARR = 24; TIM1->RCR = 0;
+#endif
     TIM1->CCMR1 = 0; /* Internal CH1 timing only; PA8 remains a GPIO. */
     TIM1->CCER = 0;
     TIM1->CR2 &= ~TIM_CR2_CCDS;
     TIM1->CCR1 = 1; /* Port A request one 64 MHz timer tick after port B. */
-    TIM1->EGR = TIM_EGR_UG; TIM1->SR = 0; TIM1->CNT = 24;
+    TIM1->EGR = TIM_EGR_UG; TIM1->SR = 0; TIM1->CNT = TIM1->ARR;
     DMA1_Channel5->CPAR = (uint32_t)&GPIOB->ODR;
+#if F103_CHANNEL_TEST
+    DMA1_Channel5->CMAR = (uint32_t)channel_words_b;
+    DMA1_Channel5->CNDTR = F103_CHANNEL_DMA_WORDS;
+#else
     DMA1_Channel5->CMAR = (uint32_t)waves_b;
     DMA1_Channel5->CNDTR = 2u*F103_HALF_WORDS;
+#endif
     DMA1_Channel5->CCR = DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
         DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL |
         DMA_CCR_TEIE;
     DMA1_Channel2->CPAR = (uint32_t)&GPIOA->ODR;
+#if F103_CHANNEL_TEST
+    DMA1_Channel2->CMAR = (uint32_t)channel_words_a;
+    DMA1_Channel2->CNDTR = F103_CHANNEL_DMA_WORDS;
+#else
     DMA1_Channel2->CMAR = (uint32_t)waves_a;
     DMA1_Channel2->CNDTR = 2u*F103_HALF_WORDS;
+#endif
     DMA1_Channel2->CCR = DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
         DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL |
-        DMA_CCR_HTIE | DMA_CCR_TCIE | DMA_CCR_TEIE;
+        DMA_CCR_TEIE;
+#if !F103_CHANNEL_TEST
+    DMA1_Channel2->CCR |= DMA_CCR_HTIE | DMA_CCR_TCIE;
+#endif
     uint32_t p = lock();
-    /* A UART/DMA fault may have arrived while both banks were rendered. */
+    /* A UART/DMA fault may have arrived while the output data was prepared. */
     if (pending_fault || !boot_ok || SystemCoreClock != 64000000u) {
         app_f103_shutdown();
         unlock(p);
@@ -194,6 +259,15 @@ static bool output_start(const Config *c, uint64_t us)
 static bool output_readback(Sample *out)
 {
     uint32_t p = lock();
+#if F103_CHANNEL_TEST
+    if (!playing && !channel_test_expired) { unlock(p); return false; }
+    *out = channel_sample;
+    /* This is a commanded digital envelope, not a measured pin or sound level. */
+    uint64_t now_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
+    out->elapsed_us = (now_ms - channel_started_ms) * 1000u;
+    out->output = out->drive_on = playing;
+    unlock(p);
+#else
     if (!playing) { unlock(p); return false; }
     unsigned remaining = DMA1_Channel2->CNDTR;
     unsigned transferred = 2u*F103_HALF_WORDS-remaining;
@@ -202,9 +276,10 @@ static bool output_readback(Sample *out)
     unsigned bank = last/F103_HALF_WORDS;
     unsigned cycle = (last%F103_HALF_WORDS)/64u;
     *out = samples[bank];
-    uint64_t time_us = bank_us[bank]+cycle*25u;
+    bool drive_on = (drive_cycles[bank] >> cycle) & 1u;
     unlock(p);
-    out->drive_on = cycle && f103_drive_on(playing_config, out, time_us);
+    out->drive_on = drive_on;
+#endif
     return true;
 }
 
@@ -345,10 +420,15 @@ static void channel_test_poll(uint64_t now_ms)
         app_f103_shutdown();
         return;
     }
-    if (now_ms < channel_test_deadline_ms) return;
+    if (!channel_test_expired && now_ms < channel_test_deadline_ms) return;
+    /* service() may have closed the output while this poll's timestamp was
+     * cached before serial transmission. Give GAP its full foreground delay. */
+    uint64_t current_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
+    if (now_ms < current_ms) now_ms = current_ms;
     /* The permission spans only our synchronous off/configure/start transition. */
     channel_test_internal = true;
     app_f103_shutdown();
+    channel_test_expired = false;
     device.state = IDLE;
     device.elapsed_us = 0;
     device.latched.output = device.latched.drive_on = false;
@@ -372,11 +452,7 @@ static void channel_test_poll(uint64_t now_ms)
         const char *error = config_compile(&device.config);
         if (error) fail(error);
         else {
-            Sample sample;
-            float remaining;
-            geometry_sample(&device.config, 0, &sample, &remaining);
-            for (unsigned i = 0; i < HAP_CHANNELS; ++i)
-                device.config.phase_offsets[i] = (uint8_t)((64u - phase_solve_channel(&sample, i)) & 63u);
+            /* No focusing/phase solver in the single-channel electrical test. */
             ++device.revision;
             if (output_start(&device.config, 0)) {
                 device.state = RUNNING;
@@ -407,6 +483,7 @@ static void startup_schedule(uint64_t now_ms)
     }
 #if F103_CHANNEL_TEST
     channel_test_on = false;
+    channel_test_expired = false;
     channel_test_index = 0;
     channel_test_internal = false;
     channel_test_deadline_ms = now_ms + F103_AUTOSTART_MS;

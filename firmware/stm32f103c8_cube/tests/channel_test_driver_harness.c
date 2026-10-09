@@ -13,11 +13,13 @@ static DMA_Channel_TypeDef channel_a, channel_b;
 static IWDG_TypeDef watchdog;
 static RCC_TypeDef reset_clock;
 static DWT_Type cycle_counter;
+static USART_TypeDef serial_port;
+static uint32_t virtual_tick, tick_step_ms;
 static char serial_reply[8192];
 static size_t serial_size;
 static uint32_t interrupt_mask;
-static bool inject_render_fault;
-static void render_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, uint16_t, Sample *);
+static bool inject_prepare_fault;
+static void geometry_with_fault(const Config *, uint64_t, Sample *, float *);
 
 #undef GPIOA
 #undef GPIOB
@@ -28,6 +30,7 @@ static void render_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, 
 #undef IWDG
 #undef RCC
 #undef DWT
+#undef USART2
 #define GPIOA (&port_a)
 #define GPIOB (&port_b)
 #define TIM1 (&timer)
@@ -37,6 +40,7 @@ static void render_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, 
 #define IWDG (&watchdog)
 #define RCC (&reset_clock)
 #define DWT (&cycle_counter)
+#define USART2 (&serial_port)
 #define __get_PRIMASK() interrupt_mask
 #define __disable_irq() (interrupt_mask = 1u)
 #define __set_PRIMASK(value) (interrupt_mask = (value))
@@ -45,7 +49,12 @@ static void render_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, 
 #define NVIC_ClearPendingIRQ(irq) ((void)(irq))
 
 uint32_t SystemCoreClock = 64000000u;
-uint32_t HAL_GetTick(void) { return 0; }
+uint32_t HAL_GetTick(void)
+{
+    uint32_t now = virtual_tick;
+    virtual_tick += tick_step_ms;
+    return now;
+}
 ADC_HandleTypeDef hadc1;
 HAL_StatusTypeDef HAL_ADC_Stop_DMA(ADC_HandleTypeDef *adc)
 { (void)adc; abort(); }
@@ -61,17 +70,21 @@ void HAL_GPIO_WritePin(GPIO_TypeDef *port, uint16_t pins, GPIO_PinState state)
 { (void)port; (void)pins; (void)state; abort(); }
 void Error_Handler(void) { abort(); }
 
-#define f103_wave_render render_with_fault
+#define geometry_sample geometry_with_fault
+/* A diagnostic build must not depend on either dynamic-wave function. */
+#define f103_wave_render forbidden_dynamic_renderer
+#define f103_wave_prepare forbidden_dynamic_prepare
 #include "../Core/Src/app_f103.c"
 #undef f103_wave_render
+#undef f103_wave_prepare
+#undef geometry_sample
 
-static void render_with_fault(const Config *c, uint64_t us, uint16_t *b, uint16_t *a,
-                              uint16_t idle, Sample *sample)
+static void geometry_with_fault(const Config *c, uint64_t us, Sample *sample, float *remaining)
 {
-    f103_wave_render(c, us, b, a, idle, sample);
-    if (inject_render_fault) {
-        inject_render_fault = false;
-        fail("UART_RX_ERROR"); /* Simulate an IRQ after actual bank generation. */
+    geometry_sample(c, us, sample, remaining);
+    if (inject_prepare_fault) {
+        inject_prepare_fault = false;
+        fail("UART_RX_ERROR"); /* Simulate an IRQ before DMA enable. */
     }
 }
 
@@ -91,13 +104,17 @@ static void fresh(uint32_t flags)
     memset(&dma, 0, sizeof(dma));
     memset(&channel_a, 0, sizeof(channel_a));
     memset(&channel_b, 0, sizeof(channel_b));
+    memset(&serial_port, 0, sizeof(serial_port));
+    virtual_tick = tick_step_ms = 0;
+    uptime_ms = 0;
+    last_tick = 0;
     port_a.ODR = 0xa5e7u;
     boot_ok = true;
     pending_fault = NULL;
     SystemCoreClock = 64000000u;
     channel_test_internal = false;
     interrupt_mask = 0;
-    inject_render_fault = false;
+    inject_prepare_fault = false;
     reset_clock.CSR = flags;
     capture_reset_flags();
     rx_head = rx_tail = 0;
@@ -109,6 +126,9 @@ static void fresh(uint32_t flags)
 
 static void poll(uint64_t now)
 {
+    virtual_tick = (uint32_t)now;
+    uptime_ms = now;
+    last_tick = virtual_tick;
     hap_poll(&device, now, false);
     channel_test_poll(now);
 }
@@ -139,15 +159,39 @@ static void one_channel(unsigned index)
     assert(!device.config.cx_um && !device.config.cy_um && device.config.z_um == 150000);
     assert(!strcmp(device.reason, "CHANNEL_TEST_ON"));
     assert(!device.calibration_trial && !device.configured);
-    for (unsigned bank = 0; bank < 2; ++bank) {
-        assert(samples[bank].phases[index] == 0);
-        for (unsigned word = 0; word < F103_HALF_WORDS; ++word) {
-            bool high = word >= 64u && word % 64u < 32u;
-            uint16_t expected_b = index == 2u || !high ? 0u : (uint16_t)(1u << index);
-            uint16_t expected_a = gpioa_idle | (index == 2u && high ? F103_GPIOA_MASK : 0u);
-            assert(waves_b[bank][word] == expected_b);
-            assert(waves_a[bank][word] == expected_a);
-        }
+    assert(timer.PSC == 0 && timer.ARR == 799u && timer.CCR1 == 1u && !timer.CCER);
+    assert(timer.CR1 & TIM_CR1_CEN);
+    assert(timer.DIER == (TIM_DIER_UDE | TIM_DIER_CC1DE));
+    assert(SystemCoreClock / (timer.ARR + 1u) / 2u == 40000u);
+    assert(channel_a.CNDTR == 2u && channel_b.CNDTR == 2u);
+    assert(channel_a.CMAR == (uint32_t)(uintptr_t)channel_words_a);
+    assert(channel_b.CMAR == (uint32_t)(uintptr_t)channel_words_b);
+    uint32_t expected_ccr = DMA_CCR_EN | DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
+        DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL | DMA_CCR_TEIE;
+    assert(channel_a.CCR == expected_ccr && channel_b.CCR == expected_ccr);
+    for (unsigned i = 0; i < HAP_CHANNELS; ++i) assert(channel_sample.phases[i] == 0);
+    for (unsigned word = 0; word < 400; ++word) {
+        bool high = (word & 1u) == 0;
+        uint16_t expected_b = index == 2u || !high ? 0u : (uint16_t)(1u << index);
+        uint16_t expected_a = gpioa_idle | (index == 2u && high ? F103_GPIOA_MASK : 0u);
+        assert(channel_words_b[word & 1u] == expected_b);
+        assert(channel_words_a[word & 1u] == expected_a);
+    }
+    uint16_t before_b[2], before_a[2];
+    memcpy(before_b, channel_words_b, sizeof(before_b));
+    memcpy(before_a, channel_words_a, sizeof(before_a));
+    service();
+    assert(!memcmp(before_b, channel_words_b, sizeof(before_b)) &&
+           !memcmp(before_a, channel_words_a, sizeof(before_a)));
+    dma.ISR = DMA_ISR_HTIF2 | DMA_ISR_TCIF2 | DMA_ISR_HTIF5 | DMA_ISR_TCIF5;
+    app_f103_wave_irq(); /* Static buffer boundaries never trigger refill. */
+    assert(playing && !pending_fault);
+    Sample sample;
+    for (unsigned remaining = 1; remaining <= 2; ++remaining) {
+        channel_a.CNDTR = remaining;
+        assert(output_readback(&sample) && sample.output && sample.drive_on);
+        assert(sample.x_um == 0 && sample.y_um == 0 && sample.z_um == 150000);
+        assert(sample.elapsed_us == (device.now_ms - channel_started_ms) * 1000u);
     }
     command(10, "SNAP");
     char mask[32];
@@ -216,6 +260,72 @@ int main(void)
     poll(done + 100000u);
     off();
 
+    fresh(0);
+    command(1, "HELLO");
+    poll(F103_AUTOSTART_MS);
+    uint64_t expiry = channel_test_deadline_ms;
+    Config before_expiry = device.config;
+    uint32_t before_revision = device.revision;
+    virtual_tick = (uint32_t)(expiry - 1u);
+    service();
+    assert(playing && !channel_test_expired);
+    /* Actual send_bytes() calls service for each TX byte while poll's cached
+     * uptime stays at startup. Advancing the virtual tick crosses the limit. */
+    serial_port.SR = USART_SR_TXE;
+    tick_step_ms = 1;
+    send_bytes("abcd", 4);
+    tick_step_ms = 0;
+    off();
+    assert(channel_test_pending && channel_test_on && channel_test_expired);
+    assert(device.state == RUNNING && device.revision == before_revision);
+    assert(!memcmp(&device.config, &before_expiry, sizeof(before_expiry)));
+    assert(!device.latched.output && !device.latched.drive_on);
+    Sample expired_sample;
+    assert(output_readback(&expired_sample) && !expired_sample.output && !expired_sample.drive_on);
+    assert(expired_sample.elapsed_us >= F103_CHANNEL_ON_MS * 1000u);
+    uint64_t after_send = uptime_ms + (uint32_t)(virtual_tick - last_tick);
+    channel_test_poll(device.now_ms); /* Complete GAP despite a stale timestamp. */
+    assert(!channel_test_expired && channel_test_pending && !channel_test_on);
+    assert(device.state == IDLE && !strcmp(device.reason, "CHANNEL_TEST_GAP"));
+    assert(channel_test_deadline_ms == after_send + F103_CHANNEL_GAP_MS);
+    poll(channel_test_deadline_ms - 1u);
+    off();
+    virtual_tick = (uint32_t)(channel_test_deadline_ms + 100u);
+    service(); /* Servicing expired GAP must never start the next channel. */
+    off();
+    poll(channel_test_deadline_ms + 100u);
+    one_channel(1);
+
+    for (unsigned canceled = 0; canceled < 2; ++canceled) {
+        fresh(0);
+        command(1, "HELLO");
+        poll(F103_AUTOSTART_MS);
+        virtual_tick = (uint32_t)channel_test_deadline_ms;
+        service();
+        assert(channel_test_expired && channel_test_pending);
+        if (canceled) {
+            fail("UART_RX_ERROR");
+            report_fault();
+        } else command(50, "STOP");
+        assert(!channel_test_expired && !channel_test_pending);
+        channel_test_poll(done);
+        service();
+        off();
+        assert(device.state == (canceled ? FAULT : IDLE));
+    }
+
+    fresh(0);
+    uint64_t wrap_start = (uint64_t)UINT32_MAX - 1000u;
+    poll(wrap_start);
+    interrupt_mask = 1;
+    virtual_tick = (uint32_t)(channel_test_deadline_ms - 1u);
+    service();
+    assert(playing && !channel_test_expired && interrupt_mask == 1);
+    virtual_tick = (uint32_t)channel_test_deadline_ms;
+    service();
+    off();
+    assert(channel_test_expired && channel_test_pending && interrupt_mask == 1);
+
     for (unsigned stage = 0; stage < 3; ++stage) {
         fresh(0);
         command(1, "HELLO");
@@ -233,20 +343,22 @@ int main(void)
         assert(!channel_test_pending && !device.configured && !device.calibration_trial);
     }
 
-    fresh(0);
-    poll(F103_AUTOSTART_MS);
-    dma.ISR = DMA_ISR_TEIF2;
-    app_f103_wave_irq();
-    assert(!channel_test_pending && !strcmp(pending_fault, "DMA_ERROR"));
-    report_fault();
-    poll(done);
-    off();
-    assert(device.state == FAULT && !strcmp(device.reason, "DMA_ERROR"));
+    for (unsigned port = 0; port < 2; ++port) {
+        fresh(0);
+        poll(F103_AUTOSTART_MS);
+        dma.ISR = port ? DMA_ISR_TEIF5 : DMA_ISR_TEIF2;
+        app_f103_wave_irq();
+        assert(!channel_test_pending && !strcmp(pending_fault, "DMA_ERROR"));
+        report_fault();
+        poll(done);
+        off();
+        assert(device.state == FAULT && !strcmp(device.reason, "DMA_ERROR"));
+    }
 
     for (unsigned masked = 0; masked < 2; ++masked) {
         fresh(0);
         interrupt_mask = masked;
-        inject_render_fault = true;
+        inject_prepare_fault = true;
         poll(F103_AUTOSTART_MS);
         assert(!channel_test_pending && !strcmp(pending_fault, "UART_RX_ERROR"));
         assert(interrupt_mask == masked); /* Preserve caller's PRIMASK on failure. */
@@ -331,6 +443,6 @@ int main(void)
         channel_test_internal = false;
         off();
     }
-    puts("Channel test: 16 single zero-phase outputs, guarded buffers, deadlines, STOP/fault/reset cancellation passed");
+    puts("Channel test: static DMA pairs/config, TX deadline/wrap, STOP/fault/reset cancellation passed");
     return 0;
 }

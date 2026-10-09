@@ -4,7 +4,9 @@
 static Sample focus;
 static uint64_t origin_us;
 static bool valid;
-static uint16_t pattern_b[64], pattern_a[64];
+enum { FULL_CARRIER, CARRY_HIGH, NEW_PULSE, CARRIER_PATTERNS };
+static uint16_t pattern_b[CARRIER_PATTERNS][64], pattern_a[CARRIER_PATTERNS][64];
+static bool pattern_nonzero[CARRIER_PATTERNS];
 static uint16_t pattern_mask, pattern_idle;
 static Sample future_focus[F103_LOOKAHEAD + 1u];
 static volatile unsigned future_read, future_write;
@@ -91,7 +93,8 @@ bool f103_drive_on(const Config *c, const Sample *s, uint64_t time_us)
 }
 
 void f103_wave_render(const Config *c, uint64_t us, uint16_t *words_b,
-                      uint16_t *words_a, uint16_t gpioa_idle, Sample *sample)
+                      uint16_t *words_a, uint16_t gpioa_idle, Sample *sample,
+                      uint16_t *active_cycles)
 {
     if (!valid) origin_us = us;
     uint64_t focus_us = us - (us - origin_us) % HAP_FOCUS_US;
@@ -116,35 +119,60 @@ void f103_wave_render(const Config *c, uint64_t us, uint16_t *words_b,
     gpioa_idle &= (uint16_t)~F103_GPIOA_MASK;
     if (new_focus || pattern_mask != c->channel_mask || pattern_idle != gpioa_idle) {
         uint16_t edges[64] = {0};
-        uint16_t bits = 0;
+        uint16_t bits = 0, carry = 0;
+        memset(pattern_nonzero, 0, sizeof(pattern_nonzero));
         for (unsigned i = 0; i < HAP_CHANNELS; ++i) {
             if (!(c->channel_mask & (1u << i))) continue;
             unsigned phase = sample->phases[i];
             edges[(64u-phase)&63u] ^= (uint16_t)(1u << i);
             edges[(96u-phase)&63u] ^= (uint16_t)(1u << i);
             if (phase < 32u) bits |= (uint16_t)(1u << i);
+            /* Only phases 1..31 have a HIGH pulse that crosses slot 0.
+             * That prefix belongs to the preceding cycle's enable decision. */
+            if (phase && phase < 32u) {
+                carry |= (uint16_t)(1u << i);
+            }
         }
         for (unsigned slot = 0; slot < 64; ++slot) {
-            if (slot) bits ^= edges[slot];
-            pattern_b[slot] = bits & F103_GPIOB_MASK;
-            pattern_a[slot] = gpioa_idle | ((bits & (1u << 2u)) ? F103_GPIOA_MASK : 0u);
+            if (slot) {
+                bits ^= edges[slot];
+                carry &= (uint16_t)~edges[slot];
+            }
+            uint16_t variants[CARRIER_PATTERNS] = {bits, carry, bits & (uint16_t)~carry};
+            for (unsigned kind = 0; kind < CARRIER_PATTERNS; ++kind) {
+                uint16_t value = variants[kind];
+                pattern_b[kind][slot] = value & F103_GPIOB_MASK;
+                pattern_a[kind][slot] = gpioa_idle | ((value & (1u << 2u)) ? F103_GPIOA_MASK : 0u);
+                pattern_nonzero[kind] |= value != 0;
+            }
         }
         pattern_mask = c->channel_mask;
         pattern_idle = gpioa_idle;
     }
     uint32_t time_us = (uint32_t)(us % 1000000u);
+    uint16_t active = 0;
+    bool previous_on = false;
     for (unsigned cycle = 0; cycle < F103_HALF_CYCLES; ++cycle) {
         uint16_t *out_b = words_b + cycle*64u;
         uint16_t *out_a = words_a + cycle*64u;
-        /* The first carrier is a LOW guard while the boundary IRQ checks readiness. */
-        if (cycle && drive_in_second(c, sample, time_us)) {
-            copy_carrier(out_b, pattern_b);
-            copy_carrier(out_a, pattern_a);
+        /* The guard clears old phase/gate state. Thereafter a pulse starts
+         * only at that channel's natural rising edge, never by restoring an
+         * already-HIGH prefix at the global cycle boundary. Normal density/
+         * modulation changes finish HIGH pulses at their natural falling edge.
+         * The next guard, STOP and faults may still cut a pulse short. */
+        bool on = cycle && drive_in_second(c, sample, time_us);
+        if (cycle && (on || previous_on)) {
+            unsigned kind = on ? (previous_on ? FULL_CARRIER : NEW_PULSE) : CARRY_HIGH;
+            copy_carrier(out_b, pattern_b[kind]);
+            copy_carrier(out_a, pattern_a[kind]);
+            if (pattern_nonzero[kind]) active |= (uint16_t)(1u << cycle);
         } else {
             fill_carrier(out_b, 0);
             fill_carrier(out_a, gpioa_idle);
         }
+        previous_on = on;
         time_us += 25u;
         if (time_us >= 1000000u) time_us -= 1000000u;
     }
+    if (active_cycles) *active_cycles = active;
 }

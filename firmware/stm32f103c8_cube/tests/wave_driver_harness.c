@@ -1,6 +1,7 @@
 /* Exercise the actual driver with CMSIS register types and simulated DMA events.
  * This checks control/failure handling, not bus timing or physical waveforms. */
 #include "main.h"
+#include "app_f103.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,10 @@ static DWT_Type cycle_counter;
 static unsigned cleared_irqs;
 static char serial_reply[8192];
 static size_t serial_size;
+static uint32_t interrupt_mask;
+static bool inject_render_fault;
+static void render_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, uint16_t,
+                              Sample *, uint16_t *);
 
 static void serial_send(const char *bytes, size_t size)
 {
@@ -43,9 +48,9 @@ static void serial_send(const char *bytes, size_t size)
 #define IWDG (&watchdog)
 #define DWT (&cycle_counter)
 #define RCC (&reset_clock)
-#define __get_PRIMASK() 0u
-#define __disable_irq() ((void)0)
-#define __set_PRIMASK(value) ((void)(value))
+#define __get_PRIMASK() interrupt_mask
+#define __disable_irq() (interrupt_mask = 1u)
+#define __set_PRIMASK(value) (interrupt_mask = (value))
 #define __DMB() ((void)0)
 #undef NVIC_ClearPendingIRQ
 #define NVIC_ClearPendingIRQ(irq) (cleared_irqs |= 1u << (unsigned)(irq))
@@ -69,7 +74,19 @@ void HAL_GPIO_WritePin(GPIO_TypeDef *port, uint16_t pins, GPIO_PinState state)
 void Error_Handler(void) { abort(); }
 
 /* Keep tests on the same start, shutdown, readback and IRQ code as firmware. */
+#define f103_wave_render render_with_fault
 #include "../Core/Src/app_f103.c"
+#undef f103_wave_render
+
+static void render_with_fault(const Config *c, uint64_t us, uint16_t *b, uint16_t *a,
+                              uint16_t idle, Sample *sample, uint16_t *active_cycles)
+{
+    f103_wave_render(c,us,b,a,idle,sample,active_cycles);
+    if (inject_render_fault) {
+        inject_render_fault = false;
+        fail("UART_RX_ERROR");
+    }
+}
 
 static void fresh(void)
 {
@@ -88,6 +105,8 @@ static void fresh(void)
     serial_size = 0;
     auto_run_pending = autostart_pending = false;
     startup_reset_flags = 0;
+    interrupt_mask = 0;
+    inject_render_fault = false;
     hap_init(&device, (Hardware){.start = output_start, .stop = app_f103_shutdown,
              .readback = output_readback, .send = serial_send}, "dma-register-test");
     device.config.level = 100;
@@ -159,6 +178,15 @@ int main(void)
     }
     app_f103_shutdown();
     off(NULL);
+
+    for (unsigned masked = 0; masked < 2; ++masked) {
+        fresh();
+        interrupt_mask = masked;
+        inject_render_fault = true;
+        assert(!output_start(&device.config,0));
+        assert(interrupt_mask == masked);
+        off("UART_RX_ERROR");
+    }
 
     for (unsigned error = 0; error < 2; ++error) {
         fresh();
