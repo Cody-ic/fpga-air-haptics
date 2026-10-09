@@ -2,6 +2,7 @@
 #define APP_F103_H
 
 #include "haptics.h"
+#include "pin_test_config.h"
 
 #define F103_HALF_CYCLES 10u
 #define F103_HALF_WORDS (F103_HALF_CYCLES * HAP_STEPS)

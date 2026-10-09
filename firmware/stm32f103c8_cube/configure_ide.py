@@ -15,16 +15,19 @@ def configure_profiles(root):
     settings = root.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']")
     debug = next(c for c in settings.findall("cconfiguration")
                  if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "Debug")
-    channel = next((c for c in settings.findall("cconfiguration")
-                    if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "ChannelTest"), None)
-    if channel is None:
+    for mode, description in (("ChannelTest", "Sequential single-channel diagnostic firmware"),
+                              ("PinTest", "Fixed-pin diagnostic firmware; parameters in pin_test_config.h")):
+        channel = next((c for c in settings.findall("cconfiguration")
+                        if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == mode), None)
+        if channel is not None:
+            continue
         channel = copy.deepcopy(debug)
         ids = {}
         for element in channel.iter():
             old = element.get("id")
             if old and element.tag != "extension":
                 base = old.rstrip(".").rsplit(".", 1)[0]
-                ids[old] = base+"."+str(zlib.crc32((old+"ChannelTest").encode("utf-8")))
+                ids[old] = base+"."+str(zlib.crc32((old+mode).encode("utf-8")))
         for element in channel.iter():
             for key, value in list(element.attrib.items()):
                 # Replace references as well as IDs, including folderInfo's final dot.
@@ -33,22 +36,25 @@ def configure_profiles(root):
                         value = ids[old]
                         break
                 element.set(key, value)
-        channel.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").set("name", "ChannelTest")
-        channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set("name", "ChannelTest")
+        channel.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").set("name", mode)
+        channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set("name", mode)
         channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set(
-            "description", "Single-channel diagnostic firmware; no graphics commands")
+            "description", description)
         for builder in channel.iter("builder"):
-            builder.set("buildPath", "${workspace_loc:/"+NAME+"}/ChannelTest")
+            builder.set("buildPath", "${workspace_loc:/"+NAME+"}/"+mode)
         settings.append(channel)
     for config in settings.findall("cconfiguration"):
         mode = config.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")
         for option in config.iter("option"):
             if option.get("superClass") == BASE+"compiler.option.definedsymbols":
-                for item in list(option):
-                    if item.get("value", "").split("=", 1)[0] == "F103_CHANNEL_TEST":
-                        option.remove(item)
-                ET.SubElement(option, "listOptionValue", builtIn="false",
-                              value="F103_CHANNEL_TEST="+str(int(mode == "ChannelTest")))
+                for name, enabled in (("F103_CHANNEL_TEST", mode in ("ChannelTest", "PinTest")),
+                                      ("F103_PIN_TEST", mode == "PinTest")):
+                    matches = [v for v in option if v.get("value", "").split("=",1)[0] == name]
+                    item = matches[0] if matches else ET.SubElement(option,"listOptionValue")
+                    item.set("builtIn","false")
+                    item.set("value",name+"="+str(int(enabled)))
+                    for duplicate in matches[1:]:
+                        option.remove(duplicate)
         for chain in config.iter("toolChain"):
             for option in chain.findall("option"):
                 if option.get("superClass") == "com.st.stm32cube.ide.mcu.gnu.managedbuild.option.runtimelibrary_c":
@@ -59,7 +65,8 @@ def configure_run(profile="Debug"):
     """Restore the green Run button after CubeMX creates its ST-only launch."""
     configuration = next(c for c in ET.parse(ROOT / ".cproject").getroot().iter("cconfiguration")
                          if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == profile)
-    local_config = "haptics_channel_test.local.cfg" if profile == "ChannelTest" else "haptics_run.local.cfg"
+    local_config = {"Debug": "haptics_run.local.cfg", "ChannelTest": "haptics_channel_test.local.cfg",
+                    "PinTest": "haptics_pin_test.local.cfg"}[profile]
     launch = ET.Element("launchConfiguration", type="org.eclipse.cdt.launch.applicationLaunchType")
     attributes = (
         ("string", "org.eclipse.cdt.launch.PROGRAM_NAME", "${stm32cubeide_openocd_path}/openocd.exe"),
@@ -80,7 +87,7 @@ def configure_run(profile="Debug"):
         field = ET.SubElement(launch, "listAttribute", key=key)
         ET.SubElement(field, "listEntry", value=value)
     ET.indent(launch)
-    launch_name = NAME+" Channel Test" if profile == "ChannelTest" else NAME
+    launch_name = {"Debug": NAME, "ChannelTest": NAME+" Channel Test", "PinTest": NAME+" Pin Test"}[profile]
     (ROOT / (launch_name+".launch")).write_text(
         '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
         + ET.tostring(launch, encoding="unicode")+"\n", encoding="utf-8")
@@ -111,7 +118,8 @@ def configure_debug(ide_root):
         return "{" + value + "}"
 
     for profile, filename in (("Debug", "haptics_run.local.cfg"),
-                              ("ChannelTest", "haptics_channel_test.local.cfg")):
+                              ("ChannelTest", "haptics_channel_test.local.cfg"),
+                              ("PinTest", "haptics_pin_test.local.cfg")):
         (ROOT / filename).write_text(
             f"add_script_search_dir {tcl_path(scripts[-1])}\n"
             f"source {tcl_path(ROOT / (NAME + '.cfg'))}\n"
@@ -176,6 +184,7 @@ def main():
         path.write_text(prolog+ET.tostring(root,encoding="unicode"),encoding="utf-8")
     configure_run()
     configure_run("ChannelTest")
+    configure_run("PinTest")
     if args.cubeide:
         configure_debug(args.cubeide)
 

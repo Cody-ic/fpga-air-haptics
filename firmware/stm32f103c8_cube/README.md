@@ -129,7 +129,7 @@ USART2 中断优先级为 0，波形 DMA 为 1，ADC DMA 为 2，均已同步到
 
 应用入口保存在 `main.c`、中断文件的 `USER CODE` 区域，专用逻辑在 `app_f103.c` / `wave_f103.c`；CubeMX 已验证能保留这些入口。生成时启用 **Keep User Code**。
 
-若 CubeMX 重新生成 IDE 配置，在工程目录运行 `python configure_ide.py`，然后在 CubeIDE 刷新工程。它恢复 `-O2`、newlib-nano、`haptics_memory.ld`、源目录范围、ChannelTest 编译配置及两种快捷 Run 配置；添加 `--cubeide` 可同时更新 Run/Debug 工具路径。不能改用默认 64 KB 链接脚本，否则会占用预留日志页。
+若 CubeMX 重新生成 IDE 配置，在工程目录运行 `python configure_ide.py`，然后在 CubeIDE 刷新工程。它恢复 `-O2`、newlib-nano、`haptics_memory.ld`、源目录范围、ChannelTest/PinTest 编译配置及三种快捷 Run 配置；添加 `--cubeide` 可同时更新 Run/Debug 工具路径。不能改用默认 64 KB 链接脚本，否则会占用预留日志页。
 
 仓库中 F411 的协议和几何核心为共享来源；修改后可执行：
 
@@ -159,6 +159,30 @@ python firmware/stm32f103c8_cube/sync_core.py --project 'D:\STM32Dev\haptics_f10
 
 普通图形上位机要求业务控制能力，不能连接此只读诊断配置。使用 `channel_monitor.py --port COM4` 观察，记录逻辑/PCB 通道、掩码及状态，退出时发送 STOP 并确认输出关闭；默认不启用 ADC。接收板正确连接后才加 `--capture` 保存原码窗口与电压分析。脚本不会复位或启动输出，因此连接前已完成的通道不会自动补测。
 
+### 6.2 固定引脚测试 PinTest
+
+2026-10-09 新增独立 **PinTest** 编译配置和 **haptics_f103c8 Pin Test** 快捷 Run。原 Debug/Release 业务与 ChannelTest 逐通道序列保留原行为；PinTest 复用静态 40 kHz、50% 方波后端，但只测试指定的一路，一次结束后停止，不切换到其他通道。
+
+默认 **PB11 → CN1-18 → PCB CH15**，对应软件通道 11、掩码 `2048`（`0x0800`）。初始化后等待 3 秒，连续输出 10 秒，再进入 `IDLE/PIN_TEST_DONE`；测试期间其余 15 路保持低。STOP、故障、看门狗复位禁止启动，以及发包期间截止关闭同样有效。普通业务 Run 不会选择此固件；在 Run Configurations 中明确选择 **haptics_f103c8 Pin Test**。
+
+参数位于 `Core/Inc/pin_test_config.h`，修改后重新编译 PinTest：
+
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `F103_PIN_TEST_CHANNEL` | `11` | 测试软件通道，允许 0–15；第 3 节接线表可查对应引脚 |
+| `F103_PIN_TEST_ON_MS` | `10000u` | 本次连续输出时长，单位 ms，必须大于 0 |
+
+例如 `10` 选择 PB10/CN1-17/CH14，`2` 选择 PA8/CN1-9/CH6；不存在 PB2 输出。PinTest 使用 `F103_CHANNEL_TEST=1、F103_PIN_TEST=1`，其他配置的 `F103_PIN_TEST=0`。也可在 PinTest 的编译宏中覆盖上述参数，IDE 配置恢复脚本保留自定义参数。
+
+```powershell
+python firmware/stm32f103c8_cube/build.py --pin-test
+python firmware/stm32f103c8_cube/build.py --pin-test --test-channel 2 --test-on-ms 1500
+```
+
+命令行产物独立保存到 `build/pin_test/`；CubeIDE 保存到 `PinTest/`，不会覆盖原版本。`channel_monitor.py --port COM4` 同样可观察并保存此模式，看到 `PIN_TEST_DONE` 后确认 STOP 并退出。新版尚未烧录，方波频率与占空比仍需实测；参数选择不改变引脚或 `.ioc`。
+
+本次检查：F103 22 项、串口工具 11 项和 IDE 配置 1 项通过；原业务、原逐通道与新 PinTest 均通过严格 Arm GNU 编译。PinTest Flash/RAM 为 37,760/13,464 字节，含原堆栈预留；原两版本资源占用保持上述数值。PB11 默认、PB10 参数覆盖和 PA8 跨端口映射，以及错误参数拒绝、仅选定通道可启动、发包截止和 STOP/故障取消均有电脑回归。
+
 ## 7. 软件验证
 
 你可以在 CubeIDE 自行编译；可选命令行编译和原生检查：
@@ -166,6 +190,7 @@ python firmware/stm32f103c8_cube/sync_core.py --project 'D:\STM32Dev\haptics_f10
 ```powershell
 python firmware/stm32f103c8_cube/build.py
 python firmware/stm32f103c8_cube/build.py --channel-test
+python firmware/stm32f103c8_cube/build.py --pin-test
 python firmware/stm32f103c8_cube/tests/test_f103.py
 python firmware/stm32f103c8_cube/tests/test_ide_profiles.py
 python firmware/stm32f103c8_cube/tests/test_channel_monitor.py

@@ -25,7 +25,7 @@ class MockSerial:
     """Fragmented serial replies plus autonomous test states; no real COM port."""
     def __init__(self, clock, *, profile="CHANNEL_TEST", done_at=0.8,
                  hello=True, bad_crc=False, interrupt_at=None, stop_ack=True,
-                 io_failure_at=None, mask=4):
+                 io_failure_at=None, mask=4, done_reason="CHANNEL_TEST_DONE"):
         self.clock = clock
         self.profile = profile
         self.done_at = done_at
@@ -35,6 +35,7 @@ class MockSerial:
         self.stop_ack = stop_ack
         self.io_failure_at = io_failure_at
         self.mask = mask
+        self.done_reason = done_reason
         self.commands = []
         self.buffer = bytearray()
         self.closed = False
@@ -51,7 +52,7 @@ class MockSerial:
                     output=0 if self.stopped or done else 1,
                     drive_on=0 if self.stopped or done else 1,
                     channel_mask=0 if self.stopped or done else self.mask,
-                    reason="NONE" if self.stopped else ("CHANNEL_TEST_DONE" if done else "CHANNEL_TEST_ON"))
+                    reason="NONE" if self.stopped else (self.done_reason if done else "CHANNEL_TEST_ON"))
 
     def write(self, raw):
         frame = decode(raw)
@@ -134,6 +135,15 @@ class ChannelMonitorTests(unittest.TestCase):
         self.assertTrue(result["stop_confirmed"])
         self.assertEqual(transport.commands[:2], ["HELLO", "STOP"])
         self.assertIn("不是", result["error"])
+
+    def test_fixed_pb11_run_completes_and_records_correct_mapping(self):
+        _, result, states, _, raw = self.run_monitor(mask=1 << 11, done_reason="PIN_TEST_DONE")
+        self.assertEqual(result["outcome"],"completed")
+        self.assertTrue(result["stop_confirmed"])
+        pb11 = next(row for row in states if row["output"]=="1")
+        self.assertEqual((pb11["logical_channels"],pb11["mcu_pins"],pb11["pcb_channels"],pb11["cn1_pins"]),
+                         ("11","PB11","CH15","CN1-18"))
+        self.assertIn(b"PIN_TEST_DONE",raw)
 
     def test_timeout_stops_once_without_restart(self):
         transport, result, *_ = self.run_monitor(done_at=10, max_seconds=0.6)

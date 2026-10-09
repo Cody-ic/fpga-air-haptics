@@ -20,39 +20,49 @@ class IDEProfileTests(unittest.TestCase):
             # Model CubeMX replacing metadata with its two ordinary profiles.
             for config in list(settings):
                 metadata = config.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']")
-                if metadata is not None and metadata.get("name") == "ChannelTest":
+                if metadata is not None and metadata.get("name") in ("ChannelTest", "PinTest"):
                     settings.remove(config)
             for option in tree.getroot().iter("option"):
                 for item in list(option):
-                    if item.get("value", "").startswith("F103_CHANNEL_TEST"):
+                    if item.get("value", "").split("=",1)[0] in ("F103_CHANNEL_TEST", "F103_PIN_TEST"):
                         option.remove(item)
             module.configure_profiles(tree.getroot())
             tree.write(project / ".cproject")
             module.ROOT = project
             module.configure_run()
             module.configure_run("ChannelTest")
+            module.configure_run("PinTest")
             configs = {c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name"): c
                        for c in settings.findall("cconfiguration")}
-            self.assertEqual(set(configs), {"Debug", "Release", "ChannelTest"})
-            self.assertEqual([e.attrib for e in configs["Debug"].iter("extension")],
-                             [e.attrib for e in configs["ChannelTest"].iter("extension")])
-            self.assertEqual(next(configs["ChannelTest"].iter("targetPlatform")).get("binaryParser"),
-                             "org.eclipse.cdt.core.ELF")
+            self.assertEqual(set(configs), {"Debug", "Release", "ChannelTest", "PinTest"})
+            for name in ("ChannelTest", "PinTest"):
+                self.assertEqual([e.attrib for e in configs["Debug"].iter("extension")],
+                                 [e.attrib for e in configs[name].iter("extension")])
+                self.assertEqual(next(configs[name].iter("targetPlatform")).get("binaryParser"),
+                                 "org.eclipse.cdt.core.ELF")
             for name, config in configs.items():
                 defines = [v.get("value") for v in config.iter("listOptionValue")
                            if v.get("value", "").startswith("F103_CHANNEL_TEST")]
-                self.assertEqual(defines, ["F103_CHANNEL_TEST="+str(int(name == "ChannelTest"))])
+                self.assertEqual(defines, ["F103_CHANNEL_TEST="+str(int(name in ("ChannelTest","PinTest")))])
+                pin_defines = [v.get("value") for v in config.iter("listOptionValue")
+                               if v.get("value", "").startswith("F103_PIN_TEST=")]
+                self.assertEqual(pin_defines,["F103_PIN_TEST="+str(int(name=="PinTest"))])
                 for builder in config.iter("builder"):
                     self.assertTrue(builder.get("buildPath").endswith("/"+name))
             for name, filename, local in (
                     ("Debug", "haptics_f103c8.launch", "haptics_run.local.cfg"),
-                    ("ChannelTest", "haptics_f103c8 Channel Test.launch", "haptics_channel_test.local.cfg")):
+                    ("ChannelTest", "haptics_f103c8 Channel Test.launch", "haptics_channel_test.local.cfg"),
+                    ("PinTest", "haptics_f103c8 Pin Test.launch", "haptics_pin_test.local.cfg")):
                 launch = ET.parse(project / filename).getroot()
                 values = {e.get("key"): e.get("value") for e in launch if e.get("key")}
                 prefix = "org.eclipse.cdt.launch."
                 self.assertEqual(values[prefix+"PROJECT_BUILD_CONFIG_ID_ATTR"], configs[name].get("id"))
                 self.assertEqual(values[prefix+"ATTR_BUILD_BEFORE_LAUNCH_ATTR"], "1")
                 self.assertEqual(values[prefix+"PROGRAM_ARGUMENTS"], "-f "+local)
+            # Regeneration must preserve a user's selected PinTest channel.
+            symbols=next(o for o in configs["PinTest"].iter("option")
+                         if o.get("superClass")==module.BASE+"compiler.option.definedsymbols")
+            ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_PIN_TEST_CHANNEL=2")
             before = ET.tostring(tree.getroot())
             module.configure_profiles(tree.getroot())
             self.assertEqual(before, ET.tostring(tree.getroot()))

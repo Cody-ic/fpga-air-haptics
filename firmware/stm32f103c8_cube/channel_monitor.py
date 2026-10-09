@@ -232,7 +232,7 @@ def observe(transport, output_dir, *, max_seconds=65.0, capture=False,
         next_ping = next_snap = next_capture = clock()
         deadline = recorder.started + max_seconds
         while clock() < deadline:
-            if latest and latest["reason"] == "CHANNEL_TEST_DONE":
+            if latest and latest["reason"] in ("CHANNEL_TEST_DONE", "PIN_TEST_DONE"):
                 if latest["state"] != "IDLE" or latest["output"] != "0":
                     raise MonitorError("测试完成标志与输出状态矛盾")
                 stats["outcome"] = "completed"

@@ -411,6 +411,31 @@ class F103Tests(unittest.TestCase):
         snap=Snapshot.parse(self.command("SNAP")[1].fields)
         self.assertEqual(snap.uptime_ms,self.now)
 
+    def test_fixed_pin_profile_and_parameterized_pa8_mapping(self):
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        for label, extra in (("pb11",()),("pb10",("-DF103_PIN_TEST_CHANNEL=10",)),
+                             ("pa8",("-DF103_PIN_TEST_CHANNEL=2","-DF103_PIN_TEST_ON_MS=1500"))):
+            executable=ROOT/"build"/("test_pin_"+label+(".exe" if os.name=="nt" else ""))
+            subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+                "-ffunction-sections","-fdata-sections","-DSTM32F103xB","-DUSE_HAL_DRIVER",
+                "-DF103_CHANNEL_TEST=1","-DF103_PIN_TEST=1",*extra,*("-I"+p for p in includes),
+                "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+                "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+                "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+            subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_invalid_pin_profile_parameters_fail_before_build(self):
+        for extra in (("-DF103_PIN_TEST_CHANNEL=-1",),("-DF103_PIN_TEST_CHANNEL=16",),
+                      ("-DF103_PIN_TEST_ON_MS=0",),("-DF103_CHANNEL_TEST=0",)):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                "-DF103_CHANNEL_TEST=1","-DF103_PIN_TEST=1",*extra,"-x","c","-"],cwd=ROOT,
+                input='#include "app_f103.h"\n',text=True,capture_output=True)
+            self.assertNotEqual(result.returncode,0,extra)
+            self.assertIn("PinTest",result.stderr)
+
     def test_desktop_takeover_and_logged_adc_at_serial_wire_speed(self):
         # Actual F103 C core, with synthetic GPIO/ADC callbacks, not a board test.
         dll = self.dll

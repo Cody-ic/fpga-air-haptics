@@ -177,6 +177,9 @@ static bool output_start(const Config *c, uint64_t us)
         (c->channel_mask & (c->channel_mask - 1u)) || c->shape != POINT ||
         c->mod_hz || c->level != 100 || c->cx_um || c->cy_um || c->z_um != 150000)
         return false;
+#if F103_PIN_TEST
+    if (c->channel_mask != (uint16_t)(1u << F103_PIN_TEST_CHANNEL)) return false;
+#endif
 #endif
     if (pending_fault || !boot_ok || SystemCoreClock != 64000000u) return false;
     /* Keep button pull-ups and every non-array GPIOA output latch unchanged. */
@@ -436,8 +439,13 @@ static void channel_test_poll(uint64_t now_ms)
         channel_test_on = false;
         device.config.channel_mask = 0;
         ++device.revision;
+#if F103_PIN_TEST
+        channel_test_pending = false;
+        device.reason = "PIN_TEST_DONE";
+#else
         device.reason = "CHANNEL_TEST_GAP";
         channel_test_deadline_ms = now_ms + F103_CHANNEL_GAP_MS;
+#endif
     } else if (channel_test_index == HAP_CHANNELS) {
         channel_test_pending = false;
         device.reason = "CHANNEL_TEST_DONE";
@@ -448,7 +456,11 @@ static void channel_test_poll(uint64_t now_ms)
         device.config.z_um = 150000;
         device.config.mod_hz = 0;
         device.config.level = 100;
+#if F103_PIN_TEST
+        device.config.channel_mask = (uint16_t)(1u << F103_PIN_TEST_CHANNEL);
+#else
         device.config.channel_mask = (uint16_t)(1u << channel_test_index);
+#endif
         const char *error = config_compile(&device.config);
         if (error) fail(error);
         else {
@@ -456,10 +468,15 @@ static void channel_test_poll(uint64_t now_ms)
             ++device.revision;
             if (output_start(&device.config, 0)) {
                 device.state = RUNNING;
-                device.reason = "CHANNEL_TEST_ON";
                 channel_test_on = true;
                 ++channel_test_index;
+#if F103_PIN_TEST
+                device.reason = "PIN_TEST_ON";
+                channel_test_deadline_ms = now_ms + F103_PIN_TEST_ON_MS;
+#else
+                device.reason = "CHANNEL_TEST_ON";
                 channel_test_deadline_ms = now_ms + F103_CHANNEL_ON_MS;
+#endif
             } else if (!pending_fault) fail("OUTPUT_START_FAILED");
         }
     }
@@ -490,7 +507,13 @@ static void startup_schedule(uint64_t now_ms)
     channel_test_pending = boot_ok && !pending_fault;
     device.local = true; /* Observing the test via HELLO must not stop it. */
     device.config.channel_mask = 0;
-    if (channel_test_pending) device.reason = "CHANNEL_TEST_WAIT";
+    if (channel_test_pending) {
+#if F103_PIN_TEST
+        device.reason = "PIN_TEST_WAIT";
+#else
+        device.reason = "CHANNEL_TEST_WAIT";
+#endif
+    }
 #else
     autostart_deadline_ms = now_ms + F103_AUTOSTART_MS;
     autostart_pending = boot_ok && !pending_fault;

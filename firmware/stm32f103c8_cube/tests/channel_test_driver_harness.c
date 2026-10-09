@@ -151,13 +151,19 @@ static void off(void)
     assert(port_a.BRR == F103_GPIOA_MASK && port_b.BRR == F103_GPIOB_MASK);
 }
 
+#if F103_PIN_TEST
+#define TEST_ON_REASON "PIN_TEST_ON"
+#else
+#define TEST_ON_REASON "CHANNEL_TEST_ON"
+#endif
+
 static void one_channel(unsigned index)
 {
     assert(playing && device.state == RUNNING && device.local);
     assert(device.config.channel_mask == (uint16_t)(1u << index));
     assert(device.config.shape == POINT && !device.config.mod_hz && device.config.level == 100);
     assert(!device.config.cx_um && !device.config.cy_um && device.config.z_um == 150000);
-    assert(!strcmp(device.reason, "CHANNEL_TEST_ON"));
+    assert(!strcmp(device.reason, TEST_ON_REASON));
     assert(!device.calibration_trial && !device.configured);
     assert(timer.PSC == 0 && timer.ARR == 799u && timer.CCR1 == 1u && !timer.CCER);
     assert(timer.CR1 & TIM_CR1_CEN);
@@ -196,7 +202,7 @@ static void one_channel(unsigned index)
     command(10, "SNAP");
     char mask[32];
     snprintf(mask, sizeof(mask), "channel_mask=%u", 1u << index);
-    assert(strstr(serial_reply, mask) && strstr(serial_reply, "reason=CHANNEL_TEST_ON"));
+    assert(strstr(serial_reply, mask) && strstr(serial_reply, TEST_ON_REASON));
 }
 
 static void reject_controls(void)
@@ -220,6 +226,7 @@ static void reject_controls(void)
     }
 }
 
+#if !F103_PIN_TEST
 int main(void)
 {
     fresh(0);
@@ -446,3 +453,106 @@ int main(void)
     puts("Channel test: static DMA pairs/config, TX deadline/wrap, STOP/fault/reset cancellation passed");
     return 0;
 }
+#else
+int main(void)
+{
+    const unsigned target = F103_PIN_TEST_CHANNEL;
+    uint64_t done = F103_AUTOSTART_MS + F103_PIN_TEST_ON_MS;
+    fresh(0);
+    assert(channel_test_pending && !strcmp(device.reason,"PIN_TEST_WAIT"));
+    command(1,"HELLO");
+    reject_controls();
+    poll(F103_AUTOSTART_MS-1u);
+    off();
+    poll(F103_AUTOSTART_MS);
+    one_channel(target);
+    assert(device.revision==1 && channel_test_deadline_ms==done);
+    command(2,"HELLO");
+    command(3,"PING");
+    reject_controls();
+    poll(done-1u);
+    service();
+    assert(playing);
+    serial_port.SR=USART_SR_TXE;
+    tick_step_ms=1;
+    send_bytes("abcd",4);
+    tick_step_ms=0;
+    off();
+    assert(channel_test_expired && channel_test_pending && device.revision==1);
+    assert(device.config.channel_mask==(uint16_t)(1u<<target));
+    Sample sample;
+    assert(output_readback(&sample) && !sample.output && !sample.drive_on);
+    channel_test_poll(device.now_ms);
+    assert(!channel_test_pending && !channel_test_expired && !channel_test_on);
+    assert(device.state==IDLE && device.revision==2 && !device.config.channel_mask);
+    assert(!strcmp(device.reason,"PIN_TEST_DONE"));
+    reject_controls();
+    poll(done+100000u);
+    off();
+
+    /* STOP in WAIT, ON and deferred completion never starts another pin. */
+    for (unsigned stage=0;stage<3;++stage) {
+        fresh(0);
+        command(1,"HELLO");
+        if (stage) poll(F103_AUTOSTART_MS);
+        if (stage==2) { virtual_tick=(uint32_t)done; service(); }
+        command(2,"STOP");
+        assert(!channel_test_pending && !channel_test_expired);
+        poll(done+100000u);
+        off();
+        assert(device.state==IDLE);
+    }
+    for (unsigned port=0;port<2;++port) {
+        fresh(0);
+        poll(F103_AUTOSTART_MS);
+        dma.ISR=port ? DMA_ISR_TEIF5 : DMA_ISR_TEIF2;
+        app_f103_wave_irq();
+        assert(!channel_test_pending && !strcmp(pending_fault,"DMA_ERROR"));
+        report_fault();
+        poll(done+100000u);
+        off();
+        assert(device.state==FAULT);
+    }
+    for (unsigned masked=0;masked<2;++masked) {
+        fresh(0);
+        interrupt_mask=masked;
+        inject_prepare_fault=true;
+        poll(F103_AUTOSTART_MS);
+        assert(!channel_test_pending && !strcmp(pending_fault,"UART_RX_ERROR"));
+        assert(interrupt_mask==masked);
+        off();
+    }
+    for (unsigned watchdog_kind=0;watchdog_kind<2;++watchdog_kind) {
+        fresh(watchdog_kind ? RCC_CSR_WWDGRSTF : RCC_CSR_IWDGRSTF);
+        assert(!channel_test_pending && !strcmp(pending_fault,"WATCHDOG_RESET"));
+        report_fault();
+        command(1,"HELLO");
+        command(2,"STOP");
+        poll(done+100000u);
+        off();
+    }
+    fresh(0);
+    boot_ok=false;
+    poll(F103_AUTOSTART_MS);
+    off();
+    assert(!channel_test_pending);
+    fresh(0);
+    device.config.shape=POINT;
+    device.config.mod_hz=0;
+    device.config.level=100;
+    device.config.channel_mask=(uint16_t)(1u<<target);
+    assert(!output_start(&device.config,0)); /* Cannot bypass mode ownership. */
+    off();
+    fresh(0);
+    channel_test_internal=true;
+    device.config.shape=POINT;
+    device.config.mod_hz=0;
+    device.config.level=100;
+    device.config.channel_mask=(uint16_t)(1u<<((target+1u)%HAP_CHANNELS));
+    assert(!output_start(&device.config,0)); /* Only the selected pin is allowed. */
+    channel_test_internal=false;
+    off();
+    printf("PinTest channel %u: static pair, single burst, TX deadline and STOP/fault isolation passed\n",target);
+    return 0;
+}
+#endif
