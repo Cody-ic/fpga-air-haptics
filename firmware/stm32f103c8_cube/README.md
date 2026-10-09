@@ -161,16 +161,18 @@ python firmware/stm32f103c8_cube/sync_core.py --project 'D:\STM32Dev\haptics_f10
 
 ### 6.2 固定引脚测试 PinTest
 
-2026-10-09 新增独立 **PinTest** 编译配置和 **haptics_f103c8 Pin Test** 快捷 Run。原 Debug/Release 业务与 ChannelTest 逐通道序列保留原行为；PinTest 复用静态 40 kHz、50% 方波后端，但只测试指定的一路，一次结束后停止，不切换到其他通道。
+2026-10-09 新增独立 **PinTest** 编译配置和 **haptics_f103c8 Pin Test** 快捷 Run。原 Debug/Release 业务与 ChannelTest 逐通道序列保留原行为；PinTest 复用静态 40 kHz、50% 方波后端，默认持续测试指定的一路，不切换到其他通道。
 
-默认 **PB11 → CN1-18 → PCB CH15**，对应软件通道 11、掩码 `2048`（`0x0800`）。初始化后等待 3 秒，连续输出 10 秒，再进入 `IDLE/PIN_TEST_DONE`；测试期间其余 15 路保持低。STOP、故障、看门狗复位禁止启动，以及发包期间截止关闭同样有效。普通业务 Run 不会选择此固件；在 Run Configurations 中明确选择 **haptics_f103c8 Pin Test**。
+默认 **PB11 → CN1-18 → PCB CH15**，对应软件通道 11、掩码 `2048`（`0x0800`）。初始化后等待 3 秒，进入 `RUNNING/PIN_TEST_ON` 并持续输出，直到 STOP、故障或断电；测试期间其余 15 路保持低。看门狗复位仍禁止自动启动。普通业务 Run 不会选择此固件；在 Run Configurations 中明确选择 **haptics_f103c8 Pin Test**。
+
+编译、下载时使用 PinTest 配置及其 ELF；`Debug/haptics_f103c8.elf` 仍为有扫描与调制的业务固件。测 PB11 对 MCU GND 可先用 10 μs/格、1 V/格、DC 耦合和约 1.5 V 上升沿触发；目标周期 25 μs，高低各约 12.5 μs。
 
 参数位于 `Core/Inc/pin_test_config.h`，修改后重新编译 PinTest：
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
 | `F103_PIN_TEST_CHANNEL` | `11` | 测试软件通道，允许 0–15；第 3 节接线表可查对应引脚 |
-| `F103_PIN_TEST_ON_MS` | `10000u` | 本次连续输出时长，单位 ms，必须大于 0 |
+| `F103_PIN_TEST_ON_MS` | `0u` | `0` 表示持续输出；正数表示输出时长（ms），最大 `0x7fffffff` |
 
 例如 `10` 选择 PB10/CN1-17/CH14，`2` 选择 PA8/CN1-9/CH6；不存在 PB2 输出。PinTest 使用 `F103_CHANNEL_TEST=1、F103_PIN_TEST=1`，其他配置的 `F103_PIN_TEST=0`。也可在 PinTest 的编译宏中覆盖上述参数，IDE 配置恢复脚本保留自定义参数。
 
@@ -179,9 +181,11 @@ python firmware/stm32f103c8_cube/build.py --pin-test
 python firmware/stm32f103c8_cube/build.py --pin-test --test-channel 2 --test-on-ms 1500
 ```
 
-命令行产物独立保存到 `build/pin_test/`；CubeIDE 保存到 `PinTest/`，不会覆盖原版本。`channel_monitor.py --port COM4` 同样可观察并保存此模式，看到 `PIN_TEST_DONE` 后确认 STOP 并退出。新版尚未烧录，方波频率与占空比仍需实测；参数选择不改变引脚或 `.ioc`。
+命令行产物独立保存到 `build/pin_test/`；CubeIDE 保存到 `PinTest/`，不会覆盖原版本。`channel_monitor.py --port COM4` 同样可观察并保存此模式，默认监听 65 秒后或按 Ctrl+C 退出时会发送 STOP 并确认关闭；这是工具发出的停止命令，固件本身不设持续模式截止。时长设置为正数时，到期进入 `IDLE/PIN_TEST_DONE`；发包跨截止也会关闭输出。方波频率与占空比仍需实测；参数选择不改变引脚或 `.ioc`。
 
-本次检查：F103 22 项、串口工具 11 项和 IDE 配置 1 项通过；原业务、原逐通道与新 PinTest 均通过严格 Arm GNU 编译。PinTest Flash/RAM 为 37,760/13,464 字节，含原堆栈预留；原两版本资源占用保持上述数值。PB11 默认、PB10 参数覆盖和 PA8 跨端口映射，以及错误参数拒绝、仅选定通道可启动、发包截止和 STOP/故障取消均有电脑回归。
+本次检查：F103 22 项通过，原业务与逐通道回归保持通过；持续 PinTest 通过严格 Arm GNU 编译，Flash/RAM 为 37,640/13,464 字节，含原堆栈预留。回归覆盖 PB11 持续、PA8 持续、PB10/PA8 定时、1 ms 和最大有效时长、HAL tick 回绕、非法参数、单路隔离及 STOP/故障关闭。串口工具 11 项和 IDE 配置 1 项在新增 PinTest 时已通过，本次不改其配置。
+
+2026-10-09 已通过 ST-LINK V2 下载持续 PB11 版本并校验成功。运行超过 3 分钟后读到 `PIN_TEST_ON`、掩码 `2048`、无待处理故障，TIM1 与 DMA 保持启用，`ARR=799`。这是数字运行状态核验，实际引脚的频率、幅度与占空比仍需示波器确认。
 
 ## 7. 软件验证
 

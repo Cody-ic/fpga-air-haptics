@@ -12,9 +12,10 @@
 #define F103_PIN_TEST_CHANNEL 11
 #endif
 
-/* One continuous burst after the existing 3-second startup delay; then stop. */
+/* 0 = continuous output until STOP/fault; positive values limit the burst in ms.
+ * Both start after the existing 3-second startup delay. */
 #ifndef F103_PIN_TEST_ON_MS
-#define F103_PIN_TEST_ON_MS 10000u
+#define F103_PIN_TEST_ON_MS 0u
 #endif
 
 #if F103_PIN_TEST && !F103_CHANNEL_TEST
@@ -23,8 +24,8 @@
 #if F103_PIN_TEST && (F103_PIN_TEST_CHANNEL < 0 || F103_PIN_TEST_CHANNEL >= HAP_CHANNELS)
 #error "PinTest channel must be 0..15; channel 2 uses PA8, not PB2."
 #endif
-#if F103_PIN_TEST && (F103_PIN_TEST_ON_MS < 1 || F103_PIN_TEST_ON_MS > 0x7fffffffu)
-#error "PinTest duration must be positive and less than 2^31 milliseconds."
+#if F103_PIN_TEST && (F103_PIN_TEST_ON_MS < 0 || F103_PIN_TEST_ON_MS > 0x7fffffff)
+#error "PinTest duration must be 0 (continuous) or positive and less than 2^31 milliseconds."
 #endif
 
 #endif

@@ -457,7 +457,10 @@ int main(void)
 int main(void)
 {
     const unsigned target = F103_PIN_TEST_CHANNEL;
-    uint64_t done = F103_AUTOSTART_MS + F103_PIN_TEST_ON_MS;
+    uint64_t late = F103_AUTOSTART_MS + (uint64_t)F103_PIN_TEST_ON_MS + 100000u;
+#if F103_PIN_TEST_ON_MS > 0
+    uint64_t done = F103_AUTOSTART_MS + (uint64_t)F103_PIN_TEST_ON_MS;
+#endif
     fresh(0);
     assert(channel_test_pending && !strcmp(device.reason,"PIN_TEST_WAIT"));
     command(1,"HELLO");
@@ -466,10 +469,15 @@ int main(void)
     off();
     poll(F103_AUTOSTART_MS);
     one_channel(target);
-    assert(device.revision==1 && channel_test_deadline_ms==done);
+    assert(device.revision==1);
+#if F103_PIN_TEST_ON_MS > 0
+    assert(channel_test_deadline_ms==done);
+#endif
     command(2,"HELLO");
     command(3,"PING");
     reject_controls();
+#if F103_PIN_TEST_ON_MS > 0
+    /* Timed profiles still close at their deadline while sending serial data. */
     poll(done-1u);
     service();
     assert(playing);
@@ -487,18 +495,64 @@ int main(void)
     assert(device.state==IDLE && device.revision==2 && !device.config.channel_mask);
     assert(!strcmp(device.reason,"PIN_TEST_DONE"));
     reject_controls();
-    poll(done+100000u);
+    poll(late);
     off();
+#else
+    /* The default never ends after the old 10-second burst or late polls. */
+    poll(F103_AUTOSTART_MS + 10000u);
+    one_channel(target);
+    poll(late);
+    one_channel(target);
+    assert(channel_test_pending && channel_test_on && !channel_test_expired);
+    assert(device.revision==1);
+    serial_port.SR=USART_SR_TXE;
+    tick_step_ms=1;
+    send_bytes("abcd",4);
+    tick_step_ms=0;
+    assert(playing && !channel_test_expired && device.revision==1);
 
-    /* STOP in WAIT, ON and deferred completion never starts another pin. */
+    /* Cross the actual 32-bit HAL tick boundary in service(), while the
+     * foreground's extended uptime remains just before the wrap. */
+    poll((uint64_t)UINT32_MAX - 1000u);
+    one_channel(target);
+    interrupt_mask=1;
+    virtual_tick=500u;
+    service();
+    assert(playing && !channel_test_expired && interrupt_mask==1);
+    uint64_t after_wrap=uptime_ms + (uint32_t)(virtual_tick-last_tick);
+    assert(after_wrap > UINT32_MAX);
+    channel_test_poll(after_wrap);
+    assert(playing && channel_test_pending && channel_test_on);
+    assert(device.revision==1);
+    interrupt_mask=0;
+    poll(after_wrap);
+    one_channel(target);
+    poll((uint64_t)UINT32_MAX * 2u + 100000u);
+    one_channel(target);
+#endif
+
+    /* STOP in WAIT, ON and late/deferred completion never restarts the pin. */
     for (unsigned stage=0;stage<3;++stage) {
         fresh(0);
         command(1,"HELLO");
         if (stage) poll(F103_AUTOSTART_MS);
-        if (stage==2) { virtual_tick=(uint32_t)done; service(); }
+        if (stage==2) {
+#if F103_PIN_TEST_ON_MS > 0
+            virtual_tick=(uint32_t)done;
+            service();
+            assert(channel_test_expired);
+#else
+            poll((uint64_t)UINT32_MAX+100000u);
+            assert(playing);
+#endif
+        }
         command(2,"STOP");
         assert(!channel_test_pending && !channel_test_expired);
-        poll(done+100000u);
+#if F103_PIN_TEST_ON_MS > 0
+        poll(late);
+#else
+        poll(stage==2 ? (uint64_t)UINT32_MAX+200000u : late);
+#endif
         off();
         assert(device.state==IDLE);
     }
@@ -509,7 +563,7 @@ int main(void)
         app_f103_wave_irq();
         assert(!channel_test_pending && !strcmp(pending_fault,"DMA_ERROR"));
         report_fault();
-        poll(done+100000u);
+        poll(late);
         off();
         assert(device.state==FAULT);
     }
@@ -528,7 +582,7 @@ int main(void)
         report_fault();
         command(1,"HELLO");
         command(2,"STOP");
-        poll(done+100000u);
+        poll(late);
         off();
     }
     fresh(0);
@@ -552,7 +606,11 @@ int main(void)
     assert(!output_start(&device.config,0)); /* Only the selected pin is allowed. */
     channel_test_internal=false;
     off();
-    printf("PinTest channel %u: static pair, single burst, TX deadline and STOP/fault isolation passed\n",target);
+#if F103_PIN_TEST_ON_MS > 0
+    printf("PinTest channel %u: static pair, timed burst, TX deadline and STOP/fault isolation passed\n",target);
+#else
+    printf("PinTest channel %u: static pair, continuous output/tick wrap and STOP/fault isolation passed\n",target);
+#endif
     return 0;
 }
 #endif

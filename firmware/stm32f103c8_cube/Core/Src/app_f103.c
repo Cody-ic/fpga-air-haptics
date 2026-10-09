@@ -121,6 +121,7 @@ static void service(void)
 {
     IWDG->KR = 0xaaaau;
 #if F103_CHANNEL_TEST
+#if !F103_PIN_TEST || F103_PIN_TEST_ON_MS > 0
     /* Formatting/transmission can span the ON deadline. Close the pins here,
      * without reentering protocol or changing a partially serialized config. */
     uint64_t now_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
@@ -135,6 +136,7 @@ static void service(void)
         device.latched.output = device.latched.drive_on = false;
     }
     unlock(p);
+#endif
 #else
     if (!playing) return;
     if (!refill) {
@@ -423,6 +425,10 @@ static void channel_test_poll(uint64_t now_ms)
         app_f103_shutdown();
         return;
     }
+#if F103_PIN_TEST && F103_PIN_TEST_ON_MS == 0
+    /* Continuous PinTest has no ON deadline; STOP/fault still cancels it. */
+    if (channel_test_on) return;
+#endif
     if (!channel_test_expired && now_ms < channel_test_deadline_ms) return;
     /* service() may have closed the output while this poll's timestamp was
      * cached before serial transmission. Give GAP its full foreground delay. */

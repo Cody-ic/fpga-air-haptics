@@ -415,8 +415,12 @@ class F103Tests(unittest.TestCase):
         includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
                   "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
                   "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
-        for label, extra in (("pb11",()),("pb10",("-DF103_PIN_TEST_CHANNEL=10",)),
-                             ("pa8",("-DF103_PIN_TEST_CHANNEL=2","-DF103_PIN_TEST_ON_MS=1500"))):
+        for label, extra in (("pb11",()),
+                             ("pb10",("-DF103_PIN_TEST_CHANNEL=10","-DF103_PIN_TEST_ON_MS=10000")),
+                             ("pa8",("-DF103_PIN_TEST_CHANNEL=2","-DF103_PIN_TEST_ON_MS=1500")),
+                             ("pa8_continuous",("-DF103_PIN_TEST_CHANNEL=2","-DF103_PIN_TEST_ON_MS=0")),
+                             ("pb11_short",("-DF103_PIN_TEST_ON_MS=1",)),
+                             ("pb11_long",("-DF103_PIN_TEST_ON_MS=0x7fffffffu",))):
             executable=ROOT/"build"/("test_pin_"+label+(".exe" if os.name=="nt" else ""))
             subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
                 "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
@@ -429,7 +433,9 @@ class F103Tests(unittest.TestCase):
 
     def test_invalid_pin_profile_parameters_fail_before_build(self):
         for extra in (("-DF103_PIN_TEST_CHANNEL=-1",),("-DF103_PIN_TEST_CHANNEL=16",),
-                      ("-DF103_PIN_TEST_ON_MS=0",),("-DF103_CHANNEL_TEST=0",)):
+                      ("-DF103_PIN_TEST_ON_MS=-1",),("-DF103_PIN_TEST_ON_MS=-1u",),
+                      ("-DF103_PIN_TEST_ON_MS=0x80000000u",),
+                      ("-DF103_CHANNEL_TEST=0",)):
             result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
                 "-DF103_CHANNEL_TEST=1","-DF103_PIN_TEST=1",*extra,"-x","c","-"],cwd=ROOT,
                 input='#include "app_f103.h"\n',text=True,capture_output=True)

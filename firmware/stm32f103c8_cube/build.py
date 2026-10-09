@@ -30,12 +30,12 @@ def main():
     parser.add_argument("--test-channel", type=int, choices=range(16),
                         help="PinTest logical channel (2=PA8, 11=PB11); default from pin_test_config.h")
     parser.add_argument("--test-on-ms", type=int,
-                        help="PinTest burst duration; default from pin_test_config.h")
+                        help="PinTest duration in ms (0=continuous); default from pin_test_config.h")
     args = parser.parse_args()
     if not args.pin_test and (args.test_channel is not None or args.test_on_ms is not None):
         parser.error("--test-channel/--test-on-ms require --pin-test")
-    if args.test_on_ms is not None and not 1 <= args.test_on_ms <= 0x7fffffff:
-        parser.error("--test-on-ms must be positive and less than 2^31 milliseconds")
+    if args.test_on_ms is not None and not 0 <= args.test_on_ms <= 0x7fffffff:
+        parser.error("--test-on-ms must be 0 (continuous) or positive and less than 2^31 milliseconds")
     gcc = find_gcc(args.gcc)
     output = ROOT / "build"
     if args.pin_test:
