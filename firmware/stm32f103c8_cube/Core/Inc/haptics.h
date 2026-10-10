@@ -1,6 +1,8 @@
 #ifndef F103_HAPTICS_PROFILE_H
 #define F103_HAPTICS_PROFILE_H
 
+#include "firmware_mode.h"
+
 #define HAP_LINE 1920
 #define HAP_POINTS 64
 #define HAP_STROKES 8

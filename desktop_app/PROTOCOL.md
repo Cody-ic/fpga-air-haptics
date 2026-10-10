@@ -47,6 +47,8 @@ z = 0
 
 阵列中心为原点，列向 +x、行向 +y、发射方向为 +z。半间距位置可能包含 0.5 µm，板端定点实现需正确表示。
 
+F103 的专用逐通道诊断固件可返回 `profile=CHANNEL_TEST`，仅声明 `STOP,STATE,PHASE,GEOMETRY` 能力，另以 `adc_capture=1` 声明采样。HELLO/PING/SNAP 不干预板上有限测试序列，STOP 取消整轮；CONFIG/MODE/START/PAUSE/CALIBRATION 等返回 `CHANNEL_TEST_ONLY`。等待、停顿和完成状态允许 `channel_mask=0`，同时 `output=0`。普通图形客户端仍要求业务能力，应明确拒绝此固件；使用 F103 的专用只读监视脚本，不将零掩码当作业务配置导入。
+
 ### 2.1 可选三维坐标扩展
 
 三维设备使用 `mapping=EXPLICIT_XYZ geometry_id=<24位小写十六进制>`，声明 `GEOMETRY` 能力。`hw_rows*hw_cols` 仍为通道数，但行列与间距不能替代实际坐标。HELLO、CONFIG、STATE 均带同一标识，固件拒绝不匹配的 CONFIG。
@@ -154,6 +156,12 @@ ADC 原码按 `code × Vref / 4095` 换算，默认 Vref=3300 mV，允许手工�
 STOP/本地停止/心跳停止/REMOTE 新握手撤销临时 trial、恢复已有修正并要求重新 CONFIG；CONFIG 总是恢复全通道和已保存修正。临时 trial 存在时不允许切换 LOCAL。断电清空保存值；试验中收到错误不能当作修正成功。主机完整核验 ACK、STATE、采样元数据及复测结果后才发送 store。错误码包含 `BAD_CALIBRATION`、`STEADY_POINT_REQUIRED`、`BUSY`；无效修改不部分生效。
 
 STATE 可选字段 `channel_mask`（十进制）与 `phase_offsets`（逐路码）说明实际门控与修正；缺省按全通道、零修正处理。`phases` 必须是叠加修正后的实际相位，不能再次由客户端加修正。详见[校准流程及边界](ARRAY_CALIBRATION.md)。
+
+### 4.3 F103 测试模式识别
+
+2026-10-10 新增可选 HELLO 字段：`fw_id` 标明固件标识，`firmware_mode=0/1/2/3` 分别为业务、逐通道、固定单路、固定多路；单路模式回传 `pin_channel`，多路模式回传起始 `group_first`、结束 `group_last`（首尾均包含）及程序自动计算的十进制 `group_mask`，两者均回传 `on_ms`（0 表示持续）。测试固件保留 `profile=CHANNEL_TEST`，仍使用 HELLO/PING/SNAP 和 STATE，不新增寄存器诊断命令。旧客户端忽略这些可选字段；仅允许单路的监视器不适用于多路模式。
+
+`serial_diagnostics.py` 保存原始收发字节、带时间报文和包含 MCU/CN1/PCB 通道的状态 CSV；退出仅释放串口，不发送 STOP。REMOTE 业务会话中的 HELLO 仍遵守第 2 节会话规则，会停止旧控制会话，此工具主要用于本地测试。STATE 是数字状态回传，不能替代引脚波形或声压测量。
 
 ## 5. STATE：原子数字快照
 
