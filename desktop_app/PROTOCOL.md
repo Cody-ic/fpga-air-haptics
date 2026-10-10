@@ -159,7 +159,7 @@ STATE 可选字段 `channel_mask`（十进制）与 `phase_offsets`（逐路码�
 
 ### 4.3 F103 测试模式识别
 
-2026-10-10 新增可选 HELLO 字段：`fw_id` 标明固件标识，`firmware_mode=0/1/2/3` 分别为业务、逐通道、固定单路、固定多路；单路模式回传 `pin_channel`，多路模式回传十进制 `group_mask`，两者均回传 `on_ms`（0 表示持续）。测试固件保留 `profile=CHANNEL_TEST`，仍使用 HELLO/PING/SNAP 和 STATE，不新增寄存器诊断命令。旧客户端忽略这些可选字段；仅允许单路的监视器不适用于多路模式。
+2026-10-10 新增可选 HELLO 字段：`fw_id` 标明固件标识，`firmware_mode=0/1/2/3` 分别为业务、逐通道、固定单路、固定多路；单路模式回传 `pin_channel`，多路模式回传起始 `group_first`、结束 `group_last`（首尾均包含）及程序自动计算的十进制 `group_mask`，两者均回传 `on_ms`（0 表示持续）。测试固件保留 `profile=CHANNEL_TEST`，仍使用 HELLO/PING/SNAP 和 STATE，不新增寄存器诊断命令。旧客户端忽略这些可选字段；仅允许单路的监视器不适用于多路模式。
 
 `serial_diagnostics.py` 保存原始收发字节、带时间报文和包含 MCU/CN1/PCB 通道的状态 CSV；退出仅释放串口，不发送 STOP。REMOTE 业务会话中的 HELLO 仍遵守第 2 节会话规则，会停止旧控制会话，此工具主要用于本地测试。STATE 是数字状态回传，不能替代引脚波形或声压测量。
 

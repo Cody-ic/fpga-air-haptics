@@ -464,6 +464,13 @@ int main(void)
 int main(void)
 {
     const uint16_t target = (uint16_t)F103_FIXED_TEST_MASK;
+#if F103_GROUP_TEST
+    /* Build the expected inclusive range independently of the macro shifts. */
+    uint16_t expected_range=0;
+    for (unsigned channel=F103_GROUP_TEST_FIRST_CHANNEL;channel<=F103_GROUP_TEST_LAST_CHANNEL;++channel)
+        expected_range |= (uint16_t)(1u << channel);
+    assert(target==expected_range);
+#endif
     uint64_t late = F103_AUTOSTART_MS + (uint64_t)F103_FIXED_TEST_ON_MS + 100000u;
 #if F103_FIXED_TEST_ON_MS > 0
     uint64_t done = F103_AUTOSTART_MS + (uint64_t)F103_FIXED_TEST_ON_MS;
@@ -474,6 +481,10 @@ int main(void)
     char selected[48], duration[48];
 #if F103_GROUP_TEST
     snprintf(selected,sizeof(selected),"group_mask=%u",target);
+    char first[48], last[48];
+    snprintf(first,sizeof(first),"group_first=%u",F103_GROUP_TEST_FIRST_CHANNEL);
+    snprintf(last,sizeof(last),"group_last=%u",F103_GROUP_TEST_LAST_CHANNEL);
+    assert(strstr(serial_reply,first) && strstr(serial_reply,last));
 #else
     snprintf(selected,sizeof(selected),"pin_channel=%u",F103_PIN_TEST_CHANNEL);
 #endif

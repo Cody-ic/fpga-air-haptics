@@ -147,7 +147,7 @@ python firmware/stm32f103c8_cube/sync_core.py --project 'D:\STM32Dev\haptics_f10
 | `0` / `F103_MODE_BUSINESS` | 业务 | 图形、按键和串口控制，自动运行有 10 秒期限 |
 | `1` / `F103_MODE_CHANNEL_TEST` | 逐通道 | 等待 3 秒，逻辑通道 0→15 各输出 2 秒、全关 1 秒；约 51 秒后停止 |
 | `2` / `F103_MODE_PIN_TEST` | 固定单路 | 等待 3 秒，只输出参数指定通道，默认 PB11 持续输出 |
-| `3` / `F103_MODE_GROUP_TEST`（当前默认） | 固定多路 | 等待 3 秒，CN1 第 6、7 排四路同时持续输出 |
+| `3` / `F103_MODE_GROUP_TEST`（当前默认） | 固定多路 | 等待 3 秒，指定范围内的通道同时持续输出，默认 8～13 |
 
 调试版本关闭调制、等级 100%；逐通道和单路模式每次只有一个掩码位有效，多路模式可同时启用多个。2026-10-09 的源码改为静态循环 DMA：TIM1 `PSC=0、ARR=799`，按 64 MHz 定时器时钟每 12.5 μs 交替写高、低两个字，目标为连续 40 kHz、50% 占空比；不再动态回填，也不插入每 250 μs 的 25 μs 全低保护。两路 DMA 只开启传输错误中断，错误、串口故障及 STOP 仍关闭全部输出。实际载波、占空比与声音变化需示波器验证。掩码对应逻辑编号，物理换能器顺序必须查第 3 节。
 
@@ -192,7 +192,7 @@ python firmware/stm32f103c8_cube/build.py --business
 
 ### 6.3 双向串口与诊断日志
 
-测试和业务共用 USART2 的接收 IRQ、HAP3 命令解析与 CRC 回传；不用另一份 `main.c`。`HELLO/PING/SNAP` 原本已可用，2026-10-10 在 HELLO 增加 `fw_id=F103_SERIAL_20261010`、`firmware_mode=0/1/2/3`；固定单路回报 `pin_channel/on_ms`，固定多路回报 `group_mask/on_ms`，可以确认实际烧录模式。STATE 已回传通道掩码、输出、运行时间和故障原因，不新增寄存器诊断命令。协议字段见[串口协议](../../desktop_app/PROTOCOL.md)。
+测试和业务共用 USART2 的接收 IRQ、HAP3 命令解析与 CRC 回传；不用另一份 `main.c`。`HELLO/PING/SNAP` 原本已可用，2026-10-10 在 HELLO 增加 `fw_id=F103_SERIAL_20261010`、`firmware_mode=0/1/2/3`；固定单路回报 `pin_channel/on_ms`，固定多路回报 `group_first/group_last/group_mask/on_ms`，可以确认实际烧录模式和范围。STATE 已回传通道掩码、输出、运行时间和故障原因，不新增寄存器诊断命令。协议字段见[串口协议](../../desktop_app/PROTOCOL.md)。
 
 在仓库根目录运行（需安装 `desktop_app/requirements.txt`）：
 
@@ -208,20 +208,24 @@ python firmware/stm32f103c8_cube/serial_diagnostics.py --port COM4 --seconds 10
 
 ### 6.4 固定多路测试 GroupTest
 
-当前默认选择 `F103_MODE_GROUP_TEST`。修改 `Core/Inc/firmware_mode.h` 中的 `F103_GROUP_TEST_MASK` 选通道，`F103_GROUP_TEST_ON_MS=0u` 表示持续输出；保存后照常使用原来的 CubeIDE Run，无需更换 `main.c`、构建配置或 ELF。
+修改 `Core/Inc/firmware_mode.h` 顶部的手动配置区，只填写十进制起始、结束通道，不用计算掩码：
 
-默认 `0x3300u` 选中逻辑通道 8、9、12、13。方向仍按绿色发射板芯片面朝向自己、CN1 在左、XT30 在右下，CN1 从底部向上数：
+```c
+#define F103_FIRMWARE_MODE F103_MODE_GROUP_TEST
+#define F103_GROUP_TEST_FIRST_CHANNEL 8
+#define F103_GROUP_TEST_LAST_CHANNEL 13
+#define F103_GROUP_TEST_ON_MS 0u
+```
 
-| CN1 排 | 右侧针 / MCU / PCB | 左侧针 / MCU / PCB |
-|---|---|---|
-| 第 6 排 | 11 / PB8 / CH12 | 12 / PB9 / CH13 |
-| 第 7 排 | 13 / PB12 / CH8 | 14 / PB13 / CH9 |
+起始、结束都包含。例子同时输出逻辑通道 **8、9、10、11、12、13**，即 PB8～PB13，共 6 路；不是原来第 6、7 排的四路选择，CN1-17/18 两路也在此范围内。全部通道填 `0` 和 `15`；只测一路可把起始、结束填成相同值。通道允许 0～15，起始不能大于结束，非法范围在编译时拒绝。通道 2 对应 PA8，其余对应同编号 PB 引脚；CN1 与 PCB 对照见第 3 节。
 
-上电等 3 秒进入 `GROUP_TEST_ON`，四路输出同相位、40 kHz、50% 方波，其余 12 路保持低。四路 GPIOB 使用同一次 DMA 写入；不进行相位求解，不代表已形成聚焦声场。STOP、UART/DMA 故障和看门狗保护仍有效；正数时长到期进入 `GROUP_TEST_DONE`，不自动重启。引脚、`.ioc` 和定时器硬件配置不变。
+`F103_GROUP_TEST_ON_MS=0u` 表示持续，正数表示毫秒。保存后照常使用原来的 CubeIDE Run，无需更换 `main.c`、构建配置或 ELF。上电等 3 秒进入 `GROUP_TEST_ON`，指定范围输出同相位、40 kHz、50% 方波，其余通道保持低。不进行聚焦计算。STOP、UART/DMA 故障和看门狗保护仍有效；定时到期进入 `GROUP_TEST_DONE`，不自动重启。引脚、`.ioc` 和定时器配置不变。
 
-通过 `serial_diagnostics.py` 读取，HELLO 应回报 `firmware_mode=3 group_mask=13056 on_ms=0`，STATE 应回报 `channel_mask=13056`。原来的 `channel_monitor.py` 限制单路，不用于此模式。可选 CLI 编译：`python firmware/stm32f103c8_cube/build.py --group-test --test-mask 0x3300`；不会烧录。
+通过 `serial_diagnostics.py` 读取，默认 HELLO 应回报 `firmware_mode=3 group_first=8 group_last=13 group_mask=16128 on_ms=0`。`group_mask/channel_mask` 是程序生成的协议信息，无需手动填写。原来的 `channel_monitor.py` 限制单路，不用于此模式。可选 CLI 编译：`python firmware/stm32f103c8_cube/build.py --group-test --test-first-channel 8 --test-last-channel 13`；不会烧录。
 
 2026-10-10 软件验证：F103 25 项、串口记录 13 项、IDE 配置 1 项和共享 F411 核心 17 项通过。多路模式通过 Arm GNU `-Wall -Wextra -Werror` 编译，Flash/RAM 为 37,764/13,464 字节。已同步 CubeIDE 源码，未烧录或测量多路实板波形。
+
+同日改为起始/结束范围配置后，F103 25 项、串口记录 14 项、IDE 配置 1 项通过；范围覆盖单个首/尾通道、全通道和跨 PA8，负数、越界及反向范围均拒绝。范围版严格 Arm GNU 编译 Flash/RAM 为 37,796/13,464 字节，未烧录。
 
 ## 7. 软件验证
 

@@ -31,20 +31,23 @@ def main():
     profiles.add_argument("--pin-test", action="store_true",
                           help="Build the parameterized fixed-pin diagnostic profile")
     profiles.add_argument("--group-test", action="store_true",
-                          help="Build simultaneous fixed-mask outputs (mode 3)")
+                          help="Build simultaneous channel-range outputs (mode 3)")
     parser.add_argument("--test-channel", type=int, choices=range(16),
                         help="PinTest logical channel (2=PA8, 11=PB11); default from firmware_mode.h")
     parser.add_argument("--test-on-ms", type=int,
                         help="Fixed test duration in ms (0=continuous); default from firmware_mode.h")
-    parser.add_argument("--test-mask", type=lambda value: int(value, 0),
-                        help="GroupTest logical-channel bitmask, e.g. 0x3300; default from firmware_mode.h")
+    parser.add_argument("--test-first-channel", type=int, choices=range(16),
+                        help="First GroupTest logical channel, included; default from firmware_mode.h")
+    parser.add_argument("--test-last-channel", type=int, choices=range(16),
+                        help="Last GroupTest logical channel, included; default from firmware_mode.h")
     args = parser.parse_args()
     if args.test_channel is not None and not args.pin_test:
         parser.error("--test-channel requires --pin-test")
-    if args.test_mask is not None and not args.group_test:
-        parser.error("--test-mask requires --group-test")
-    if args.test_mask is not None and not 1 <= args.test_mask <= 0xffff:
-        parser.error("--test-mask must be 1..0xffff")
+    if (args.test_first_channel is not None or args.test_last_channel is not None) and not args.group_test:
+        parser.error("--test-first-channel/--test-last-channel require --group-test")
+    if (args.test_first_channel is not None and args.test_last_channel is not None
+            and args.test_first_channel > args.test_last_channel):
+        parser.error("GroupTest first channel must be <= last channel")
     if args.test_on_ms is not None and not (args.pin_test or args.group_test):
         parser.error("--test-on-ms requires --pin-test or --group-test")
     if args.test_on_ms is not None and not 0 <= args.test_on_ms <= 0x7fffffff:
@@ -72,8 +75,10 @@ def main():
     if args.test_on_ms is not None:
         name = "F103_GROUP_TEST_ON_MS" if args.group_test else "F103_PIN_TEST_ON_MS"
         flags.append("-D" + name + "=" + str(args.test_on_ms))
-    if args.test_mask is not None:
-        flags.append("-DF103_GROUP_TEST_MASK=" + str(args.test_mask))
+    if args.test_first_channel is not None:
+        flags.append("-DF103_GROUP_TEST_FIRST_CHANNEL=" + str(args.test_first_channel))
+    if args.test_last_channel is not None:
+        flags.append("-DF103_GROUP_TEST_LAST_CHANNEL=" + str(args.test_last_channel))
     includes = ["Core/Inc", "Drivers/STM32F1xx_HAL_Driver/Inc",
                 "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
                 "Drivers/CMSIS/Device/ST/STM32F1xx/Include", "Drivers/CMSIS/Include"]

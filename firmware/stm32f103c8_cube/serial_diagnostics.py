@@ -168,6 +168,7 @@ def observe(transport, output_dir, *, max_seconds=10.0, reply_timeout=2.0,
             stats.update(handshake=True, boot=fields["boot"], profile=fields.get("profile", "BUSINESS"),
                          fw_id=fields.get("fw_id"), firmware_mode=fields.get("firmware_mode"),
                          pin_channel=fields.get("pin_channel"), group_mask=fields.get("group_mask"),
+                         group_first=fields.get("group_first"), group_last=fields.get("group_last"),
                          on_ms=fields.get("on_ms"))
             if latest_state is not None:
                 check_boot(latest_state)

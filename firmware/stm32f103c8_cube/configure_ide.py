@@ -57,6 +57,8 @@ def configure_profiles(root):
                             "F103_CHANNEL_TEST", "F103_PIN_TEST", "F103_FIRMWARE_MODE",
                             "F103_PIN_TEST_CHANNEL", "F103_PIN_TEST_ON_MS",
                             "F103_GROUP_TEST", "F103_FIXED_TEST", "F103_GROUP_TEST_MASK",
+                            "F103_GROUP_TEST_FIRST_CHANNEL", "F103_GROUP_TEST_LAST_CHANNEL",
+                            "F103_GROUP_TEST_EFFECTIVE_MASK",
                             "F103_GROUP_TEST_ON_MS", "F103_FIXED_TEST_MASK", "F103_FIXED_TEST_ON_MS"):
                         option.remove(item)
         for chain in config.iter("toolChain"):

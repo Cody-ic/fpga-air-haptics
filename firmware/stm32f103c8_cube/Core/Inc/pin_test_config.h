@@ -12,8 +12,12 @@
 #error "PinTest duration must be 0 (continuous) or positive and less than 2^31 milliseconds."
 #endif
 
-#if F103_GROUP_TEST && (F103_GROUP_TEST_MASK <= 0 || F103_GROUP_TEST_MASK > 0xffffu)
-#error "GroupTest mask must select at least one logical channel within bits 0..15."
+#if F103_GROUP_TEST && (F103_GROUP_TEST_FIRST_CHANNEL < 0 || F103_GROUP_TEST_FIRST_CHANNEL >= HAP_CHANNELS || \
+    F103_GROUP_TEST_LAST_CHANNEL < F103_GROUP_TEST_FIRST_CHANNEL || F103_GROUP_TEST_LAST_CHANNEL >= HAP_CHANNELS)
+#error "GroupTest range must satisfy 0 <= FIRST_CHANNEL <= LAST_CHANNEL <= 15 (inclusive)."
+#endif
+#if F103_GROUP_TEST && defined(F103_GROUP_TEST_MASK)
+#error "GroupTest no longer takes a manual mask; set FIRST_CHANNEL and LAST_CHANNEL in firmware_mode.h."
 #endif
 #if F103_GROUP_TEST && (F103_GROUP_TEST_ON_MS < 0 || F103_GROUP_TEST_ON_MS > 0x7fffffff)
 #error "GroupTest duration must be 0 (continuous) or positive and less than 2^31 milliseconds."

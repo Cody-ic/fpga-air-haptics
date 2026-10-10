@@ -11,7 +11,7 @@
  * 所有模式共用 main.c，不需要换源文件、ELF 或烧录配置。
  * ===================================================================== */
 
-/* 模式：0=业务图形，1=逐通道，2=固定单路，3=固定多路（当前默认）。 */
+/* 模式：0=业务图形，1=逐通道，2=固定单路，3=固定多路。 */
 #ifndef F103_FIRMWARE_MODE
 #define F103_FIRMWARE_MODE F103_MODE_GROUP_TEST
 #endif
@@ -30,14 +30,16 @@
 #define F103_PIN_TEST_ON_MS 0u
 #endif
 
-/* >>> 多路同时测试，只改下面的掩码（每一位对应一个软件通道） <<<
- * 0x3300u = (1u<<8)|(1u<<9)|(1u<<12)|(1u<<13)。
- * 按 CN1 从底部向上数：第 6 排=11/12 针，第 7 排=13/14 针。
- * 对应 PB8、PB9、PB12、PB13；PCB CH12、CH13、CH8、CH9。
+/* >>> 多路同时测试：只改下面的起始、结束通道（两端都包含） <<<
+ * 通道范围 0..15，起始必须 <= 结束。例如 8..13 共输出 6 路：
+ * PB8、PB9、PB10、PB11、PB12、PB13；不是只选首尾两路。
  * 各选中通道同时输出同相位 40 kHz、50% 方波，其余通道保持低。
  * 此参数仅在多路模式（3）生效；通道 2 仍对应 PA8，不是 PB2。 */
-#ifndef F103_GROUP_TEST_MASK
-#define F103_GROUP_TEST_MASK 0x3300u
+#ifndef F103_GROUP_TEST_FIRST_CHANNEL
+#define F103_GROUP_TEST_FIRST_CHANNEL 8
+#endif
+#ifndef F103_GROUP_TEST_LAST_CHANNEL
+#define F103_GROUP_TEST_LAST_CHANNEL 13
 #endif
 
 /* 多路输出时长：0u=持续；正数=毫秒。启动前等待 3 秒。 */
@@ -60,8 +62,17 @@
 #define F103_GROUP_TEST (F103_FIRMWARE_MODE == 3)
 #define F103_FIXED_TEST (F103_PIN_TEST || F103_GROUP_TEST)
 
+/* 自动生成内部掩码；先验证范围，避免非法参数造成移位溢出。 */
+#if F103_GROUP_TEST_FIRST_CHANNEL >= 0 && F103_GROUP_TEST_FIRST_CHANNEL <= 15 && \
+    F103_GROUP_TEST_LAST_CHANNEL >= F103_GROUP_TEST_FIRST_CHANNEL && F103_GROUP_TEST_LAST_CHANNEL <= 15
+#define F103_GROUP_TEST_EFFECTIVE_MASK \
+    ((0xffffu >> (15u - F103_GROUP_TEST_LAST_CHANNEL)) & (0xffffu << F103_GROUP_TEST_FIRST_CHANNEL))
+#else
+#define F103_GROUP_TEST_EFFECTIVE_MASK 0u
+#endif
+
 #if F103_GROUP_TEST
-#define F103_FIXED_TEST_MASK F103_GROUP_TEST_MASK
+#define F103_FIXED_TEST_MASK F103_GROUP_TEST_EFFECTIVE_MASK
 #define F103_FIXED_TEST_ON_MS F103_GROUP_TEST_ON_MS
 #define F103_FIXED_TEST_WAIT_REASON "GROUP_TEST_WAIT"
 #define F103_FIXED_TEST_ON_REASON "GROUP_TEST_ON"

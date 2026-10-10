@@ -445,12 +445,19 @@ class F103Tests(unittest.TestCase):
         includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
                   "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
                   "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
-        for label, extra in (("rows_6_7",()),
-                             ("rows_6_7_timed",("-DF103_GROUP_TEST_ON_MS=2000",)),
-                             ("pa8_pb11",("-DF103_GROUP_TEST_MASK=0x0804u",
-                                           "-DF103_GROUP_TEST_ON_MS=1500")),
-                             ("pa8_pb11_continuous",("-DF103_GROUP_TEST_MASK=0x0804u",
-                                                      "-DF103_GROUP_TEST_ON_MS=0"))):
+        for label, extra in (("range_8_13",()),
+                             ("range_8_13_timed",("-DF103_GROUP_TEST_ON_MS=2000",)),
+                             ("range_pa8_pb3",("-DF103_GROUP_TEST_FIRST_CHANNEL=2",
+                                               "-DF103_GROUP_TEST_LAST_CHANNEL=3")),
+                             ("range_pa8_pb3_timed",("-DF103_GROUP_TEST_FIRST_CHANNEL=2",
+                                                     "-DF103_GROUP_TEST_LAST_CHANNEL=3",
+                                                     "-DF103_GROUP_TEST_ON_MS=1500")),
+                             ("all_channels",("-DF103_GROUP_TEST_FIRST_CHANNEL=0",
+                                               "-DF103_GROUP_TEST_LAST_CHANNEL=15")),
+                             ("last_channel",("-DF103_GROUP_TEST_FIRST_CHANNEL=15",
+                                               "-DF103_GROUP_TEST_LAST_CHANNEL=15")),
+                             ("first_channel",("-DF103_GROUP_TEST_FIRST_CHANNEL=0",
+                                                "-DF103_GROUP_TEST_LAST_CHANNEL=0"))):
             executable=ROOT/"build"/("test_group_"+label+(".exe" if os.name=="nt" else ""))
             subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
                 "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
@@ -462,8 +469,14 @@ class F103Tests(unittest.TestCase):
             subprocess.run([str(executable)],cwd=ROOT,check=True)
 
     def test_invalid_group_profile_parameters_fail_before_build(self):
-        for extra in (("-DF103_GROUP_TEST_MASK=0",),("-DF103_GROUP_TEST_MASK=0x10000u",),
-                      ("-DF103_GROUP_TEST_MASK=-1",),("-DF103_GROUP_TEST_MASK=-1u",),
+        for extra in (("-DF103_GROUP_TEST_FIRST_CHANNEL=-1",),
+                      ("-DF103_GROUP_TEST_FIRST_CHANNEL=-1u",),
+                      ("-DF103_GROUP_TEST_LAST_CHANNEL=-1",),
+                      ("-DF103_GROUP_TEST_LAST_CHANNEL=-1u",),
+                      ("-DF103_GROUP_TEST_FIRST_CHANNEL=16",),
+                      ("-DF103_GROUP_TEST_LAST_CHANNEL=16",),
+                      ("-DF103_GROUP_TEST_FIRST_CHANNEL=13","-DF103_GROUP_TEST_LAST_CHANNEL=8"),
+                      ("-DF103_GROUP_TEST_MASK=0x3300u",),
                       ("-DF103_GROUP_TEST_ON_MS=-1",),("-DF103_GROUP_TEST_ON_MS=-1u",),
                       ("-DF103_GROUP_TEST_ON_MS=0x80000000u",)):
             result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",

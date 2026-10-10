@@ -303,7 +303,9 @@ static void process(Device *d)
         append(" pin_channel=%u on_ms=%lu", F103_PIN_TEST_CHANNEL,
                (unsigned long)F103_PIN_TEST_ON_MS);
 #elif F103_GROUP_TEST
-        append(" group_mask=%u on_ms=%lu", (unsigned)F103_GROUP_TEST_MASK,
+        append(" group_first=%u group_last=%u group_mask=%u on_ms=%lu",
+               (unsigned)F103_GROUP_TEST_FIRST_CHANNEL, (unsigned)F103_GROUP_TEST_LAST_CHANNEL,
+               (unsigned)F103_GROUP_TEST_EFFECTIVE_MASK,
                (unsigned long)F103_GROUP_TEST_ON_MS);
 #endif
 #endif

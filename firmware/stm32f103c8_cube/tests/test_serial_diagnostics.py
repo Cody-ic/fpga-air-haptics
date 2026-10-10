@@ -27,7 +27,8 @@ class MockSerial:
     def __init__(self, clock, *, hello=True, bad_crc=False,
                  restart_at=None, fault=False, lost_ack=None, wrong_ack=False,
                  no_state=False, io_failure_at=None,
-                 interrupt_at=None, device="STM32F103C8T6", simulated=0, group_mask=None):
+                 interrupt_at=None, device="STM32F103C8T6", simulated=0, group_mask=None,
+                 group_first=None, group_last=None):
         self.clock = clock
         self.hello = hello
         self.bad_crc = bad_crc
@@ -41,6 +42,8 @@ class MockSerial:
         self.device = device
         self.simulated = simulated
         self.group_mask = group_mask
+        self.group_first = group_first
+        self.group_last = group_last
         self.commands = []
         self.writes = bytearray()
         self.buffer = bytearray()
@@ -86,6 +89,8 @@ class MockSerial:
                 self.append("ACK", frame.seq, "PING", applied=1)
             test_fields = (dict(firmware_mode=2, pin_channel=11) if self.group_mask is None
                            else dict(firmware_mode=3, group_mask=self.group_mask))
+            if self.group_first is not None:
+                test_fields.update(group_first=self.group_first, group_last=self.group_last)
             self.append("ACK", frame.seq, "HELLO", proto=3, boot=self.boot,
                         device=self.device, simulated=self.simulated, profile="CHANNEL_TEST",
                         fw_id="F103_20261010", on_ms=0, **test_fields)
@@ -169,6 +174,14 @@ class SerialDiagnosticsTests(unittest.TestCase):
                          ("PB8;PB9;PB12;PB13", "CH12;CH13;CH8;CH9", "CN1-11;CN1-12;CN1-13;CN1-14"))
         self.assertEqual(states[0]["channel_mask"], "0x3300")
         self.assertEqual(states[0]["reason"], "GROUP_TEST_ON")
+
+    def test_group_range_readback_records_inclusive_limits(self):
+        _, result, states, *_ = self.run_diagnostics(group_mask=0x3f00, group_first=8, group_last=13)
+        self.assertEqual(result["outcome"], "completed")
+        self.assertEqual((result["group_first"], result["group_last"], result["group_mask"]),
+                         ("8", "13", "16128"))
+        self.assertEqual(states[0]["logical_channels"], "8;9;10;11;12;13")
+        self.assertEqual(states[0]["mcu_pins"], "PB8;PB9;PB10;PB11;PB12;PB13")
 
     def test_no_response_is_bounded_and_never_stops(self):
         transport, result, *_ = self.run_diagnostics(hello=False)
