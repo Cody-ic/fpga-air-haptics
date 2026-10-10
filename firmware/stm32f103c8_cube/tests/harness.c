@@ -79,3 +79,7 @@ API void test_wave(uint64_t us, uint16_t *out_b, uint16_t *out_a, uint16_t idle,
     f103_wave_render(&device.config,us,out_b,out_a,idle,s,&active_cycles);
 }
 API unsigned test_active_cycles(void) { return active_cycles; }
+API void test_static_focus(uint64_t us, uint16_t *out_b, uint16_t *out_a, uint16_t idle, Sample *s)
+{
+    f103_wave_static_focus(&device.config, us, out_b, out_a, idle, s);
+}

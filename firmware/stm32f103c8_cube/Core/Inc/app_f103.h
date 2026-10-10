@@ -9,8 +9,6 @@
 #define F103_HALF_US (F103_HALF_CYCLES * 25u)
 #define F103_GPIOB_MASK 0xfffbu /* PB2/BOOT1 is not an array output. */
 #define F103_GPIOA_MASK (1u << 8u) /* Logical channel 2 uses exposed PA8. */
-#define F103_AUTOSTART_MS 3000u
-#define F103_AUTO_RUN_LIMIT_MS 10000u /* Bound unattended prototype startup. */
 #define F103_CHANNEL_ON_MS 2000u
 #define F103_CHANNEL_GAP_MS 1000u
 #define F103_CHANNEL_DMA_WORDS 2u
@@ -27,5 +25,11 @@ bool f103_wave_prepare(const Config *);
 bool f103_wave_ready(uint64_t);
 void f103_wave_render(const Config *, uint64_t, uint16_t *, uint16_t *, uint16_t, Sample *, uint16_t *);
 bool f103_drive_on(const Config *, const Sample *, uint64_t);
+void f103_wave_static_focus(const Config *, uint64_t, uint16_t *, uint16_t *, uint16_t, Sample *);
+
+#if !F103_CHANNEL_TEST
+_Static_assert(F103_BUSINESS_SHAPE >= POINT && F103_BUSINESS_SHAPE <= ARROW,
+               "Business startup shape must be POINT or another built-in shape.");
+#endif
 
 #endif

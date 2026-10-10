@@ -13,7 +13,39 @@
 
 /* 模式：0=业务图形，1=逐通道，2=固定单路，3=固定多路。 */
 #ifndef F103_FIRMWARE_MODE
-#define F103_FIRMWARE_MODE F103_MODE_GROUP_TEST
+#define F103_FIRMWARE_MODE F103_MODE_BUSINESS
+#endif
+
+/* >>> 业务：固定中心焦点。坐标单位 um；Z 是距阵列发射面的距离 <<<
+ * POINT=固定焦点；也可改为 CIRCLE 等已有基础图形。
+ * 默认无调制、满等级，用于先核验各路相位及聚焦；并非触觉效果证明。 */
+#ifndef F103_BUSINESS_SHAPE
+#define F103_BUSINESS_SHAPE POINT
+#endif
+#ifndef F103_BUSINESS_X_UM
+#define F103_BUSINESS_X_UM 0
+#endif
+#ifndef F103_BUSINESS_Y_UM
+#define F103_BUSINESS_Y_UM 0
+#endif
+#ifndef F103_BUSINESS_Z_UM
+#define F103_BUSINESS_Z_UM 150000
+#endif
+#ifndef F103_BUSINESS_MOD_HZ
+#define F103_BUSINESS_MOD_HZ 0
+#endif
+#ifndef F103_BUSINESS_LEVEL
+#define F103_BUSINESS_LEVEL 100
+#endif
+
+/* 启动等待（所有模式）：毫秒。业务自动运行时长：0u=持续；
+ * 10000u=运行 10 秒。STOP、故障及看门狗保护仍有效。
+ * 运行时长仅约束上电自动启动，串口/按键显式启动遵从原控制流程。 */
+#ifndef F103_AUTOSTART_MS
+#define F103_AUTOSTART_MS 3000u
+#endif
+#ifndef F103_AUTO_RUN_LIMIT_MS
+#define F103_AUTO_RUN_LIMIT_MS 0u
 #endif
 
 /* >>> 单路测试时，只改下一行的通道号 <<<
@@ -24,7 +56,7 @@
 #define F103_PIN_TEST_CHANNEL 11
 #endif
 
-/* 输出时长：0u=一直输出；如 2000u=输出 2 秒。启动前均等待 3 秒。
+/* 输出时长：0u=一直输出；如 2000u=输出 2 秒。默认启动前等待 3 秒。
  * STOP、故障或断电仍会停止输出。仅在固定通道模式（2）生效。 */
 #ifndef F103_PIN_TEST_ON_MS
 #define F103_PIN_TEST_ON_MS 0u
@@ -42,7 +74,7 @@
 #define F103_GROUP_TEST_LAST_CHANNEL 13
 #endif
 
-/* 多路输出时长：0u=持续；正数=毫秒。启动前等待 3 秒。 */
+/* 多路输出时长：0u=持续；正数=毫秒。默认启动前等待 3 秒。 */
 #ifndef F103_GROUP_TEST_ON_MS
 #define F103_GROUP_TEST_ON_MS 0u
 #endif
@@ -61,6 +93,22 @@
 #define F103_PIN_TEST (F103_FIRMWARE_MODE == 2)
 #define F103_GROUP_TEST (F103_FIRMWARE_MODE == 3)
 #define F103_FIXED_TEST (F103_PIN_TEST || F103_GROUP_TEST)
+
+#if F103_AUTOSTART_MS < 0 || F103_AUTOSTART_MS > 0x7fffffff || \
+    F103_AUTO_RUN_LIMIT_MS < 0 || F103_AUTO_RUN_LIMIT_MS > 0x7fffffff
+#error "Startup delay and business run limit must be 0..2147483647 milliseconds."
+#endif
+#if !F103_CHANNEL_TEST
+#if F103_BUSINESS_X_UM < -100000 || F103_BUSINESS_X_UM > 100000 || \
+    F103_BUSINESS_Y_UM < -100000 || F103_BUSINESS_Y_UM > 100000 || \
+    F103_BUSINESS_Z_UM < 20000 || F103_BUSINESS_Z_UM > 300000
+#error "Business focus coordinates exceed the supported workspace."
+#endif
+#if F103_BUSINESS_LEVEL < 0 || F103_BUSINESS_LEVEL > 100 || \
+    F103_BUSINESS_MOD_HZ < 0 || F103_BUSINESS_MOD_HZ > 1000
+#error "Business level must be 0..100 and modulation must be 0..1000 Hz."
+#endif
+#endif
 
 /* 自动生成内部掩码；先验证范围，避免非法参数造成移位溢出。 */
 #if F103_GROUP_TEST_FIRST_CHANNEL >= 0 && F103_GROUP_TEST_FIRST_CHANNEL <= 15 && \

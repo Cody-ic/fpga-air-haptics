@@ -24,6 +24,8 @@ static uint64_t bank_us[2], next_us;
 static volatile bool refill, ready[2];
 static volatile unsigned free_bank;
 static const Config *playing_config;
+static volatile bool static_focus;
+static uint64_t static_started_ms, static_resume_us;
 #endif
 static uint16_t gpioa_idle;
 static volatile bool playing;
@@ -79,6 +81,7 @@ void app_f103_shutdown(void)
     refill = false;
     ready[0] = ready[1] = false;
     auto_run_pending = false;
+    static_focus = false;
 #endif
     unlock(p);
 }
@@ -98,7 +101,7 @@ void app_f103_wave_irq(void)
     DMA1->IFCR = DMA_IFCR_CGIF5 | DMA_IFCR_CGIF2;
     if (flags & (DMA_ISR_TEIF5 | DMA_ISR_TEIF2)) { fail("DMA_ERROR"); return; }
 #if !F103_CHANNEL_TEST
-    if (!playing) return;
+    if (!playing || static_focus) return;
     /* Port A transfers after port B, so its boundary releases both buffers. */
     unsigned boundaries = flags & (DMA_ISR_HTIF2 | DMA_ISR_TCIF2);
     if (!boundaries) return;
@@ -138,7 +141,7 @@ static void service(void)
     unlock(p);
 #endif
 #else
-    if (!playing) return;
+    if (!playing || static_focus) return;
     if (!refill) {
         /* Finish one complete focus between protocol operations. A single
          * phase per formatted field can starve the producer during ADC replies.
@@ -204,15 +207,22 @@ static bool output_start(const Config *c, uint64_t us)
     playing_config = c;
     us = us/25u*25u;
     f103_wave_reset();
-    for (unsigned i = 0; i < 2; ++i) {
-        bank_us[i] = us+i*F103_HALF_US;
-        f103_wave_render(c, bank_us[i], waves_b[i], waves_a[i], gpioa_idle,
-                         &samples[i], &drive_cycles[i]);
+    bool point_backend = c->shape == POINT && c->level == 100 && !c->mod_hz;
+    if (point_backend) {
+        f103_wave_static_focus(c, us, waves_b[0], waves_a[0], gpioa_idle, &samples[0]);
+        static_resume_us = us;
+        static_started_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
+    } else {
+        for (unsigned i = 0; i < 2; ++i) {
+            bank_us[i] = us+i*F103_HALF_US;
+            f103_wave_render(c, bank_us[i], waves_b[i], waves_a[i], gpioa_idle,
+                             &samples[i], &drive_cycles[i]);
+        }
+        for (unsigned step = 0; step < F103_LOOKAHEAD * (HAP_CHANNELS + 1u); ++step)
+            f103_wave_prepare(c);
+        next_us = us+2u*F103_HALF_US;
+        ready[0] = ready[1] = true;
     }
-    for (unsigned step = 0; step < F103_LOOKAHEAD * (HAP_CHANNELS + 1u); ++step)
-        f103_wave_prepare(c);
-    next_us = us+2u*F103_HALF_US;
-    ready[0] = ready[1] = true;
     TIM1->PSC = 0; TIM1->ARR = 24; TIM1->RCR = 0;
 #endif
     TIM1->CCMR1 = 0; /* Internal CH1 timing only; PA8 remains a GPIO. */
@@ -226,7 +236,7 @@ static bool output_start(const Config *c, uint64_t us)
     DMA1_Channel5->CNDTR = F103_CHANNEL_DMA_WORDS;
 #else
     DMA1_Channel5->CMAR = (uint32_t)waves_b;
-    DMA1_Channel5->CNDTR = 2u*F103_HALF_WORDS;
+    DMA1_Channel5->CNDTR = point_backend ? HAP_STEPS : 2u*F103_HALF_WORDS;
 #endif
     DMA1_Channel5->CCR = DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
         DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL |
@@ -237,13 +247,13 @@ static bool output_start(const Config *c, uint64_t us)
     DMA1_Channel2->CNDTR = F103_CHANNEL_DMA_WORDS;
 #else
     DMA1_Channel2->CMAR = (uint32_t)waves_a;
-    DMA1_Channel2->CNDTR = 2u*F103_HALF_WORDS;
+    DMA1_Channel2->CNDTR = point_backend ? HAP_STEPS : 2u*F103_HALF_WORDS;
 #endif
     DMA1_Channel2->CCR = DMA_CCR_DIR | DMA_CCR_CIRC | DMA_CCR_MINC |
         DMA_CCR_PSIZE_0 | DMA_CCR_MSIZE_0 | DMA_CCR_PL |
         DMA_CCR_TEIE;
 #if !F103_CHANNEL_TEST
-    DMA1_Channel2->CCR |= DMA_CCR_HTIE | DMA_CCR_TCIE;
+    if (!point_backend) DMA1_Channel2->CCR |= DMA_CCR_HTIE | DMA_CCR_TCIE;
 #endif
     uint32_t p = lock();
     /* A UART/DMA fault may have arrived while the output data was prepared. */
@@ -253,6 +263,9 @@ static bool output_start(const Config *c, uint64_t us)
         return false;
     }
     __DMB();
+#if !F103_CHANNEL_TEST
+    static_focus = point_backend;
+#endif
     playing = true;
     DMA1_Channel5->CCR |= DMA_CCR_EN;
     DMA1_Channel2->CCR |= DMA_CCR_EN;
@@ -275,6 +288,13 @@ static bool output_readback(Sample *out)
     unlock(p);
 #else
     if (!playing) { unlock(p); return false; }
+    if (static_focus) {
+        *out = samples[0];
+        uint64_t now_ms = uptime_ms + (uint32_t)(HAL_GetTick() - last_tick);
+        out->elapsed_us = static_resume_us + (now_ms - static_started_ms) * 1000u;
+        unlock(p);
+        return true;
+    }
     unsigned remaining = DMA1_Channel2->CNDTR;
     unsigned transferred = 2u*F103_HALF_WORDS-remaining;
     /* CNDTR points after the last transferred sample. */
@@ -405,8 +425,10 @@ static void autostart_poll(uint64_t now_ms, bool user_action)
     hap_toggle_mode(&device);
     hap_local_button(&device, false);
     if (playing && device.state == RUNNING) {
+#if F103_AUTO_RUN_LIMIT_MS > 0
         auto_run_deadline_ms = now_ms + F103_AUTO_RUN_LIMIT_MS;
         auto_run_pending = true;
+#endif
     }
 }
 
@@ -499,6 +521,17 @@ static void capture_reset_flags(void)
 
 static void startup_schedule(uint64_t now_ms)
 {
+#if !F103_CHANNEL_TEST
+    /* Only the local boot defaults change. Remote CONFIG remains authoritative. */
+    device.config.shape = (Shape)F103_BUSINESS_SHAPE;
+    device.config.cx_um = F103_BUSINESS_X_UM;
+    device.config.cy_um = F103_BUSINESS_Y_UM;
+    device.config.z_um = F103_BUSINESS_Z_UM;
+    device.config.mod_hz = F103_BUSINESS_MOD_HZ;
+    device.config.level = F103_BUSINESS_LEVEL;
+    const char *config_error = config_compile(&device.config);
+    if (config_error && !pending_fault) pending_fault = config_error;
+#endif
     /* Preserve boot-journal/ADC faults instead of replacing their diagnosis. */
     if (!pending_fault && (startup_reset_flags & (RCC_CSR_IWDGRSTF | RCC_CSR_WWDGRSTF))) {
         pending_fault = "WATCHDOG_RESET";

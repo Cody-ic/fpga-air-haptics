@@ -59,7 +59,10 @@ def configure_profiles(root):
                             "F103_GROUP_TEST", "F103_FIXED_TEST", "F103_GROUP_TEST_MASK",
                             "F103_GROUP_TEST_FIRST_CHANNEL", "F103_GROUP_TEST_LAST_CHANNEL",
                             "F103_GROUP_TEST_EFFECTIVE_MASK",
-                            "F103_GROUP_TEST_ON_MS", "F103_FIXED_TEST_MASK", "F103_FIXED_TEST_ON_MS"):
+                            "F103_GROUP_TEST_ON_MS", "F103_FIXED_TEST_MASK", "F103_FIXED_TEST_ON_MS",
+                            "F103_BUSINESS_SHAPE", "F103_BUSINESS_X_UM", "F103_BUSINESS_Y_UM",
+                            "F103_BUSINESS_Z_UM", "F103_BUSINESS_MOD_HZ", "F103_BUSINESS_LEVEL",
+                            "F103_AUTOSTART_MS", "F103_AUTO_RUN_LIMIT_MS"):
                         option.remove(item)
         for chain in config.iter("toolChain"):
             for option in chain.findall("option"):

@@ -92,6 +92,30 @@ bool f103_drive_on(const Config *c, const Sample *s, uint64_t time_us)
     return drive_in_second(c, s, (uint32_t)(time_us % 1000000u));
 }
 
+/* POINT + full level + no modulation: solve once, repeat one complete carrier.
+ * All selected channels keep their own focusing phase and 32 HIGH slots.
+ * Unlike the electrical test pair, this does not force all phases to zero. */
+void f103_wave_static_focus(const Config *c, uint64_t us, uint16_t *words_b,
+                            uint16_t *words_a, uint16_t gpioa_idle, Sample *sample)
+{
+    float remaining;
+    geometry_sample(c, us, sample, &remaining);
+    phase_solve_config(c, sample);
+    sample->output = sample->scan_on && c->level > 0;
+    sample->drive_on = sample->output;
+    gpioa_idle &= (uint16_t)~F103_GPIOA_MASK;
+    for (unsigned slot = 0; slot < HAP_STEPS; ++slot) {
+        uint16_t bits = 0;
+        for (unsigned channel = 0; channel < HAP_CHANNELS; ++channel) {
+            if (sample->output && (c->channel_mask & (1u << channel)) &&
+                ((slot + sample->phases[channel]) & 63u) < 32u)
+                bits |= (uint16_t)(1u << channel);
+        }
+        words_b[slot] = bits & F103_GPIOB_MASK;
+        words_a[slot] = gpioa_idle | ((bits & 4u) ? F103_GPIOA_MASK : 0u);
+    }
+}
+
 void f103_wave_render(const Config *c, uint64_t us, uint16_t *words_b,
                       uint16_t *words_a, uint16_t gpioa_idle, Sample *sample,
                       uint16_t *active_cycles)

@@ -21,6 +21,7 @@ static uint32_t interrupt_mask;
 static bool inject_render_fault;
 static void render_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, uint16_t,
                               Sample *, uint16_t *);
+static void static_focus_with_fault(const Config *, uint64_t, uint16_t *, uint16_t *, uint16_t, Sample *);
 
 static void serial_send(const char *bytes, size_t size)
 {
@@ -75,13 +76,25 @@ void Error_Handler(void) { abort(); }
 
 /* Keep tests on the same start, shutdown, readback and IRQ code as firmware. */
 #define f103_wave_render render_with_fault
+#define f103_wave_static_focus static_focus_with_fault
 #include "../Core/Src/app_f103.c"
 #undef f103_wave_render
+#undef f103_wave_static_focus
 
 static void render_with_fault(const Config *c, uint64_t us, uint16_t *b, uint16_t *a,
                               uint16_t idle, Sample *sample, uint16_t *active_cycles)
 {
     f103_wave_render(c,us,b,a,idle,sample,active_cycles);
+    if (inject_render_fault) {
+        inject_render_fault = false;
+        fail("UART_RX_ERROR");
+    }
+}
+
+static void static_focus_with_fault(const Config *c, uint64_t us, uint16_t *b, uint16_t *a,
+                                    uint16_t idle, Sample *sample)
+{
+    f103_wave_static_focus(c, us, b, a, idle, sample);
     if (inject_render_fault) {
         inject_render_fault = false;
         fail("UART_RX_ERROR");

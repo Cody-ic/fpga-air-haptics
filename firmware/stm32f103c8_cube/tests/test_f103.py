@@ -49,6 +49,7 @@ class F103Tests(unittest.TestCase):
         cls.half_us=cls.dll.test_half_us()
         cls.dll.test_wave.argtypes=(ct.c_uint64,ct.POINTER(ct.c_uint16),ct.POINTER(ct.c_uint16),
                                    ct.c_uint16,ct.POINTER(Sample))
+        cls.dll.test_static_focus.argtypes=cls.dll.test_wave.argtypes
 
     def setUp(self):
         self.dll.test_init()
@@ -379,11 +380,67 @@ class F103Tests(unittest.TestCase):
         subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
             "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
             "-ffunction-sections","-fdata-sections",
-            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=0",*("-I"+p for p in includes),
+            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=0",
+            "-DF103_AUTO_RUN_LIMIT_MS=10000",*("-I"+p for p in includes),
             "tests/wave_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
             "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
             "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
         subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_static_focus_phases_carrier_and_calibration(self):
+        for x,y,z in ((0,0,150000),(3000,-4000,50000),(-55000,37000,230000)):
+            c=Config(shape="POINT",level=100,mod_hz=0,cx_um=x,cy_um=y,z_um=z)
+            self.configure(c)
+            nominal=focus_phases(c,(x/1000,y/1000,z/1000),self.array)
+            for phase in range(64):
+                offsets=tuple((phase+i-p)%64 for i,p in enumerate(nominal))
+                mask=0xffff if phase % 2 else 4
+                self.assertEqual(self.command("CALIBRATION",action="trial",mask=mask,
+                    offsets=",".join(map(str,offsets)),
+                    geometry_id=self.array.resolved_geometry().identity)[0].kind,"ACK")
+                a=(ct.c_uint16*64)(); b=(ct.c_uint16*64)(); sample=Sample()
+                self.dll.test_static_focus(123456789000,b,a,0xa5e7,ct.byref(sample))
+                expected=tuple((p+o)%64 for p,o in zip(nominal,offsets))
+                self.assertEqual(tuple(sample.phases),expected)
+                self.assertEqual((sample.x_um,sample.y_um,sample.z_um),(x,y,z))
+                words=[v | (4 if other & 0x100 else 0) for v,other in zip(b,a)]
+                self.assertTrue(all(other & ~0x100 == 0xa5e7 & ~0x100 for other in a))
+                self.assertTrue(all(v & 4 == 0 for v in b))
+                for channel,p in enumerate(expected):
+                    signal=[int(bool(mask & (1<<channel)) and (slot+p)%64 < 32)
+                            for slot in range(64)]
+                    self.assertEqual([(v>>channel)&1 for v in words],signal)
+                    self.assertEqual(sum(signal),32 if mask & (1<<channel) else 0)
+
+    def test_business_focus_driver_and_macro_defaults(self):
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        for index,extra in enumerate(((),("-DF103_AUTO_RUN_LIMIT_MS=10000",),
+                ("-DF103_BUSINESS_X_UM=3000","-DF103_BUSINESS_Y_UM=-4000","-DF103_BUSINESS_Z_UM=50000"))):
+            executable=ROOT/"build"/(f"test_business_focus_{index}.exe" if os.name=="nt" else f"test_business_focus_{index}")
+            subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+                "-ffunction-sections","-fdata-sections",
+                "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=0",
+                *extra,*("-I"+p for p in includes),
+                "tests/business_focus_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+                "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+                "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+            subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_invalid_business_macro_parameters(self):
+        for define in ("F103_BUSINESS_X_UM=-100001","F103_BUSINESS_Y_UM=100001",
+                "F103_BUSINESS_Z_UM=19999","F103_BUSINESS_Z_UM=300001",
+                "F103_BUSINESS_LEVEL=-1","F103_BUSINESS_LEVEL=101",
+                "F103_BUSINESS_MOD_HZ=-1","F103_BUSINESS_MOD_HZ=1001",
+                "F103_AUTO_RUN_LIMIT_MS=-1","F103_AUTOSTART_MS=2147483648",
+                "F103_BUSINESS_SHAPE=CUSTOM"):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                "-DF103_FIRMWARE_MODE=0","-D"+define,"tests/harness.c"],
+                cwd=ROOT,capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0,define)
+            self.assertTrue("#error" in result.stderr or "static assertion" in result.stderr,result.stderr)
 
     def test_channel_diagnostic_profile(self):
         executable=ROOT/"build"/("test_channel_driver.exe" if os.name == "nt" else "test_channel_driver")
@@ -489,7 +546,7 @@ class F103Tests(unittest.TestCase):
         # All application files include haptics.h; mode must be known before
         # the shared protocol core, even where app_f103.h is not included.
         for mode in (None, 0, 1, 2, 3):
-            expected=3 if mode is None else mode
+            expected=0 if mode is None else mode
             defines=[] if mode is None else ["-DF103_FIRMWARE_MODE="+str(mode)]
             source=(
                 '#include "haptics.h"\n'

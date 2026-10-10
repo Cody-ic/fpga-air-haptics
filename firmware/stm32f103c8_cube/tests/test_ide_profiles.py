@@ -76,6 +76,8 @@ class IDEProfileTests(unittest.TestCase):
             ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_GROUP_TEST_ON_MS=1000")
             ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_GROUP_TEST_FIRST_CHANNEL=0")
             ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_GROUP_TEST_LAST_CHANNEL=15")
+            ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_BUSINESS_Z_UM=50000")
+            ET.SubElement(symbols,"listOptionValue",builtIn="false",value="F103_AUTO_RUN_LIMIT_MS=10000")
             module.configure_profiles(tree.getroot())
             self.assertFalse(any(v.get("value", "").startswith("F103_") for v in symbols))
             before = ET.tostring(tree.getroot())
