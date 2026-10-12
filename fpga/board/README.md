@@ -59,15 +59,25 @@ cd D:\OneDrive\Desktop\fpga-air-haptics\fpga\board
 1. **串口引脚**。板载 FT2232 的 UART 接哪两个 FPGA 引脚，只有官方的「全引脚约束」表里有
    （网上没有公开文本）。`.cst` 现在先把串口临时放在相机口的两个空闲脚（Y13/AA14）上，
    你拿一根 USB-TTL 接上去就能调通；核实到板载串口引脚后改这两行即可。**注意别把 TX/RX 接反。**
-2. **通道引脚**。这一版是 **8 路**（对应计划里"先验证少量驱动通道"这一步）：左边 PMOD 的
-   T18/R18/R17/P16 + 相机口的 P14/P15/R16/R14，全部在 Bank 6（3.3 V）。
+2. **通道引脚**。**16 路（4×4）已经能布局布线并生成比特流** ✓
 
-   ⚠️ **为什么不是 16 路**：板子两个 PMOD 里的 P19/R19/T21/U21 是芯片的**配置复用脚**
-   （D06/D07/D04/D05），命令行工程里布局阶段会直接报
-   `PR2017 ... dedicated pin (CPU)`，跑不通。想把这 4 个脚拿回来（恢复 4×4 的 16 路）：
-   在 Gowin IDE 里打开工程 → `Project → Configuration → Multipurpose Pin`，
-   把 Download Mode 选成 `JTAG` 后重新布局；能过就把 `.cst` 里那 8 路扩成 16 路，
-   同时把 `board_top` 的 `HW_ROWS` 改回 4。
+   关键是 `build.tcl` 里这一条（不是可选项）：
+
+   ```tcl
+   set_option -use_cpu_as_gpio 1
+   ```
+
+   板子两个 PMOD 里的 P19/R19/T21/U21 是芯片的**配置复用脚**（D06/D07/D04/D05），
+   不放开会直接报 `PR2017 ... dedicated pin (CPU)`。这个开关实测有效
+   （生成文件里会变成 `set CPU regular_io = true`）。
+
+   ⚠️ 走过弯路，记一下：**改文件没用**。`IDE\share\config\device.cfg`（工具模板）改了
+   不生效；工程里的 `impl\pnr\device.cfg` 每次跑都会被重新生成，改了会被覆盖回去。
+   IDE 里那个 Multipurpose/复用引脚的对话框我们也一直没找到，
+   最后是**命令行开关**解决的。
+
+   切换 8 路/16 路：`board_top` 的 `HW_ROWS`（4 = 16 路，2 = 8 路），
+   同时 `.cst` 里把 `array_pos[8..15]` 那几行注释/取消注释。
 
    各 bank 的电压（查器件数据文件 `IDE\data\device\GW5AT-60B\PBGA484A.json` 得到）：
 
