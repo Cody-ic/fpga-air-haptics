@@ -91,8 +91,16 @@ module hap2_out #(
     /* verilator lint_off UNUSEDSIGNAL */
     wire [55:0] duty_scaled = cfg_level * DUTY_SCALE;
     /* verilator lint_on UNUSEDSIGNAL */
-    wire [ACC_BITS-1:0] duty_thr = (cfg_level >= 32'd100) ? HALF_CYCLE
-                                                       : duty_scaled[ACC_BITS-1:0];
+    // ⚠️ 这里必须**寄存**：最早是写成组合 wire 直接进 16 路比较器的，综合出来的
+    // 关键路径是 cfg_level → 56 位乘法 → 16 个比较器 → out_pos[16]（slack −2.9 ns，
+    // 16 路版最差的 8 条里有 7 条都在这一条链上）。配置只在待机时变，所以
+    // 配置一变就把门槛算好寄存起来，运行阶段只剩「加相位、比大小」。
+    reg [ACC_BITS-1:0] duty_thr;
+    always @(posedge clk) begin
+        if (!rst_n)          duty_thr <= {ACC_BITS{1'b0}};
+        else if (cfg_change) duty_thr <= (cfg_level >= 32'd100) ? HALF_CYCLE
+                                                               : duty_scaled[ACC_BITS-1:0];
+    end
 
     // ---------------- 调制包络：mod_hz 的 50% 方波 ----------------
     // mod_hz=0 时包络恒为 1（等于不调制）。mod_hz>0 时用一个专门的相位累加器

@@ -396,8 +396,12 @@ module tb_out;
         // level=100 时应当还是原来那个 50% 方波（1250 拍里高 625 拍）；
         // level=50 时占空比减半（高约 312 拍）。这条把「等级→占空比」这条路钉住。
         enable    = 1'b1;
-        cfg_level = 32'd100;
-        repeat (20) @(negedge clk);
+	    cfg_level  = 32'd100;
+	    // 等级是配置项：真实系统里它随 CONFIG 一起来（cfg_change 有效）。
+	    // 输出级的占空比门槛是**寄存**的（为了时序），所以测试台也必须像真系统那样
+	    // 给出 cfg_change 脉冲，否则等级改了门槛不会更新。
+	    cfg_change = 1'b1; @(negedge clk); cfg_change = 1'b0;
+	    repeat (20) @(negedge clk);
         measure_duty;
         checks = checks + 1;
         if (high_ticks < 618 || high_ticks > 632) begin
@@ -409,8 +413,9 @@ module tb_out;
                      duty_total, high_ticks);
         end
 
-        cfg_level = 32'd50;
-        repeat (20) @(negedge clk);
+	    cfg_level  = 32'd50;
+	    cfg_change = 1'b1; @(negedge clk); cfg_change = 1'b0;
+	    repeat (20) @(negedge clk);
         measure_duty;
         checks = checks + 1;
         if (high_ticks < 305 || high_ticks > 320) begin
@@ -421,8 +426,9 @@ module tb_out;
         end
 
         // level=0：即使 enable 还是 1，也不许有任何输出（“等级 0 = 不驱动”）
-        cfg_level = 32'd0;
-        repeat (20) @(negedge clk);
+	    cfg_level  = 32'd0;
+	    cfg_change = 1'b1; @(negedge clk); cfg_change = 1'b0;
+	    repeat (20) @(negedge clk);
         checks = checks + 1;
         seen_edge = 0;
         for (k = 0; k < 3000; k = k + 1) begin
@@ -435,8 +441,9 @@ module tb_out;
         end else begin
             $display("  等级：level=0 → 即使 enable=1，输出也全部拉低");
         end
-        cfg_level = 32'd100;
-        repeat (20) @(negedge clk);
+	    cfg_level  = 32'd100;
+	    cfg_change = 1'b1; @(negedge clk); cfg_change = 1'b0;
+	    repeat (20) @(negedge clk);
 
         // ---- 调制频率 mod_hz：把输出整段开/关 ----
         // mod_hz=100 → 包络周期 10 ms（50 MHz ÷ 100 = 500000 拍），占空比 50%，
