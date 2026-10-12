@@ -75,6 +75,34 @@ IO_PORT "array_pos[6]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 IO_LOC  "array_pos[7]"  R14;
 IO_PORT "array_pos[7]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
+// ==================== 恢复 16 路（4×4）时要补的 8 个脚 ====================
+// 前提：先在 Gowin IDE 里把复用脚解锁（Project → Configuration → Multipurpose
+// Pin/多用途引脚 → Download Mode 从默认的 JTAG_AUTO_BOOT 改成 JTAG），
+// 重新布局布线确认不再报 PR2017 之后，再做下面两步：
+//   1. 把上面 8 路注释掉（或者直接删），改用下面这 16 路（两排 PMOD）；
+//   2. 把 board_top 的 HW_ROWS 改回 4（HW_COLS 保持 4）。
+// 注意左边 PMOD 的 P19/R19/T21/U21 就是那 4 个配置复用脚（D06/D07/D04/D05）；
+// 右边那排 Y21/Y22/AB21/AB22/AA20/AA21/AA19/AB20 里有 6 个也是复用脚
+// （Y22=D13、AB21=D14、AB22=D15、AA19=RDWR_B、AB20=CSO_B、AA20=D11、AA21=D12），
+// 所以这一整组都依赖同一个开关。串口/状态灯到时候要挪到别处（Bank 5/6 还有空脚）。
+//
+// IO_LOC  "array_pos[0]"  P19;   IO_PORT "array_pos[0]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[1]"  R19;   IO_PORT "array_pos[1]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[2]"  T21;   IO_PORT "array_pos[2]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[3]"  U21;   IO_PORT "array_pos[3]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[4]"  Y21;   IO_PORT "array_pos[4]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[5]"  Y22;   IO_PORT "array_pos[5]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[6]"  AB21;  IO_PORT "array_pos[6]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[7]"  AB22;  IO_PORT "array_pos[7]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[8]"  AA20;  IO_PORT "array_pos[8]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[9]"  AA21;  IO_PORT "array_pos[9]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[10]" AA19;  IO_PORT "array_pos[10]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[11]" AB20;  IO_PORT "array_pos[11]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[12]" R16;   IO_PORT "array_pos[12]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[13]" T20;   IO_PORT "array_pos[13]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[14]" N15;   IO_PORT "array_pos[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+// IO_LOC  "array_pos[15]" P14;   IO_PORT "array_pos[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+
 // 互补输出（半桥驱动才用）：board_top 现在**故意不引出** array_neg——顶层端口没约束时
 // 工具会把它们自动摆到随便哪个脚上，可能撞到 DDR/HDMI 那些不能乱动的脚。
 // 要半桥方案时：把 board_top 里那行端口改成同时引出 array_pos/array_neg，
