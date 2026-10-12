@@ -213,6 +213,13 @@ module hap2_tx #(
         end
     endfunction
 
+    // 下面这几个寄存器是被 value_at 函数读的，所以声明必须放在函数**之前**：
+    // Gowin 综合器按顺序看声明，先用后声明会先造一条隐式的 1 位线网，
+    // 再看到真正的声明就报 EX3638，而且那条 1 位线网会把值截断。
+    reg [15:0] seq_lat;      // 要原样抄回去的命令序号
+    reg [31:0] uptime_ms;    // 上电到现在的毫秒数（状态帧用）
+    reg [15:0] sample;       // 状态快照序号（状态帧用）
+
     function [31:0] value_at;
         input [1:0] sel;
         input [4:0] idx;
@@ -375,7 +382,6 @@ module hap2_tx #(
     reg [4:0]  num_idx;        // 模板里第几个十进制占位符
     reg        want_state;     // 发完这条应答后要不要再发状态帧
 
-    reg [15:0] seq_lat;
     reg [3:0]  verb_lat;
     reg [3:0]  code_lat;
 
@@ -422,8 +428,6 @@ module hap2_tx #(
     wire [7:0] c  = tmpl_byte(frame_sel, pos);
     wire [8:0] nc = name_char(name_grp, name_id, name_pos);
 
-    reg [31:0] uptime_ms;
-    reg [15:0] sample;
     reg [31:0] ms_cnt;
 
     // 子模块接口

@@ -18,24 +18,24 @@ module tb_board;
     localparam integer CLK_NS       = 20;            // 50 MHz
     localparam integer CLKS_PER_BIT = CLK_HZ / BAUD; // 434
     localparam integer POR_MS       = 1;             // 仿真里缩到 1 ms
-    localparam integer ARRAY_N      = 16;            // 4×4
+    localparam integer ARRAY_N      = 8;             // board_top 默认 2×4
 
     reg clk;
     initial clk = 1'b0;
     always #(CLK_NS / 2.0) clk = ~clk;
 
-    reg  key_rst_n, key0_n, key1_n, key2_n;
+    reg  key_rst_n, key0_n, key1_n;
     reg  uart_line;
     wire uart_tx_pin;
     wire [ARRAY_N-1:0] array_pos;
     /* verilator lint_off UNUSEDSIGNAL */
-    wire [4:0] led;
+    wire [2:0] led;
     /* verilator lint_on UNUSEDSIGNAL */
 
     board_top #(
         .CLK_HZ      (CLK_HZ),
         .BAUD        (BAUD),
-        .HW_ROWS     (4),
+        .HW_ROWS     (2),          // 和 board_top 默认一致：2×4 = 8 路
         .HW_COLS     (4),
         .HW_PITCH_UM (10000),
         .POR_MS      (POR_MS),
@@ -46,7 +46,6 @@ module tb_board;
         .key_rst_n   (key_rst_n),
         .key0_n      (key0_n),
         .key1_n      (key1_n),
-        .key2_n      (key2_n),
         .uart_rx_pin (uart_line),
         .uart_tx_pin (uart_tx_pin),
         .array_pos   (array_pos),
@@ -215,7 +214,6 @@ module tb_board;
         key_rst_n = 1'b1;
         key0_n    = 1'b1;
         key1_n    = 1'b1;
-        key2_n    = 1'b1;
         uart_line = 1'b1;
         txlen     = 0;
         lf_count  = 0;

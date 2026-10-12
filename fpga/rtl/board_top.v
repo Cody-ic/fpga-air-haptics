@@ -15,7 +15,14 @@
 module board_top #(
     parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（Tang Mega 60K = 50 MHz）
     parameter integer BAUD          = 115200,
-    parameter integer HW_ROWS       = 4,            // 先做 4×4，将来改 8 就填 8
+    // 阵列规模：第一版上板用 2×4 = 8 路。
+    // 为什么不是 16 路：板子两个 PMOD 里只有一部分脚是"纯 IO"，另外几个（P19/R19/
+    // T21/U21 = 芯片的 D06/D07/D04/D05 配置复用脚）在命令行工程里会被判成
+    // "dedicated pin (CPU)"，布局阶段直接报错。8 路刚好用满 13 个干净脚，
+    // 也正好对应计划里"先验证单通道和少量驱动通道"这一步。
+    // 想在 IDE 里把这些复用脚解锁（Multipurpose Pin → Download Mode = JTAG）之后，
+    // 把这里改成 4×4、并按 .cst 里的说明补上那 4 个脚即可。
+    parameter integer HW_ROWS       = 2,
     parameter integer HW_COLS       = 4,
     parameter integer HW_PITCH_UM   = 10000,        // 阵元间距（微米）
     parameter integer PH_PIPE       = 4,            // 相位并行流水线条数（8×8 建议 8）
@@ -36,7 +43,6 @@ module board_top #(
     input  wire key_rst_n,    // 复位键（Y12），低有效；没有按键就接 1'b1
     input  wire key0_n,       // 用户按键 0（AA13）→ 换下一个图形
     input  wire key1_n,       // 用户按键 1（AB13）→ 播放／暂停
-    input  wire key2_n,       // 用户按键 2（备用脚）→ 停止
     input  wire uart_rx_pin,  // 电脑 → 板子
     output wire uart_tx_pin,  // 板子 → 电脑
     // 送给驱动电路的方波（单端驱动：每路一根线，多数半桥驱动芯片自己管死区）。
@@ -45,8 +51,9 @@ module board_top #(
     //   再在 .cst 里给 array_neg 也分配引脚（现在故意不引出：顶层端口没约束时，
     //   工具会把它们自动摆到随便哪个脚上，可能撞到 DDR/HDMI 那些不能乱动的脚）。
     output wire [HW_ROWS*HW_COLS-1:0] array_pos,
-    // 状态灯：输出开 / 正在扫描 / 走步器在跑 / 本地模式 / 串口在发
-    output wire [4:0] led
+    // 状态灯：输出开 / 正在扫描 / 走步器在跑（干净脚不够，只留最有用的三颗；
+    // 本地模式、串口状态在状态帧里都看得到）
+    output wire [2:0] led
 );
 
     // ---------------- 1. 上电复位 ----------------
@@ -80,7 +87,10 @@ module board_top #(
     // 逻辑里统一成「1 = 按下」，消抖模块就不用关心板子怎么接的。
     wire key_next = ~key0_n;
     wire key_play = ~key1_n;
-    wire key_stop = ~key2_n;
+    // 板上第三个用户键在 1.5 V 的 bank 里，那一组只剩复位键了，所以本地"停止"
+    // 先不接按键（播放键本身既能暂停也能继续）。要接的话在 .cst 里分配一个脚，
+    // 再把这里改成 ~key2_n 即可。
+    wire key_stop = 1'b0;
 
     // ---------------- 4. 主逻辑 ----------------
     wire       output_on, scan_on, walk_running, mode_local;
@@ -133,6 +143,6 @@ module board_top #(
     // ---------------- 5. 状态灯 ----------------
     // 5 颗灯分别是：正在驱动换能器、正在扫描、走步器在跑、本地模式、串口在发。
     // 上板时一眼就能看出板子走到哪一步了。
-    assign led = {uart_tx_pin, mode_local, walk_running, scan_on, output_on};
+    assign led = {walk_running, scan_on, output_on};
 
 endmodule

@@ -375,6 +375,10 @@ module hap2_top #(
     wire signed [20:0] ph_pub_fx, ph_pub_fy;
     wire [31:0] ph_pub_fz_um;
 
+    // 状态快照用到的这一位：相位引擎实例化时就要接上它（`rd_sel`），
+    // 所以声明必须放在实例化之前——先用后声明会被综合器当成隐式 1 位线网。
+    reg         snap_sel;
+
     hap2_phase #(
         .ROWS (HW_ROWS), .COLS (HW_COLS), .PITCH_UM (HW_PITCH_UM), .PIPE (PH_PIPE)
     ) u_phase (
@@ -430,11 +434,13 @@ module hap2_top #(
     reg  [7:0]  snap_ph [0:255];
     reg  [7:0]  snap_idx;
     reg         snap_wait, snap_copy;
-    reg         snap_sel;
     reg  [8:0]  snap_count;
 
     reg [31:0] sn_carrier, sn_steps, sn_cx, sn_cy, sn_z, sn_radius;
     reg [31:0] sn_repeat, sn_mod, sn_level, sn_closed, sn_blank;
+    // 发给电脑的焦点坐标（32 位有符号，单位微米）。见下面连接处的说明。
+    wire signed [31:0] fx_um32 = {{11{ph_pub_fx[20]}}, ph_pub_fx};
+    wire signed [31:0] fy_um32 = {{11{ph_pub_fy[20]}}, ph_pub_fy};
     reg [2:0]  sn_shape;
     reg [1:0]  sn_mode, sn_run;
     reg [2:0]  sn_reason;
@@ -491,15 +497,16 @@ module hap2_top #(
         end
     end
 
-    // 发送模块读相位快照（同步读，一拍出数据）
+    // 发送模块读相位快照（同步读，一拍出数据）。
+    // phase_addr 是发送模块给的读地址（它的输出端口），所以声明要放在这里之前：
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [7:0] phase_addr;      // 相位表读口：由 hap2_tx 驱动
+    wire       tx_busy;
+    /* verilator lint_on UNUSEDSIGNAL */
     reg [7:0] snap_rd_data;
     always @(posedge clk) snap_rd_data <= snap_ph[phase_addr];
 
     // ---------------- 应答组装与发送 ----------------
-    /* verilator lint_off UNUSEDSIGNAL */
-    wire [7:0] phase_addr;      // 相位表读口：相位计算做出来之前没人读
-    wire       tx_busy;
-    /* verilator lint_on UNUSEDSIGNAL */
     reg        state_push;      // 单拍：主动插一份状态快照
     reg [31:0] state_ms;
 
@@ -571,8 +578,12 @@ module hap2_top #(
         .cfg_blank_us     (sn_blank),
         // 焦点与相位表来自同一次计算（相位引擎把那次用的坐标一并给出来），
         // 单位从 0.5 µm 换成整数微米
-        .fx_um            ($signed(ph_pub_fx) >>> 1),
-        .fy_um            ($signed(ph_pub_fy) >>> 1),
+         // 先把 21 位有符号坐标**符号扩展**成 32 位，再右移一位（0.5 µm → µm）。
+         // 不能直接把 21 位接到 32 位端口上：端口是无符号的，Verilog 会零扩展，
+         // 负坐标就变成一个巨大的正数（画圆走到左半边时电脑会显示错的焦点）。
+         // 这个坑是综合时的位宽警告提醒的，仿真里没人看过负坐标这条。
+         .fx_um            (fx_um32 >>> 1),
+         .fy_um            (fy_um32 >>> 1),
         .fz_um            (ph_pub_fz_um),
         .scan_on          (sn_scan),
         .stroke_index     (sn_stroke),

@@ -2,25 +2,38 @@
 // 板卡：Sipeed Tang Mega 60K（FPGA 型号 GW5AT-LV60PG484A，Device Version B）
 // 顶层模块：board_top
 //
-// 引脚号全部来自 Sipeed 官方例程（github.com/sipeed/TangMega-60K-example）：
-//   - 时钟 V22、50 MHz：官方 sdc 里写的是 create_clock ... -period 20
-//   - 按键 AA13 / AB13 / Y12：官方 cst 里 key0 / key1 / rst_n，都注明「内部上拉」
-//   - 状态灯与两个 PMOD：官方 pmod_led.cst
-//   - 相机口各脚：官方 NEO_DOCK.cst（我们不用相机，这些脚空着）
+// 引脚号来自 Sipeed 官方例程（github.com/sipeed/TangMega-60K-example），
+// 所属 bank 来自器件数据文件 IDE\data\device\GW5AT-60B\PBGA484A.json。
 //
-// ⚠️ 两处必须自己确认（板子到手后 5 分钟就能确认）：
-//   1. 串口：板载 FT2232 的 UART 到底接哪两个 FPGA 引脚，官方「全引脚约束」表里才有，
-//      网上没有公开文本。下面先用相机口两个空闲脚外接 USB-TTL 调通（能跑，但不漂亮）。
-//      拿到官方表以后，把 uart_rx_pin / uart_tx_pin 换成板载串口的两个脚即可。
-//   2. 通道：16 路输出暂时绑在两个 PMOD 上（正好 16 个脚）。其中 5 个脚同时接着板载
-//      状态灯 —— 驱动 40 kHz 时那几个灯会微弱发亮，无害但费一点电。等驱动板定型，
-//      按实际原理图重排这一节就行。
+// ⚠️ 为什么要挑脚：芯片有一部分球是**配置复用脚**（CFG 字段是 D00~D15 / CSO_B /
+//    RDWR_B 这些）。它们在布局阶段会被判成 "dedicated pin (CPU)"，直接报错：
+//      PR2017 : 'array_pos[0]' cannot be placed ... dedicated pin (CPU)
+//    板子上两个 PMOD 里就有 4 个这样的脚（P19/R19/T21/U21 = D06/D07/D04/D05）。
+//    命令行工程（gw_sh）没法解锁它们，所以这一版只用**干净脚**：
+//
+//      Bank 5（3.3 V）：J16、J20
+//      Bank 6（3.3 V）：T18 R18 R17 P16 P14 P15 R16 R14 N15
+//      Bank 7（3.3 V）：V22（时钟，EMCCLK）
+//      Bank 8（3.3 V）：Y21、AA14
+//      Bank 9（1.5 V）：Y12、AA13、AB13（三个用户按键，内部上拉）
+//
+//    干净脚一共 13 个（5/6/8 三个 bank），这一版分配成：8 路通道 + 2 路串口 + 3 颗灯。
+//    想把 P19/R19/T21/U21 那 4 个复用脚也拿来用（比如恢复 4×4 的 16 路）：在 IDE 里
+//    打开 Project → Configuration → Multipurpose Pin，把 Download Mode 选成 JTAG
+//    试试；能过布局就把这 4 个脚加回来。
+//
+// ⚠️ 待核实：串口这两行是「相机口外接 USB-TTL」的临时方案（板载 FT2232 的 UART 引脚
+//    只在官方「全引脚约束」表里，网上没有公开文本）。核实后改这两行即可，TX/RX 别接反。
 
 // ==================== 时钟 ====================
 IO_LOC  "clk" V22;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
 
 // ==================== 按键（低有效，需要内部上拉：底板上没有上拉电阻）====================
+// 板上三个用户按键都在 Bank 9，这个 bank 是 **1.5 V**（官方例程里就是 LVCMOS15+
+// 内部上拉）。所以这三个脚只能给按键用，不能拿来做 3.3 V 的信号——
+// 第一次综合就是在这里翻过车：把串口放在同 bank 的 Y13 上，工具直接报
+// 「Bank 9 vccio(1.5) is locked ... conflicting BANK_VCCIO」。
 IO_LOC  "key_rst_n" Y12;
 IO_PORT "key_rst_n" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
 
@@ -30,55 +43,37 @@ IO_PORT "key0_n" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
 IO_LOC  "key1_n" AB13;
 IO_PORT "key1_n" IO_TYPE=LVCMOS15 PULL_MODE=UP BANK_VCCIO=1.5;
 
-// 第三个键（停止）暂时借用相机口的空闲脚；不接也行，PLAY 键本身就能暂停。
-IO_LOC  "key2_n" AB20;
-IO_PORT "key2_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+// 本地「停止」键暂时不接（干净脚不够分；播放键本身能暂停/继续）。
 
 // ==================== 串口（电脑 ↔ 板子）====================
 // ⚠️ 待核实：这两行现在是「相机口外接 USB-TTL」的临时方案（相机口我们不用）。
+//    两个脚都在 Bank 8（3.3 V，官方例程验证过）。
 //    板载 FT2232 的 UART 引脚请照官方全引脚约束表填。TX/RX 别接反：
 //    电脑的 TX → 板子的 uart_rx_pin，电脑的 RX → 板子的 uart_tx_pin。
-IO_LOC  "uart_rx_pin" Y13;
+IO_LOC  "uart_rx_pin" Y21;
 IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 IO_LOC  "uart_tx_pin" AA14;
 IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
-// ==================== 16 路输出（4×4，临时绑在两个 PMOD 上）====================
-// 左边 PMOD（靠近板子左边缘）。注意：其中 5 个脚同时接着板载状态灯。
-IO_LOC  "array_pos[0]"  P19;
+// ==================== 8 路输出（2×4，全部在 Bank 6）====================
+// 左边 PMOD 上 4 个干净脚 + 相机口 4 个数据脚，都在同一个 3.3 V bank 里。
+// 顺序就是 array_pos[0..7] = 阵列的第 1..8 个换能器，驱动板按这个顺序接。
+IO_LOC  "array_pos[0]"  T18;
 IO_PORT "array_pos[0]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[1]"  R19;
+IO_LOC  "array_pos[1]"  R18;
 IO_PORT "array_pos[1]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[2]"  T21;
+IO_LOC  "array_pos[2]"  R17;
 IO_PORT "array_pos[2]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[3]"  U21;   // 与板载 state_led[4] 同脚
+IO_LOC  "array_pos[3]"  P16;
 IO_PORT "array_pos[3]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[4]"  P16;   // 与板载 state_led[3] 同脚
+IO_LOC  "array_pos[4]"  P14;
 IO_PORT "array_pos[4]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[5]"  R17;   // 与板载 state_led[2] 同脚
+IO_LOC  "array_pos[5]"  P15;
 IO_PORT "array_pos[5]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[6]"  R18;   // 与板载 state_led[1] 同脚
+IO_LOC  "array_pos[6]"  R16;
 IO_PORT "array_pos[6]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[7]"  T18;   // 与板载 state_led[0] 同脚
+IO_LOC  "array_pos[7]"  R14;
 IO_PORT "array_pos[7]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-
-// 相机口那 8 个数据脚（我们不用相机，正好当另外 8 路输出）
-IO_LOC  "array_pos[8]"  AA20;
-IO_PORT "array_pos[8]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[9]"  AA19;
-IO_PORT "array_pos[9]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[10]" T20;
-IO_PORT "array_pos[10]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[11]" N15;
-IO_PORT "array_pos[11]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[12]" R14;
-IO_PORT "array_pos[12]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[13]" R16;
-IO_PORT "array_pos[13]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[14]" P15;
-IO_PORT "array_pos[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[15]" P14;
-IO_PORT "array_pos[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
 // 互补输出（半桥驱动才用）：board_top 现在**故意不引出** array_neg——顶层端口没约束时
 // 工具会把它们自动摆到随便哪个脚上，可能撞到 DDR/HDMI 那些不能乱动的脚。
@@ -86,13 +81,12 @@ IO_PORT "array_pos[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 // 再在这里给 array_neg[0..15] 分配一组自己的引脚（不能和上面的通道重脚）。
 
 // ==================== 状态灯（借用相机口剩下的脚）====================
-IO_LOC  "led[0]" AA21;
+// 三颗状态灯：输出开 / 正在扫描 / 走步器在跑。
+// N15 在相机口，J16 就是板上 WS2812 的数据脚（板载彩灯会跟着亮，肉眼看着是暗亮），
+// J20 在另一排排针上。没有外接 LED 时，用逻辑分析仪看这三个脚也一样。
+IO_LOC  "led[0]" N15;
 IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "led[1]" Y22;
+IO_LOC  "led[1]" J16;
 IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "led[2]" AB22;
+IO_LOC  "led[2]" J20;
 IO_PORT "led[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "led[3]" Y21;
-IO_PORT "led[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "led[4]" AB21;
-IO_PORT "led[4]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;

@@ -322,16 +322,19 @@ module hap2_cmd #(
     // 查两件事：焦点高度 z，以及图形的包围盒（只有「这份配置有图形」时才算）。
     // 注意：单个字段合法不等于整个图形合法——cx=90000 µm 和 radius=20000 µm
     // 都合法，但圆会伸到 110000 µm。这一项就是专门拦这种情况的。
-    function ws_ok;
-        begin
-            ws_ok = 1'b1;
-            if (sh_z_um < WS_Z_LO_UM || sh_z_um > WS_Z_HI_UM) ws_ok = 1'b0;
-            if (bb_vld) begin
-                if (bb_xmin < WS_X_LO_Q || bb_xmax > WS_X_HI_Q ||
-                    bb_ymin < WS_Y_LO_Q || bb_ymax > WS_Y_HI_Q) ws_ok = 1'b0;
-            end
+    //
+    // 写法说明：这里**不用 function**，用组合逻辑块。原因是 Gowin 综合器要求
+    // function 至少带一个输入参数（会报 EX3808），而这个判断要读的是模块里的
+    // 寄存器（影子配置和包围盒），写成组合块既符合工具要求，读起来也更直白。
+    reg ws_bad;
+    always @* begin
+        ws_bad = 1'b0;
+        if (sh_z_um < WS_Z_LO_UM || sh_z_um > WS_Z_HI_UM) ws_bad = 1'b1;
+        if (bb_vld) begin
+            if (bb_xmin < WS_X_LO_Q || bb_xmax > WS_X_HI_Q ||
+                bb_ymin < WS_Y_LO_Q || bb_ymax > WS_Y_HI_Q) ws_bad = 1'b1;
         end
-    endfunction
+    end
 
     // 这份配置不能用：回 ERR，配置一个字都不动，版本号也不动
     task reject_config;
@@ -675,7 +678,7 @@ module hap2_cmd #(
                         if (traj_none) begin
                             // 这份配置没有草图（scan_paths=NONE）：不需要节拍表，
                             // 检查过工作空间就直接生效，轨迹标记清掉
-                            if (!ws_ok()) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
+                            if (ws_bad) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
                             else        accept_config(1'b0, lat_seq, lat_verb, ~local_cfg);
                             pending <= P_IDLE;
                         end else begin
@@ -691,7 +694,7 @@ module hap2_cmd #(
                         pending <= P_IDLE;
                     end else if (traj_plan_done) begin
                         // 节拍表算好了，还要过最后一关：整张图在不在工作空间里
-                        if (!ws_ok()) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
+                        if (ws_bad) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
                         else        accept_config(1'b1, lat_seq, lat_verb, ~local_cfg);
                         pending <= P_IDLE;
                     end

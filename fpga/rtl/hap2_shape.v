@@ -109,14 +109,16 @@ module hap2_shape #(
         endcase
     end
 
+    // 圆的单位向量转一步：Q16 × Q24 → 右移 24 位回到 Q16（加 2^23 四舍五入）
+    // 常数要放在用到它的表达式之前（综合器按顺序看声明）
+    localparam signed [24:0] COS_Q24 = 25'sd16757007;     // cos(2π/128)
+    localparam signed [24:0] SIN_Q24 = 25'sd823219;       // sin(2π/128)
+
     // 顶点 = 中心 + （单位向量 × 半径）四舍五入
     // r_units 也声明成有符号，乘法两边才都是 signed，负数才不会算错
     wire signed [39:0] vx_prod = (ux_q * r_units) + 40'sd32768;
     wire signed [39:0] vy_prod = (uy_q * r_units) + 40'sd32768;
 
-    // 圆的单位向量转一步：Q16 × Q24 → 右移 24 位回到 Q16（加 2^23 四舍五入）
-    localparam signed [24:0] COS_Q24 = 25'sd16757007;     // cos(2π/128)
-    localparam signed [24:0] SIN_Q24 = 25'sd823219;       // sin(2π/128)
     wire signed [43:0] rot_x = (ux_rot * COS_Q24) - (uy_rot * SIN_Q24) + 44'sd8388608;
     wire signed [43:0] rot_y = (ux_rot * SIN_Q24) + (uy_rot * COS_Q24) + 44'sd8388608;
 

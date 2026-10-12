@@ -54,7 +54,9 @@ module hap2_out #(
 );
 
     localparam integer CHANNELS = ROWS * COLS;
-    localparam integer DEAD_MAX = (DEAD_CYC < 1) ? 1 : DEAD_CYC;
+    // 至少留 2 位：DEAD_CYC=0 时延迟链用不到，但 `dly << 1` 对 1 位值移一位
+    // 会被综合器报「移位超过位宽」（EX3041），白送一条警告，不如直接留 2 位。
+    localparam integer DEAD_MAX = (DEAD_CYC < 2) ? 2 : DEAD_CYC;
 
     // ---------------- 配置阶段：算累加增量 ----------------
     // inc = round(f × 2^ACC_BITS ÷ 时钟频率)
@@ -95,6 +97,9 @@ module hap2_out #(
     reg  [MOD_ACC_BITS-1:0] mod_acc;
     reg  [MOD_ACC_BITS-1:0] mod_inc;
     wire mod_on = (cfg_mod_hz == 32'd0) ? 1'b1 : mod_acc[MOD_ACC_BITS-1];
+
+    // 最终门控 = 三个门控条件 × 调制包络。声明放在生成块之前（综合器对顺序严格）。
+    wire out_gate = enable & mod_on;
 
     function [3:0] log2s;            // S 只可能是 8..256
         input [31:0] s;
@@ -203,8 +208,6 @@ module hap2_out #(
     /* verilator lint_off UNUSEDSIGNAL */
     reg busy;   // 只在波形上看：算增量的时候是 1
     /* verilator lint_on UNUSEDSIGNAL */
-
-    wire out_gate = enable & mod_on;     // 最终门控：运行为前提，再叠上调制包络
 
     localparam [1:0] O_IDLE = 2'd0;
     localparam [1:0] O_INC  = 2'd1;

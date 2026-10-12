@@ -106,7 +106,10 @@ module hap2_traj_scan #(
     wire signed [PT_BITS-1:0] pt_x, pt_y;
     wire                      sp_bb_vld;
     wire signed [PT_BITS-1:0] sp_bb_xmin, sp_bb_xmax, sp_bb_ymin, sp_bb_ymax;
-    reg  [7:0]                pt_addr;
+    // 点表读地址：由下面的 hap2_traj（它内部是节拍表模块）**输出**驱动，
+    // 同时送给解析器/点表当读地址。被实例输出驱动的信号必须是 wire，不能是 reg
+    // （Gowin 会报 EX3805：Concurrent assignment to a non-net）。
+    wire [7:0]                pt_addr;
 
     hap2_scan_parse #(
         .ADDR_W  (ADDR_W),
@@ -151,6 +154,49 @@ module hap2_traj_scan #(
     reg [ADDR_W:0]   txt_len_r;
     reg              txt_valid_r;
     reg              txt_sel;      // 0 = 对外的是低 4 KB，1 = 高 4 KB
+    // 「没有草图 → 回传 NONE」这五个字符要**一拍写一个字节**，分 5 拍写完。
+    // 原因（综合时报 IF0008 才发现）：块存储（BSRAM）只有一个写口，一拍里写 4 个
+    // 字节它没法用 BRAM 实现，工具只能退化成 65536 个触发器，直接超出芯片容量。
+    reg [2:0]        none_wr;      // 0 = 不在写；1..4 = 正在写第几个字节
+    reg              none_sel;     // NONE 要写进哪一半（提交那一刻定下来）
+
+    // NONE 四个字符里的第 n 个（1..4）
+    function [7:0] none_byte;
+        input [2:0] n;
+        begin
+            case (n)
+                3'd1:    none_byte = "N";
+                3'd2:    none_byte = "O";
+                3'd3:    none_byte = "N";
+                default: none_byte = "E";
+            endcase
+        end
+    endfunction
+
+    // 这块存储**必须只有一个写语句**：块存储（BSRAM）只有一个写口，
+    // 一拍里出现两处写（抄原文一处、写 NONE 一处）工具就没法用 BRAM 实现，
+    // 只能退化成 65536 个触发器，直接超出芯片容量（综合报 IF0008）。
+    // 所以这里先把「这一拍要不要写、写哪儿、写什么」算成一路，再写一次。
+    reg               txt_we;
+    reg [TXT_AW-1:0]  txt_wa;
+    reg [7:0]         txt_wd;
+
+    always @* begin
+        if (parse_busy) begin
+            // 解析器读哪个字节，就顺手抄一份
+            txt_we = 1'b1;
+            txt_wa = {~txt_sel, copy_addr_q};
+            txt_wd = rd_data;
+        end else if (none_wr != 3'd0) begin
+            txt_we = 1'b1;
+            txt_wa = {~none_sel, 9'd0, (none_wr - 3'd1)};
+            txt_wd = none_byte(none_wr);
+        end else begin
+            txt_we = 1'b0;
+            txt_wa = {TXT_AW{1'b0}};
+            txt_wd = 8'h00;
+        end
+    end
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -159,23 +205,33 @@ module hap2_traj_scan #(
             txt_valid_r <= 1'b0;
             txt_sel     <= 1'b0;
             txt_data    <= 8'h00;
+            none_wr     <= 3'd0;
+            none_sel    <= 1'b0;
         end else begin
             copy_addr_q <= (parse_rd_addr - src_off[ADDR_W-1:0]);
-            if (parse_busy) txt_ram[{~txt_sel, copy_addr_q}] <= rd_data;
+            if (txt_we) txt_ram[txt_wa] <= txt_wd;      // 唯一的写口
             txt_data <= txt_ram[{txt_sel, txt_addr}];
-            if (txt_commit) begin
-                if (txt_none) begin
-                    // 没有草图：把 NONE 写进「没在对外的」那一半，再切过去
-                    txt_ram[{~txt_sel, 12'd0}] <= "N";
-                    txt_ram[{~txt_sel, 12'd1}] <= "O";
-                    txt_ram[{~txt_sel, 12'd2}] <= "N";
-                    txt_ram[{~txt_sel, 12'd3}] <= "E";
-                    txt_len_r  <= 13'd4;
+
+            if (none_wr != 3'd0) begin
+                // 正在把 "NONE" 写进「没在对外的」那一半，一拍一个字节
+                if (none_wr == 3'd4) begin
+                    none_wr     <= 3'd0;      // 写完四个字节，现在才翻指针
+                    txt_len_r   <= 13'd4;
+                    txt_valid_r <= 1'b1;
+                    txt_sel     <= ~none_sel;
                 end else begin
-                    txt_len_r <= src_len;
+                    none_wr <= none_wr + 3'd1;
                 end
-                txt_valid_r <= 1'b1;
-                txt_sel     <= ~txt_sel;
+            end else if (txt_commit) begin
+                if (txt_none) begin
+                    // 没有草图（预设图形、或 scan_paths=NONE）：排一个 4 拍的写字序列
+                    none_wr  <= 3'd1;
+                    none_sel <= txt_sel;
+                end else begin
+                    txt_len_r   <= src_len;
+                    txt_valid_r <= 1'b1;
+                    txt_sel     <= ~txt_sel;      // 有原文：指针直接翻（原文是解析时写的）
+                end
             end
         end
     end
@@ -297,6 +353,13 @@ module hap2_traj_scan #(
     // 预设图形没有抬笔时间（参考实现里 blank_us 只对多段草图生效）
     wire [31:0]               plan_blank    = preset ? 32'd0 : cfg_blank_us;
 
+    // 走步器的输出。**声明必须放在实例化之前**：Gowin 综合器对声明顺序是严格的，
+    // 先用后声明会先造出一条隐式的 1 位线网，再看到真正的声明就报 EX3638，
+    // 而且那条 1 位线网会把 21 位的坐标截断（Verilator 宽容，仿真发现不了）。
+    wire signed [PT_BITS-1:0] walk_fx, walk_fy;
+    wire        walk_scan;
+    wire [5:0]  walk_stroke;
+
     hap2_traj #(
         .PT_BITS (PT_BITS), .MAX_PTS (MAX_PTS), .MAX_STK (MAX_STK),
         .FRAC (FRAC), .TICK_CYC (TICK_CYC)
@@ -336,10 +399,6 @@ module hap2_traj_scan #(
         .beat_pulse         (beat_pulse),
         .walk_running       (walk_running)
     );
-
-    wire signed [PT_BITS-1:0] walk_fx, walk_fy;
-    wire        walk_scan;
-    wire [5:0]  walk_stroke;
 
     // 没有可用节拍表时（预设图形、或还没发过图形），对外一律报「停在阵列中心、
     // 没在扫描」——走步器内部状态是上一份图形留下的，不能露出去。
