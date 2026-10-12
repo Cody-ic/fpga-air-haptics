@@ -39,6 +39,14 @@ add_file [file join $root tang_mega_60k.sdc]
 set_option -top_module board_top
 set_option -output_base_name board_top
 
+# 把 CPU 配置复用脚（D00~D15）当普通 IO 用。这一条是必须的：
+# 板上两个 PMOD 里 P19/R19/T21/U21 就是 D06/D07/D04/D05，不放开的话布局阶段直接报
+#   PR2017 : 'array_pos[0]' cannot be placed ... dedicated pin (CPU)
+# 试过改 IDE\share\config\device.cfg 和工程里的 impl\pnr\device.cfg 都没用
+# （每次跑都会被重新生成）；只有这个命令行开关真的有效，实测生成文件里会变成
+#   set CPU regular_io = true
+set_option -use_cpu_as_gpio 1
+
 puts "=== 开始综合 ==="
 run syn
 puts "=== 开始布局布线 ==="

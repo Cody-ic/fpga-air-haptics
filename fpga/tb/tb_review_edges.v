@@ -24,7 +24,7 @@ module tb_review_edges;
     reg board_rst_n = 1'b1;
     // board_top 默认是 2×4 = 8 路（原因见 board/tang_mega_60k.cst：板子两个 PMOD 里
     // 有 4 个脚是芯片的配置复用脚，命令行工程里布局过不去，所以先用 8 路干净脚）
-    wire [7:0] board_pos;
+    wire [15:0] board_pos;   // board_top 默认 4x4 = 16 路
     board_top #(.CLK_HZ(1_000_000), .POR_MS(1), .STATE_MS(0)) u_board (
         .clk(clk), .key_rst_n(board_rst_n), .key0_n(1'b1),
         // 本地“停止”键这一版没有分配引脚（干净脚不够），所以 board_top 里没有

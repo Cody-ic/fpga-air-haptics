@@ -18,7 +18,7 @@ module tb_board;
     localparam integer CLK_NS       = 20;            // 50 MHz
     localparam integer CLKS_PER_BIT = CLK_HZ / BAUD; // 434
     localparam integer POR_MS       = 1;             // 仿真里缩到 1 ms
-    localparam integer ARRAY_N      = 8;             // board_top 默认 2×4
+    localparam integer ARRAY_N      = 16;            // board_top 默认 4x4
 
     reg clk;
     initial clk = 1'b0;
@@ -35,7 +35,7 @@ module tb_board;
     board_top #(
         .CLK_HZ      (CLK_HZ),
         .BAUD        (BAUD),
-        .HW_ROWS     (2),          // 和 board_top 默认一致：2×4 = 8 路
+        .HW_ROWS     (4),          // 和 board_top 默认一致：4x4 = 16 路
         .HW_COLS     (4),
         .HW_PITCH_UM (10000),
         .POR_MS      (POR_MS),

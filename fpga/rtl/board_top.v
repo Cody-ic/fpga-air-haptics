@@ -14,14 +14,11 @@
 module board_top #(
     parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（Tang Mega 60K = 50 MHz）
     parameter integer BAUD          = 115200,
-    // 阵列规模：第一版上板用 2×4 = 8 路。
-    // 为什么不是 16 路：板子两个 PMOD 里只有一部分脚是"纯 IO"，另外几个（P19/R19/
-    // T21/U21 = 芯片的 D06/D07/D04/D05 配置复用脚）在命令行工程里会被判成
-    // "dedicated pin (CPU)"，布局阶段直接报错。8 路刚好用满 13 个干净脚，
-    // 也正好对应计划里"先验证单通道和少量驱动通道"这一步。
-    // 想在 IDE 里把这些复用脚解锁（Multipurpose Pin → Download Mode = JTAG）之后，
-    // 把这里改成 4×4、并按 .cst 里的说明补上那 4 个脚即可。
-    parameter integer HW_ROWS       = 2,
+    // 阵列规模：4×4 = 16 路。板子两个 PMOD 里的 P19/R19/T21/U21 是芯片的
+    // 配置复用脚（D06/D07/D04/D05），靠 build.tcl 里的 `-use_cpu_as_gpio 1`
+    // 放开（不放开会报 PR2017 dedicated pin (CPU)）。先把 `HW_ROWS` 改成 2
+    // 就能退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
+    parameter integer HW_ROWS       = 4,
     parameter integer HW_COLS       = 4,
     parameter integer HW_PITCH_UM   = 10000,        // 阵元间距（微米）
     parameter integer PH_PIPE       = 4,            // 相位并行流水线条数（8×8 建议 8）
