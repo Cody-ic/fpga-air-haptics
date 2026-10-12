@@ -262,24 +262,33 @@ module hap2_traj_scan #(
             pub_y0  <= {PT_BITS{1'b0}};
             pub_moves <= 9'd0;
         end else begin
-            if (plan_done) begin
-                mv_sel  <= ~mv_sel;      // 新表算好了，切到新那一半
-                traj_ok <= 1'b1;
-                pub_x0  <= plan_x0;
-                pub_y0  <= plan_y0;
-                pub_moves <= move_count; // 行数也要跟着切，不然走步器会按错的行数循环
-            end else if (!traj_ready_in) begin
-                // 命令层说这份生效的配置没有轨迹表（比如 CUSTOM + scan_paths=NONE）。
-                // 注意不能用 txt_none 判断：预设图形也没有草图文案，但它有轨迹表。
-                traj_ok <= 1'b0;
+            if (txt_commit) begin
+                // plan_done 只说明编译成功；命令层还要检查工作空间。
+                // 配置最终接受时才一起发布表、起点和行数，拒绝路径保留旧表。
+                traj_ok <= traj_ready_in;
+                if (traj_ready_in) begin
+                    mv_sel    <= ~mv_sel;
+                    pub_x0    <= plan_x0;
+                    pub_y0    <= plan_y0;
+                    pub_moves <= move_count;
+                end else begin
+                    pub_x0    <= {PT_BITS{1'b0}};
+                    pub_y0    <= {PT_BITS{1'b0}};
+                    pub_moves <= 9'd0;
+                end
             end
         end
     end
 
     // 没有可用节拍表时，走步器停在阵列中心（0,0）并且不开扫描，
     // 免得把上一份图形的表当成这一份继续走。
-    wire signed [PT_BITS-1:0] walk_x0 = traj_ok ? pub_x0 : {PT_BITS{1'b0}};
-    wire signed [PT_BITS-1:0] walk_y0 = traj_ok ? pub_y0 : {PT_BITS{1'b0}};
+    // 接受配置时 STOP/本地自动 START 与提交同拍到达：用待提交的起点。
+    wire signed [PT_BITS-1:0] walk_x0 = txt_commit
+        ? (traj_ready_in ? plan_x0 : {PT_BITS{1'b0}})
+        : (traj_ok ? pub_x0 : {PT_BITS{1'b0}});
+    wire signed [PT_BITS-1:0] walk_y0 = txt_commit
+        ? (traj_ready_in ? plan_y0 : {PT_BITS{1'b0}})
+        : (traj_ok ? pub_y0 : {PT_BITS{1'b0}});
 
     // ---------------- 预设图形：单独一份点表 ----------------
     // 填这张表的是 hap2_shape（草图那条路填的是解析器自己的表）。两张表共用

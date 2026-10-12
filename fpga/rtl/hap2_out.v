@@ -82,12 +82,17 @@ module hap2_out #(
     // 载波周期里高电平那一段越短。方波的基波幅度 ∝ sin(π × 占空比)，所以
     // 占空比从 0 走到 50% 正好是一条从「关」到「满」的单调曲线。这就是数字电路里
     // 常用的「用占空比调幅度」（PWM，Pulse Width Modulation，脉冲宽度调制）。
-    // 门槛 ≈ 2^32 ÷ 200 × level，所以 level=100 时门槛 ≈ 半个周期。
+    // 门槛按 ACC_BITS 缩放；level=100 精确对应半个周期。
     // 首版约定：真实换能器的「等级—声压」曲线要在示波器和麦克风上标定一次。
     // level 的取值范围 0~100 由字段解析层把关；这里再夹一次，万一真收到超范围的值
     // 也不会因为乘法溢出而算出一个奇怪的门槛。
-    wire [31:0] duty_thr = (cfg_level > 32'd100) ? 32'd2_147_483_648
-                                                 : cfg_level * 32'd21_474_836;
+    localparam [55:0] DUTY_SCALE = (56'd1 << ACC_BITS) / 56'd200;
+    localparam [ACC_BITS-1:0] HALF_CYCLE = {1'b1, {(ACC_BITS-1){1'b0}}};
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire [55:0] duty_scaled = cfg_level * DUTY_SCALE;
+    /* verilator lint_on UNUSEDSIGNAL */
+    wire [ACC_BITS-1:0] duty_thr = (cfg_level >= 32'd100) ? HALF_CYCLE
+                                                       : duty_scaled[ACC_BITS-1:0];
 
     // ---------------- 调制包络：mod_hz 的 50% 方波 ----------------
     // mod_hz=0 时包络恒为 1（等于不调制）。mod_hz>0 时用一个专门的相位累加器
@@ -98,8 +103,10 @@ module hap2_out #(
     reg  [MOD_ACC_BITS-1:0] mod_inc;
     wire mod_on = (cfg_mod_hz == 32'd0) ? 1'b1 : mod_acc[MOD_ACC_BITS-1];
 
-    // 最终门控 = 三个门控条件 × 调制包络。声明放在生成块之前（综合器对顺序严格）。
-    wire out_gate = enable & mod_on;
+    // 最终门控 = 三个门控条件 × 调制包络 × 相位表已就绪 × 等级非 0。
+    // 声明放在生成块之前（综合器对顺序严格）；`phase_valid` 保证第一份相位表
+    // 读进来之前不会驱动换能器（那时表里是未初始化内容）。
+    wire out_gate = enable & mod_on & phase_valid & (cfg_level != 32'd0);
 
     function [3:0] log2s;            // S 只可能是 8..256
         input [31:0] s;
@@ -120,9 +127,13 @@ module hap2_out #(
     reg [7:0]          code [0:CHANNELS-1];   // 锁进来的相位码，只为了看波形
     /* verilator lint_on UNUSEDSIGNAL */
     reg [ACC_BITS-1:0] off  [0:CHANNELS-1];
+    reg [7:0] next_code [0:CHANNELS-1];
+    reg [ACC_BITS-1:0] next_off [0:CHANNELS-1];
     reg [ACC_BITS-1:0] acc;
     reg [7:0]          load_i;
     reg                loading, load_wait;
+    reg                phase_commit, phase_valid;
+    integer ch;
 
     // 读表：给地址后一拍出数据，所以每个通道两拍
     always @(posedge clk) begin
@@ -131,7 +142,25 @@ module hap2_out #(
             loading    <= 1'b0;
             load_wait  <= 1'b0;
             tbl_addr   <= 8'd0;
+            phase_commit <= 1'b0;
+            phase_valid  <= 1'b0;
+            for (ch = 0; ch < CHANNELS; ch = ch + 1) begin
+                code[ch]      <= 8'd0;
+                off[ch]       <= {ACC_BITS{1'b0}};
+                next_code[ch] <= 8'd0;
+                next_off[ch]  <= {ACC_BITS{1'b0}};
+            end
         end else begin
+            phase_commit <= 1'b0;
+            if (phase_commit) begin
+                // 最后一路先落入影子表，下一拍再统一发布。
+                for (ch = 0; ch < CHANNELS; ch = ch + 1) begin
+                    code[ch] <= next_code[ch];
+                    off[ch]  <= next_off[ch];
+                end
+                phase_valid <= 1'b1;
+            end
+            if (cfg_change) phase_valid <= 1'b0;
             if (tbl_new) begin
                 loading   <= 1'b1;
                 load_i    <= 8'd0;
@@ -140,11 +169,12 @@ module hap2_out #(
             end else if (loading) begin
                 if (load_wait) begin
                     // 数据这一拍有效：锁进本地，偏移也跟着算好
-                    code[load_i] <= tbl_data;
-                    off [load_i] <= tbl_data << off_shift;
+                    next_code[load_i] <= tbl_data;
+                    next_off [load_i] <= tbl_data << off_shift;
                     load_wait    <= 1'b0;
-                    if (load_i + 8'd1 >= CHANNELS[7:0]) begin
+                    if ({1'b0, load_i} + 9'd1 >= CHANNELS) begin
                         loading <= 1'b0;
+                        phase_commit <= 1'b1;
                     end else begin
                         load_i   <= load_i + 8'd1;
                         tbl_addr <= load_i + 8'd1;

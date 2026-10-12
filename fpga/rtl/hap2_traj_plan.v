@@ -117,6 +117,7 @@ module hap2_traj_plan #(
     localparam [4:0] S_P2_BYW = 5'd23;
     localparam [4:0] S_DONE   = 5'd24;
     localparam [4:0] S_DONE2  = 5'd25;   // 再等一拍才发 done：让别人读得到 settle 好的行数
+    localparam [4:0] S_FIXED2 = 5'd26;   // 流水化的第二拍：把大乘法算完再做判定
 
     // ---- 段表本地副本（避开跨模块读的时序讲究，后面反复要用）----
     reg [8:0]  s_start [0:MAX_STK-1];
@@ -224,12 +225,20 @@ module hap2_traj_plan #(
                                                      : blk_dx_now32;
 
     // 协议显式要求的拒绝条件：blank_us × 笔数 × repeat_millihz ≥ 10^9
-    // （意思是「一秒里所有抬笔时间加起来已经超过 1 秒」）。这条只在配置阶段算一次，
-    // 所以用一个 64 位乘法换「和协议公式一字不差」，不占运行阶段的时序预算。
-    wire [63:0] blank_budget = {32'h0, cfg_blank_us} * {58'h0, stroke_count}
-                             * {32'h0, cfg_repeat_millihz};
-    // 抬笔总时长（拍）
-    wire [31:0] blank_total_beats = (cfg_blank_us / TICK_US) * {26'h0, stroke_count};
+    // （意思是「一秒里所有抬笔时间加起来已经超过 1 秒」）。
+    //
+    // ⚠️ 这里**不能**写成一条组合逻辑：最早写成
+    //     wire blank_budget = blank_us * 笔数 * repeat;
+    //     wire blank_total  = (blank_us / 10) * 笔数;
+    // 两次乘法串在一起（还带一个常数除法），综合报出来的关键路径是 36.9 ns，
+    // 在 50 MHz（20 ns）下 slack = −13.5 ns，26 条路径违例，全在这一个模块里。
+    // 现在拆成三级寄存器：第一级在 S_IDLE（收到 start 那一拍），第二级在 S_FIXED，
+    // 第三级才是判定。多花两拍，但每一级的组合深度都只有一次乘法。
+    // 语义完全不变（都是同一个乘积、同一个比较），只是算得晚两拍。
+    reg [63:0] budget_q;        // 第一级：blank_us × 笔数
+    reg [63:0] budget_full;     // 第二级：再乘 repeat_millihz
+    reg [31:0] blank_beats_q;   // 第一级：blank_us / 10
+    reg [31:0] blank_total_q;   // 第二级：blank_beats × 笔数
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -298,6 +307,9 @@ module hap2_traj_plan #(
                         dv_numer   <= {24'h0, TICKS_PER_X};
                         dv_denom   <= cfg_repeat_millihz;
                         dv_start   <= 1'b1;
+                        // 流水第一级：小乘法 / 常数除法，先把输入吞进来
+                        budget_q      <= {32'h0, cfg_blank_us} * {58'h0, stroke_count};
+                        blank_beats_q <= cfg_blank_us / TICK_US;
                         state      <= S_LOADST;
                     end
                 end
@@ -324,23 +336,31 @@ module hap2_traj_plan #(
 
                 // ---- 一圈拍数 + 拒绝条件 ----
                 S_FIXED: begin
+                    // 流水第二级：把剩下的乘法算完，并锁下 blank_beats；
+                    // 判定放到下一拍（S_FIXED2），这样每一级只有一次乘法。
+                    budget_full     <= budget_q * {32'h0, cfg_repeat_millihz};
+                    blank_total_q   <= blank_beats_q * {26'h0, stroke_count};
+                    blank_beats     <= blank_beats_q[23:0];
+                    state           <= S_FIXED2;
+                end
+
+                S_FIXED2: begin
                     if (dv_done) begin
-                        blank_beats <= cfg_blank_us / TICK_US;
                         if (stroke_count == 6'd0) begin
                             fail  <= 1'b1;                       // 没有任何一笔：兜底
                             state <= S_DONE;
                         end else if (dv_div0 || dv_quot[31:0] == 32'd0) begin
                             fail  <= 1'b1;                       // 一圈拍数为 0：兜底
                             state <= S_DONE;
-                        end else if (blank_budget >= 64'd1_000_000_000) begin
+                        end else if (budget_full >= 64'd1_000_000_000) begin
                             fail  <= 1'b1;                       // 协议明文：一秒里装不下这么多抬笔
                             state <= S_DONE;
-                        end else if (dv_quot[31:0] <= blank_total_beats) begin
+                        end else if (dv_quot[31:0] <= blank_total_q) begin
                             fail  <= 1'b1;                       // 抬笔把一圈占满，没有扫描时间
                             state <= S_DONE;
                         end else begin
                             laps_beats   <= dv_quot[31:0];
-                            active_beats <= dv_quot[31:0] - blank_total_beats;
+                            active_beats <= dv_quot[31:0] - blank_total_q;
                             s            <= 6'd0;
                             state        <= S_P1_STK;
                         end

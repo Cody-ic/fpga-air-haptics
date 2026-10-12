@@ -293,7 +293,8 @@ module hap2_cmd #(
             traj_ready         <= ready;
             traj_txt_commit    <= 1'b1;    // 原文可以对外公布了（STATE 要回传）
             traj_txt_none      <= (sh_shape != SH_CUSTOM) || traj_none;
-            walk_stop          <= 1'b1;        // 新图形一律从起点重新开始
+            // 本地自动播放时直接 START；同时给 STOP 会被走步器的停止优先级吞掉。
+            walk_stop          <= !(local_cfg && local_auto_run);
             if (do_reply) begin
                 reply_valid      <= 1'b1;
                 reply_kind       <= 2'd0;

@@ -33,6 +33,12 @@ module uart_rx #(
     reg [2:0]  bit_idx;    // 正在收第几位数据
     reg [7:0]  shifter;    // 移位寄存器，先收到的是最低位
 
+    (* ASYNC_REG = "TRUE" *) reg [1:0] rx_sync;
+    always @(posedge clk) begin
+        if (!rst_n) rx_sync <= 2'b11;
+        else        rx_sync <= {rx_sync[0], rx_line};
+    end
+
     always @(posedge clk) begin
         if (!rst_n) begin
             state    <= S_IDLE;
@@ -48,7 +54,7 @@ module uart_rx #(
 
             case (state)
                 S_IDLE: begin
-                    if (rx_line == 1'b0) begin     // 看到起始位
+                    if (rx_sync[1] == 1'b0) begin  // 看到同步后的起始位
                         cnt   <= HALF_BIT;         // 等半个位，采到中间
                         state <= S_START;
                     end
@@ -56,7 +62,7 @@ module uart_rx #(
 
                 S_START: begin
                     if (cnt == 16'd0) begin
-                        if (rx_line == 1'b0) begin // 确认不是毛刺
+                        if (rx_sync[1] == 1'b0) begin // 确认不是毛刺
                             cnt     <= CLKS_PER_BIT - 1;
                             bit_idx <= 3'd0;
                             state   <= S_DATA;
@@ -70,7 +76,7 @@ module uart_rx #(
 
                 S_DATA: begin
                     if (cnt == 16'd0) begin
-                        shifter[bit_idx] <= rx_line;   // 低位先到
+                        shifter[bit_idx] <= rx_sync[1];   // 低位先到
                         cnt <= CLKS_PER_BIT - 1;
                         if (bit_idx == 3'd7) begin
                             state <= S_STOP;
@@ -84,7 +90,7 @@ module uart_rx #(
 
                 S_STOP: begin
                     if (cnt == 16'd0) begin
-                        if (rx_line == 1'b1) begin
+                        if (rx_sync[1] == 1'b1) begin
                             rx_data  <= shifter;
                             rx_valid <= 1'b1;
                         end else begin

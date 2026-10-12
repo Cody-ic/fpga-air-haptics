@@ -450,14 +450,15 @@ module tb_hap2_rx;
     end
 
     // ---------------- 结果捕获 ----------------
-    reg            got_line;
-    reg            got_drop;
-    reg            got_ok;
-    reg            got_bad;
-    reg [ADDR_W:0] got_len;
-    reg [3:0]      got_verb;   // 整帧结论出来时的命令编号
-    reg [3:0]      got_err;    // 整帧结论出来时的错误分类
-    reg [18:0]     got_seen;   // 整帧结论出来时的字段表（19 个字段）
+    // 这些变量由捕获 always 和测试协程共享；防止旧版 Verilator 将协程副本局部化。
+    reg            got_line /* verilator public_flat_rw */;
+    reg            got_drop /* verilator public_flat_rw */;
+    reg            got_ok /* verilator public_flat_rw */;
+    reg            got_bad /* verilator public_flat_rw */;
+    reg [ADDR_W:0] got_len /* verilator public_flat_rw */;
+    reg [3:0]      got_verb /* verilator public_flat_rw */;   // 命令编号
+    reg [3:0]      got_err /* verilator public_flat_rw */;    // 错误分类
+    reg [18:0]     got_seen /* verilator public_flat_rw */;   // 字段表
 
     // 字段寄存器组：模拟下一个模块会怎么收字段流
     reg [31:0]     fval  [0:16];   // 数值类字段的值（编号 0~16）
@@ -932,9 +933,9 @@ module tb_hap2_rx;
     wire       small_ready;
     wire       small_dropped;
     wire [6:0] small_len;
-    reg        small_got_ready;
-    reg        small_got_drop;
-    reg [6:0]  small_got_len;
+    reg        small_got_ready /* verilator public_flat_rw */;
+    reg        small_got_drop /* verilator public_flat_rw */;
+    reg [6:0]  small_got_len /* verilator public_flat_rw */;
 
     hap2_line_rx #(
         .MAX_LINE (64),
@@ -1031,9 +1032,10 @@ module tb_hap2_rx;
     integer k;
     integer frame_count;
     integer scan_idx;
-    integer scan_result;      // 1 = 通过，0 = 拒绝
+    integer scan_result /* verilator public_flat_rw */;      // 1 = 通过，0 = 拒绝
     integer scan_x0, scan_y0, scan_x1, scan_y1;
-    integer scan_npt, scan_nst;
+    integer scan_npt /* verilator public_flat_rw */;
+    integer scan_nst /* verilator public_flat_rw */;
     integer st0_start, st0_len, st1_start, st1_len;
 
     initial begin
@@ -1413,7 +1415,7 @@ module tb_hap2_rx;
         if (errors == 0) begin
             $display("结果：全部通过");
         end else begin
-            $display("结果：有失败");
+            $fatal(1, "结果：有失败");
         end
         $display("=========================================");
         $finish;

@@ -122,6 +122,9 @@ module tb_hap2_top;
     integer checks = 0;
     integer st, val, timeout;
     integer case_i;
+    reg saved_mv_sel;
+    reg signed [20:0] saved_x0, saved_y0;
+    reg [8:0] saved_moves;
 
     // ---------------- 工具 ----------------
     task clear_rx;
@@ -807,12 +810,22 @@ module tb_hap2_top;
         found("HAP3 ACK 18 CONFIG applied=1 rev=4");
 
         // ---- 19. 工作空间越界：字段各自合法，但整张图越界（第 4 项）----
+        saved_mv_sel = dut.u_traj.mv_sel;
+        saved_x0 = dut.u_traj.pub_x0;
+        saved_y0 = dut.u_traj.pub_y0;
+        saved_moves = dut.u_traj.pub_moves;
         // 草图点 x=150000 µm，参考实现允许（≤300 mm），但设备声明的工作空间是 ±100 mm
         case_i = 18;
         clear_rx;
         send_case(18);
         wait_frames(1);
         found("HAP3 ERR 20 CONFIG code=OUT_OF_WORKSPACE");
+        checks = checks + 1;
+        if (dut.u_traj.mv_sel !== saved_mv_sel || dut.u_traj.pub_x0 !== saved_x0 ||
+            dut.u_traj.pub_y0 !== saved_y0 || dut.u_traj.pub_moves !== saved_moves) begin
+            $display("越界草图被拒后已发布轨迹改变  **失败**");
+            errors = errors + 1;
+        end
 
         // 预设图形：cx=90000 + radius=20000 = 110000 µm，同样是越界
         case_i = 19;
@@ -820,6 +833,26 @@ module tb_hap2_top;
         send_case(19);
         wait_frames(1);
         found("HAP3 ERR 21 CONFIG code=OUT_OF_WORKSPACE");
+        checks = checks + 1;
+        if (dut.u_traj.mv_sel !== saved_mv_sel || dut.u_traj.pub_x0 !== saved_x0 ||
+            dut.u_traj.pub_y0 !== saved_y0 || dut.u_traj.pub_moves !== saved_moves) begin
+            $display("越界预设图形被拒后已发布轨迹改变  **失败**");
+            errors = errors + 1;
+        end
+
+        // 拒绝后重新 START：必须继续使用先前两笔草图。
+        clear_rx;
+        send_case(8);
+        wait_frames(2);
+        watch_trajectory(1200000);
+        clear_rx;
+        send_case(9);
+        wait_frames(2);
+        checks = checks + 1;
+        if (focus_x !== saved_x0 || focus_y !== saved_y0) begin
+            $display("越界拒绝后重启/停止未回到原图形起点  **失败**");
+            errors = errors + 1;
+        end
 
         // 两次被拒之后要版本号没动（还是 4）：要一份状态来看看真实的 rev
         case_i = 20;
@@ -937,10 +970,25 @@ module tb_hap2_top;
         found("HAP3 ACK 24 MODE applied=1 rev=6");
         found("mode=REMOTE");
 
+        // ---- 负坐标经真实串口序列化回传 ----
+        clear_rx;
+        send_case(24);
+        wait_frames(2);
+        found("HAP3 ACK 26 CONFIG applied=1 rev=7");
+        found("fx_um=-10 fy_um=-20 fz_um=150000");
+        clear_rx;
+        send_case(25);
+        wait_frames(2);
+        found("state=RUNNING");
+        found("fx_um=-10 fy_um=-20 fz_um=150000");
+        clear_rx;
+        send_case(26);
+        wait_frames(2);
+
         $display("=========================================");
         $display("共检查 %0d 项，失败 %0d 项", checks, errors);
         if (errors == 0) $display("结果：全部通过");
-        else             $display("结果：有失败");
+        else             $fatal(1, "结果：有失败");
         $display("=========================================");
         $finish;
     end

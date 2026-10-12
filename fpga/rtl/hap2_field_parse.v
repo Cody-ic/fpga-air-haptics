@@ -219,7 +219,7 @@ module hap2_field_parse #(
     endfunction
 
     function in_range;         // 字段编号 -> 数值范围检查（协议第 3 节）
-        input [3:0]  id;
+        input [4:0]  id;
         input [31:0] mag;      // 绝对值
         input        neg;      // 是否带负号
         begin
