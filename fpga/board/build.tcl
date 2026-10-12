@@ -47,6 +47,12 @@ set_option -output_base_name board_top
 #   set CPU regular_io = true
 set_option -use_cpu_as_gpio 1
 
+# 时序报告默认只打印最差的一小批路径（我们一直是 50 条），于是"修掉 20 条之后
+# 又有 21 条顶上来"，看起来像白改 ✗。把这个数字放大，一次就能看到**所有**违例路径，
+# 也就能一次改完、只跑一次综合验证。
+set_option -num_critical_paths 500
+set_option -num_startend_points 500
+
 puts "=== 开始综合 ==="
 run syn
 puts "=== 开始布局布线 ==="

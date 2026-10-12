@@ -118,6 +118,8 @@ module hap2_traj_plan #(
     localparam [4:0] S_DONE   = 5'd24;
     localparam [4:0] S_DONE2  = 5'd25;   // 再等一拍才发 done：让别人读得到 settle 好的行数
     localparam [4:0] S_FIXED2 = 5'd26;   // 流水化的第二拍：把大乘法算完再做判定
+    localparam [4:0] S_P2_SEG2= 5'd27;   // 段内拍数：先把段长读出来寄存
+    localparam [4:0] S_P2_SEG3= 5'd28;   // 再算乘法（一拍只做一件事）
 
     // ---- 段表本地副本（避开跨模块读的时序讲究，后面反复要用）----
     reg [8:0]  s_start [0:MAX_STK-1];
@@ -155,6 +157,9 @@ module hap2_traj_plan #(
     reg signed [PT_BITS-1:0] blk_fx, blk_fy;
     reg signed [PT_BITS:0]   blk_dx, blk_dy;
     reg [23:0] wr_beats;
+    // 段内拍数那三拍流水用的中间寄存器
+    reg [31:0] seg_len_q;
+    reg [55:0] prod_q;
     reg signed [31:0] wr_sx, wr_sy;
     reg        wr_scan;
     reg [1:0]  wr_next;      // 0 = 还有下一小段；1 = 接着写跳转段；2 = 换下一笔
@@ -478,8 +483,21 @@ module hap2_traj_plan #(
                 end
 
                 // 段内拍数 = 这一笔的拍数 × 段长 ÷ 这一笔总长（余数累计，加总不缺不多）
+                // 这里拆成三拍：段长读出来寄存 → 乘法 → 加余数并启动除法。
+                // 最早是一拍里「读表 + 24×32 乘法 + 加 + 启动除法」，16 路版的时序报告里
+                // `sh_blank_us → u_plan/mult_937` 是 −2.29 ns（最差的一条）。
                 S_P2_SEG: begin
-                    dv_numer <= bstroke * len_tab[g2] + rem_seg;
+                    seg_len_q <= len_tab[g2];
+                    state     <= S_P2_SEG2;
+                end
+
+                S_P2_SEG2: begin
+                    prod_q <= bstroke * seg_len_q;
+                    state  <= S_P2_SEG3;
+                end
+
+                S_P2_SEG3: begin
+                    dv_numer <= prod_q + rem_seg;
                     dv_denom <= raw_len[s[4:0]];
                     dv_start <= 1'b1;
                     state    <= S_P2_SGW;

@@ -96,10 +96,18 @@ module hap2_out #(
     // 16 路版最差的 8 条里有 7 条都在这一条链上）。配置只在待机时变，所以
     // 配置一变就把门槛算好寄存起来，运行阶段只剩「加相位、比大小」。
     reg [ACC_BITS-1:0] duty_thr;
+    reg [31:0]         level_q;      // 上一次算门槛时用的 level
     always @(posedge clk) begin
-        if (!rst_n)          duty_thr <= {ACC_BITS{1'b0}};
-        else if (cfg_change) duty_thr <= (cfg_level >= 32'd100) ? HALF_CYCLE
-                                                               : duty_scaled[ACC_BITS-1:0];
+        if (!rst_n) begin
+            duty_thr <= {ACC_BITS{1'b0}};
+            level_q  <= 32'd0;
+        end else if (cfg_change || cfg_level != level_q) begin
+            // 配置整体换了、或者 level 本身变了，都重算一次。
+            // 加「level 变了也重算」是为了兼容：真实系统里 level 随 CONFIG 一起来
+            // （cfg_change 有效），但测试台/别的调用方可能只改 level 不拉 cfg_change。
+            duty_thr <= (cfg_level >= 32'd100) ? HALF_CYCLE : duty_scaled[ACC_BITS-1:0];
+            level_q  <= cfg_level;
+        end
     end
 
     // ---------------- 调制包络：mod_hz 的 50% 方波 ----------------

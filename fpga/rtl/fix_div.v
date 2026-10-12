@@ -36,7 +36,13 @@ module fix_div #(
     reg [DEN_BITS-1:0] den_lat;
     reg [DEN_BITS-1:0] r;          // 运行中的余数
     reg [NUM_BITS-2:0] q;          // 运行中的商（最后一位在收尾时拼上）
-    reg [NUM_BITS-1:0] cnt;        // 还剩几拍
+    // ⚠️ 计数器只要 6 位，**不要**写成 NUM_BITS 位：
+    // 最早写成 reg [NUM_BITS-1:0] cnt，综合出来是一条 56 位的借位链
+    // （时序报告里 u_aconst/cnt_0 → cnt_32 就是它，slack −2.0～−2.3 ns，
+    //   16 路版 25 条违例里有 20 条来自这里）。它的值最大只用 55，
+    // 6 位放得下；`num_lat[cnt]` 这种按位选也照样合法（55 < 56）。
+    localparam integer CW = 6;
+    reg [CW-1:0]       cnt;        // 从 NUM_BITS-1 数到 0
 
     wire [RW-1:0]       r_shift = {r, num_lat[cnt]};
     wire [RW-1:0]       den_ext = {1'b0, den_lat};
@@ -53,7 +59,7 @@ module fix_div #(
             den_lat <= {DEN_BITS{1'b0}};
             r       <= {RW{1'b0}};
             q       <= {(NUM_BITS-1){1'b0}};
-            cnt     <= {NUM_BITS{1'b0}};
+            cnt     <= {CW{1'b0}};
             quot    <= {NUM_BITS{1'b0}};
             rem     <= {NUM_BITS{1'b0}};
         end else begin
@@ -64,7 +70,7 @@ module fix_div #(
                 den_lat <= denom;
                 r       <= {DEN_BITS{1'b0}};
                 q       <= {(NUM_BITS-1){1'b0}};
-                cnt     <= NUM_BITS[15:0] - 1'b1;   // 从最高位开始，共 NUM_BITS 拍
+                cnt     <= (NUM_BITS - 1);          // 从最高位开始，共 NUM_BITS 拍
                 div0    <= (denom == {DEN_BITS{1'b0}});
                 busy    <= 1'b1;
             end else if (busy) begin
