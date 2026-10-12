@@ -161,7 +161,7 @@ module tb_shape;
         $display("=========================================");
         $display("共检查 %0d 项，失败 %0d 项", checks, errors);
         if (errors == 0) $display("结果：全部通过");
-        else             $display("结果：有失败");
+        else             $fatal(1, "结果：有失败");
         $display("=========================================");
         $finish;
     end

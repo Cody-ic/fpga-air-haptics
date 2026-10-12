@@ -54,6 +54,7 @@ module hap2_phase #(
     output reg  [8:0]                sweep_cnt,      // 这次算到第几路（看波形用）
     // ---- 相位表读口（给状态快照用）----
     output reg                       pub_sel,        // 对外的是哪一半
+    output reg                       pub_valid,      // 已经发布过一份完整相位表
     // 快照在读的时候可以把「读哪一半」钉住：算到一半翻指针也不会读串
     input  wire                      rd_sel,
     input  wire [7:0]                rd_addr,
@@ -256,6 +257,7 @@ module hap2_phase #(
             busy        <= 1'b0;
             done        <= 1'b0;
             pub_sel     <= 1'b0;
+            pub_valid   <= 1'b0;
             base_ch     <= {STEP_W{1'b0}};
             sweep_cnt   <= 9'd0;
             lane_wr     <= 8'd0;
@@ -365,6 +367,7 @@ module hap2_phase #(
 
                 P_END: begin
                     pub_sel <= ~pub_sel;      // 整张表算完了，切过去
+                    pub_valid <= 1'b1;
                     // 顺手记住这张表是对着哪个焦点算的（状态帧要用同一份数据）
                     pub_fx    <= fx_q;
                     pub_fy    <= fy_q;

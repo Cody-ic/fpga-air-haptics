@@ -33,7 +33,17 @@ module hap2_local #(
     localparam [23:0] DEB_CYC = (CLK_HZ / 1000) * DEB_MS;   // 24 位够到 335 ms @50 MHz
 
     // 三个键各一份：raw[i] 是同步进来的电平，stable[i] 是消抖之后的电平
-    wire [2:0] raw = {key_stop, key_play, key_next};
+    (* ASYNC_REG = "TRUE" *) reg [2:0] key_meta, key_sync;
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            key_meta <= 3'b000;
+            key_sync <= 3'b000;
+        end else begin
+            key_meta <= {key_stop, key_play, key_next};
+            key_sync <= key_meta;
+        end
+    end
+    wire [2:0] raw = key_sync;
     reg  [2:0] stable;
     reg  [2:0] pulse;                 // 单拍：某个键刚被确认按下
     reg  [23:0] cnt [0:2];            // 每个键各自的「已经连续多久是新电平」

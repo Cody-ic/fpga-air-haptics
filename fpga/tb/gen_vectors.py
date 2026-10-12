@@ -625,6 +625,11 @@ def build_top_cases(device):
         # 本地按键之后要读回真实的 rev / shape：SNAP 在任何模式下都允许
         ("snap_local", encode("CMD", 25, "SNAP"),
          "要一份状态：本地动作之后核对 rev/shape 用"),
+        ("config_negative", cfg(26, shape="CUSTOM", scan_paths="-10:-20",
+                                repeat_millihz=40000, blank_us=2000, level=30),
+         "负坐标单点：状态帧必须正确回传 -10/-20 µm"),
+        ("start_negative", encode("CMD", 27, "START"), "负坐标单点启动"),
+        ("stop_negative", encode("CMD", 28, "STOP"), "负坐标单点停止"),
     ]
 
 

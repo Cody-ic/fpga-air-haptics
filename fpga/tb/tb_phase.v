@@ -79,7 +79,9 @@ module tb_phase;
     );
 
     // 三个实例各自什么时候算完，都记下来（不然后面的用例可能在读到一半时被偷跑）
-    reg got_d0, got_d1, got_d2;
+    reg got_d0 /* verilator public_flat_rw */;
+    reg got_d1 /* verilator public_flat_rw */;
+    reg got_d2 /* verilator public_flat_rw */;
     always @(posedge clk) begin
         if (!rst_n) begin
             got_d0 <= 1'b0;
@@ -323,7 +325,7 @@ module tb_phase;
         $display("=========================================");
         $display("共检查 %0d 项，失败 %0d 项", checks, errors);
         if (errors == 0) $display("结果：全部通过");
-        else             $display("结果：有失败");
+        else             $fatal(1, "结果：有失败");
         $display("=========================================");
         $finish;
     end

@@ -20,7 +20,7 @@ BUILD_DIR="${BUILD_DIR:-$HOME/.cache/hap2_sim}"
 mkdir -p "$BUILD_DIR"
 
 # -Wno-WIDTH：Verilog-2001 里常量算术一律按 32 位算，赋给窄位寄存器时
-# Verilator 会报大量位宽提示。这些在综合工具里无害，这里统一关闭。
+# Verilator 会报大量位宽提示。此脚本为兼容已有测试关闭提示；新增代码应单独查位宽。
 # -Wno-PINMISSING：有些输出端口是有意不接的（例如只在调试时才看），
 # 这类“端口没接”的提示在这里不需要。
 verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
@@ -127,3 +127,10 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"
+
+echo
+echo "=== 审查回归（冷启动、字段边界、动态相位与快照）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_review_edges -o review_edges_sim -Mdir "$BUILD_DIR/obj_review" \
+          rtl/*.v tb/tb_review_edges.v
+"$BUILD_DIR/obj_review/review_edges_sim"

@@ -370,6 +370,7 @@ module hap2_top #(
     wire [8:0]  ph_cnt;
     /* verilator lint_on UNUSEDSIGNAL */
     wire        ph_pub_sel;
+    wire        ph_pub_valid;
     wire [7:0]  ph_rd_addr, ph_rd_data;
     wire [7:0]  ph_rd2_addr, ph_rd2_data;   // 第二个读口：给输出级拿相位码
     wire signed [20:0] ph_pub_fx, ph_pub_fy;
@@ -391,6 +392,7 @@ module hap2_top #(
         .done               (ph_done),
         .sweep_cnt          (ph_cnt),
         .pub_sel            (ph_pub_sel),
+        .pub_valid          (ph_pub_valid),
         .rd_sel             (snap_sel),
         .rd_addr            (ph_rd_addr),
         .rd_data            (ph_rd_data),
@@ -432,6 +434,7 @@ module hap2_top #(
     reg         snap_wait, snap_copy;
     reg         snap_sel;
     reg  [8:0]  snap_count;
+    reg         snap_phase_valid;
 
     reg [31:0] sn_carrier, sn_steps, sn_cx, sn_cy, sn_z, sn_radius;
     reg [31:0] sn_repeat, sn_mod, sn_level, sn_closed, sn_blank;
@@ -441,6 +444,8 @@ module hap2_top #(
     reg [15:0] sn_rev;
     reg        sn_scan;
     reg [5:0]  sn_stroke;
+    reg signed [31:0] sn_fx_um, sn_fy_um;
+    reg [31:0] sn_fz_um;
 
     assign ph_rd_addr = snap_idx;
 
@@ -451,6 +456,7 @@ module hap2_top #(
             snap_copy <= 1'b0;
             snap_sel  <= 1'b0;
             snap_count<= 9'd0;
+            snap_phase_valid <= 1'b0;
             sn_carrier<= 32'd40000; sn_steps <= 32'd64;  sn_cx <= 32'd0;
             sn_cy     <= 32'd0;     sn_z     <= 32'd150000;
             sn_radius <= 32'd20000; sn_repeat<= 32'd500;
@@ -460,6 +466,9 @@ module hap2_top #(
             sn_run    <= 2'd0;      sn_reason<= 3'd0;
             sn_rev    <= 16'd0;     sn_scan  <= 1'b0;
             sn_stroke <= 6'd0;
+            sn_fx_um  <= 32'sd0;
+            sn_fy_um  <= 32'sd0;
+            sn_fz_um  <= 32'd150000;
         end else begin
             if (state_capture) begin
                 // 锁存这一瞬间：配置、状态、扫描开关
@@ -472,15 +481,20 @@ module hap2_top #(
                 sn_mode    <= cmd_mode;       sn_run   <= cmd_run;
                 sn_reason  <= cmd_reason;     sn_rev   <= cmd_rev;
                 sn_scan    <= scan_on;        sn_stroke<= stroke_index;
+                // 明确扩为 32 位有符号数，再换单位；和相位表同拍锁存。
+                sn_fx_um <= $signed({{11{ph_pub_fx[20]}}, ph_pub_fx}) >>> 1;
+                sn_fy_um <= $signed({{11{ph_pub_fy[20]}}, ph_pub_fy}) >>> 1;
+                sn_fz_um <= ph_pub_fz_um;
                 // 相位表：钉住现在对外的哪一半，从头复制一遍
                 snap_sel   <= ph_pub_sel;
+                snap_phase_valid <= ph_pub_valid;
                 snap_idx   <= 8'd0;
                 snap_wait  <= 1'b0;
                 snap_copy  <= 1'b1;
                 snap_count <= HW_ROWS * HW_COLS;
             end else if (snap_copy) begin
                 if (snap_wait) begin
-                    snap_ph[snap_idx] <= ph_rd_data;
+                    snap_ph[snap_idx] <= snap_phase_valid ? ph_rd_data : 8'd0;
                     snap_wait <= 1'b0;
                     if ({1'b0, snap_idx} + 9'd1 >= snap_count) snap_copy <= 1'b0;
                     else                                       snap_idx  <= snap_idx + 8'd1;
@@ -571,9 +585,9 @@ module hap2_top #(
         .cfg_blank_us     (sn_blank),
         // 焦点与相位表来自同一次计算（相位引擎把那次用的坐标一并给出来），
         // 单位从 0.5 µm 换成整数微米
-        .fx_um            ($signed(ph_pub_fx) >>> 1),
-        .fy_um            ($signed(ph_pub_fy) >>> 1),
-        .fz_um            (ph_pub_fz_um),
+        .fx_um            (sn_fx_um),
+        .fy_um            (sn_fy_um),
+        .fz_um            (sn_fz_um),
         .scan_on          (sn_scan),
         .stroke_index     (sn_stroke),
         .phase_addr       (phase_addr),

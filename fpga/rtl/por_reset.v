@@ -2,10 +2,8 @@
 
 // 上电复位（POR，Power-On Reset）。
 //
-// 为什么必须有这个模块：真板子上电、FPGA 配置完成之后，里面寄存器的值是**随机的**，
-// 不是仿真里那样全都是 0（仿真工具默认把寄存器初始化成 0，真芯片不会）。
-// 所以必须自己产生一个复位，把整条链路按住一小段时间再放开，
-// 否则状态机会从一堆随机值开始跑——这是上板最经典的翻车点，仿真里永远看不到。
+// 计数器必须有明确的配置初值，才能在没有按复位键时产生上电复位。
+// 四态仿真中未初始化的寄存器是 X；综合后需核查器件的 INIT/GSR 设置。
 //
 // 做法是数字电路里通行的「异步拉低、同步放开」：
 //   - 外部复位键一按（低电平）**立刻**拉低复位，不用等时钟；
@@ -23,12 +21,22 @@ module por_reset #(
 
     localparam [23:0] HOLD_CYC = (CLK_HZ / 1000) * HOLD_MS;
 
-    reg [23:0] cnt;
-    reg        released;
+    reg [23:0] cnt = 24'd0;
+    reg        released = 1'b0;
+    (* ASYNC_REG = "TRUE" *) reg [1:0] ext_sync = 2'b00;
+
+    // 外部复位异步置低，同步进入计数器后再开始释放计时。
+    always @(posedge clk or negedge ext_rst_n) begin
+        if (!ext_rst_n) ext_sync <= 2'b00;
+        else            ext_sync <= {ext_sync[0], 1'b1};
+    end
 
     always @(posedge clk or negedge ext_rst_n) begin
         if (!ext_rst_n) begin
             // 按键一按：立刻回到「还没放开」的状态，重新数
+            cnt      <= 24'd0;
+            released <= 1'b0;
+        end else if (!ext_sync[1]) begin
             cnt      <= 24'd0;
             released <= 1'b0;
         end else if (cnt != HOLD_CYC) begin
