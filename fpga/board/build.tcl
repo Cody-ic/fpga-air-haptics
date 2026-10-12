@@ -53,6 +53,17 @@ set_option -use_cpu_as_gpio 1
 set_option -num_critical_paths 500
 set_option -num_startend_points 500
 
+# 关掉乘法器"资源共享"。综合器为了省 DSP，会把多处乘法复用同一个 DSP，
+# 于是在 DSP 输入端造出一个很大的多路选择器——16 路版最差那条 −1.65 ns
+# （`u_plan/mult_937` 的输入侧）就是它。这颗芯片有 118 个 DSP，我们只用了 24 个，
+# 不值得为省资源牺牲时序。
+set_option -resource_sharing 0
+
+# 让综合器自己做"寄存器重定时"：把寄存器穿过组合逻辑搬一搬，把长组合链切短。
+# 纯综合选项、不动 RTL，所以仿真结果不受影响（失败也无副作用，删掉这行即可）。
+# 目标：`u_parse/key_buf` 那 21 条（19 个 128 位比较器并联 + 19 级优先选择链）。
+set_option -retiming 1
+
 puts "=== 开始综合 ==="
 run syn
 puts "=== 开始布局布线 ==="
