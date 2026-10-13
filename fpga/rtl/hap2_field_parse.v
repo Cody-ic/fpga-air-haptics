@@ -256,6 +256,7 @@ module hap2_field_parse #(
     localparam [3:0] S_KEY   = 4'd7;
     localparam [3:0] S_VAL   = 4'd8;
     localparam [3:0] S_END   = 4'd9;
+    localparam [3:0] S_KEYJ  = 4'd10;  // 键名判定的第二拍（见 key_hit_q 的说明）
 
     reg [3:0]      state;
     reg [ADDR_W:0] idx;         // rd_data 当前对应第几个字节
@@ -352,6 +353,25 @@ module hap2_field_parse #(
                    : key_hit[17] ? F_SCAN_PATHS
                    : key_hit[18] ? F_BLANK_US
                    : 5'h1F;
+
+    // 键名比较是 19 个 128 位比较器并联，再串 19 级优先选择链（hit_id）。
+    // 16 路版的时序报告里 21 条违例全在这条链上（−0.59 ns），路径是
+    // key_buf(寄存器) → 比较器 → 优先链 → 状态机。这里把它从中间打断：
+    // 比较结果先寄存一拍，状态机下一拍（S_KEYJ）再判定。
+    // key_buf 在等号到来之前一直稳定，所以寄存一拍不会丢数据。
+    // 注意：别用"缩小位宽"来省比较器——`repeat_millihz` 有 14 个字符（112 位），
+    // 缩到 96 位会直接解析失败（试过：tb_hap2_rx 挂 28 项）。
+    reg        hit_any_q;
+    reg [4:0]  hit_id_q;
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            hit_any_q <= 1'b0;
+            hit_id_q  <= 5'h1F;
+        end else begin
+            hit_any_q <= hit_any;
+            hit_id_q  <= hit_id;
+        end
+    end
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -533,28 +553,13 @@ module hap2_field_parse #(
                 end
 
                 S_KEY: begin
+                    // 键名结束（遇到等号）只切状态，判定放到下一拍 S_KEYJ
                     if (rd_data == CH_EQUAL) begin
                         if (key_len == 0) begin
                             fail(E_CHAR, 5'h1F);
-                        end else if (!hit_any) begin
-                            // 不认识的键：忽略这个字段，但仍要检查它的字符是否合法
-                            cur_known <= 1'b0;
-                            cur_key   <= 5'h1F;
-                            state     <= S_VAL;
-                            step;
-                        end else if (seen_mask[hit_id]) begin
-                            fail(E_DUP, hit_id);
                         end else begin
-                            cur_known   <= 1'b1;
-                            cur_key     <= hit_id;
-                            seen_mask[hit_id] <= 1'b1;
-                            enum_buf    <= 128'h0;
-                            acc         <= 32'd0;
-                            acc_neg     <= 1'b0;
-                            acc_digits  <= 4'd0;
-                            val_start   <= idx + 1'b1;
-                            state       <= S_VAL;
-                            step;
+                            // 只切状态：比较结果要在下一拍用寄存后的那一份（S_KEYJ）
+                            state <= S_KEYJ;
                         end
                     end else if (is_key_char(rd_data)) begin
                         if (key_first && !is_lower(rd_data)) begin
@@ -569,6 +574,32 @@ module hap2_field_parse #(
                         end
                     end else begin
                         fail(E_CHAR, 5'h1F);
+                    end
+                end
+
+                // 键名判定的第二拍：用寄存后的比较结果（见 hit_any_q 的说明）。
+                // 这里做的事和原来在 S_KEY 里遇到等号时那三个分支完全一样，
+                // 只是晚一拍；idx 这一拍没有动，所以 val_start = idx+1 仍然正确。
+                S_KEYJ: begin
+                    if (!hit_any_q) begin
+                        // 不认识的键：忽略这个字段，但仍要检查它的字符是否合法
+                        cur_known <= 1'b0;
+                        cur_key   <= 5'h1F;
+                        state     <= S_VAL;
+                        step;
+                    end else if (seen_mask[hit_id_q]) begin
+                        fail(E_DUP, hit_id_q);
+                    end else begin
+                        cur_known   <= 1'b1;
+                        cur_key     <= hit_id_q;
+                        seen_mask[hit_id_q] <= 1'b1;
+                        enum_buf    <= 128'h0;
+                        acc         <= 32'd0;
+                        acc_neg     <= 1'b0;
+                        acc_digits  <= 4'd0;
+                        val_start   <= idx + 1'b1;
+                        state       <= S_VAL;
+                        step;
                     end
                 end
 
