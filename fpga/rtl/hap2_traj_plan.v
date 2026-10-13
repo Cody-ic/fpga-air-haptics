@@ -120,6 +120,7 @@ module hap2_traj_plan #(
     localparam [4:0] S_FIXED2 = 5'd26;   // 流水化的第二拍：把大乘法算完再做判定
     localparam [4:0] S_P2_SEG2= 5'd27;   // 段内拍数：先把段长读出来寄存
     localparam [4:0] S_P2_SEG3= 5'd28;   // 再算乘法（一拍只做一件事）
+    localparam [4:0] S_BLKW  = 5'd29;    // 抬笔拍数（blank_us ÷ 10）走共享除法器
 
     // ---- 段表本地副本（避开跨模块读的时序讲究，后面反复要用）----
     reg [8:0]  s_start [0:MAX_STK-1];
@@ -308,14 +309,28 @@ module hap2_traj_plan #(
                         mv_wr      <= 9'd0;
                         total_w    <= 32'd0;
                         rem_stroke <= 32'd0;
-                        // 先算一圈多少拍
-                        dv_numer   <= {24'h0, TICKS_PER_X};
-                        dv_denom   <= cfg_repeat_millihz;
+                        // 先算抬笔拍数 blank_us÷10（它要参与拒绝条件判定，必须最早算）。
+                        // 走共享除法器而不是用「/ 常数」：常数除法综合出来是一大坨
+                        // 乘法+移位，而且 cfg_blank_us 扇出很大，16 路版最后 10 条违例
+                        // （最差 −4.03 ns）全在这条路上。
+                        dv_numer   <= {32'h0, cfg_blank_us};
+                        dv_denom   <= TICK_US;
                         dv_start   <= 1'b1;
-                        // 流水第一级：小乘法 / 常数除法，先把输入吞进来
+                        // 顺手起第一级小乘法（和除法并行）
                         budget_q      <= {32'h0, cfg_blank_us} * {58'h0, stroke_count};
-                        blank_beats_q <= cfg_blank_us / TICK_US;
-                        state      <= S_LOADST;
+                        state      <= S_BLKW;
+                    end
+                end
+
+                // 抬笔拍数算完了：锁下来，再开始算一圈拍数
+                S_BLKW: begin
+                    if (dv_done) begin
+                        blank_beats   <= dv_div0 ? 24'd0 : dv_quot[23:0];
+                        blank_beats_q <= dv_div0 ? 32'd0 : dv_quot[31:0];
+                        dv_numer      <= {24'h0, TICKS_PER_X};
+                        dv_denom      <= cfg_repeat_millihz;
+                        dv_start      <= 1'b1;
+                        state         <= S_LOADST;
                     end
                 end
 
