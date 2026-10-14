@@ -22,8 +22,7 @@ module tb_review_edges;
         .clk(clk), .ext_rst_n(ext_rst_n), .rst_n(por_n)
     );
     reg board_rst_n = 1'b1;
-    // board_top 默认是 2×4 = 8 路（原因见 board/tang_mega_138k_pro.cst：板子 PMOD 里
-    // 有 4 个脚是芯片的配置复用脚，命令行工程里布局过不去，所以先用 8 路干净脚）
+    // 使用当前板级默认值：4×4、11 mm 间距。
     wire [15:0] board_pos;   // board_top 默认 4x4 = 16 路
     board_top #(.CLK_HZ(1_000_000), .POR_MS(1), .STATE_MS(0)) u_board (
         .clk(clk), .key_rst_n(board_rst_n), .key0_n(1'b1),
@@ -125,6 +124,8 @@ module tb_review_edges;
     reg [31:0] boot_before;
     reg [31:0] old_offsets [0:3];
     initial begin
+        check(u_board.HW_PITCH_UM == 11000, "board default matches the 11 mm R5 array");
+        check(u_board.u_top.u_phase.PITCH_UM == 11000, "board pitch reaches the phase solver");
         phase_mem[0] = 0; phase_mem[1] = 3;
         phase_mem[2] = 7; phase_mem[3] = 11;
         repeat (4) begin

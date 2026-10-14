@@ -18,7 +18,7 @@ module board_top #(
     // 改成 2 就退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
     parameter integer HW_ROWS       = 4,
     parameter integer HW_COLS       = 4,
-    parameter integer HW_PITCH_UM   = 10000,        // 阵元间距（微米）
+    parameter integer HW_PITCH_UM   = 11000,        // 当前 4×4 R5 发射板：11 mm 阵元间距
     parameter integer PH_PIPE       = 4,            // 相位并行流水线条数（8×8 建议 8）
     parameter integer OUT_DEAD_CYC  = 0,            // 互补输出的死区拍数；单端驱动填 0
     parameter integer POR_MS        = 10,           // 上电复位按住多少毫秒

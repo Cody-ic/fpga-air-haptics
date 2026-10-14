@@ -3,7 +3,9 @@
 Coordinates: mm in computation, integer um on the wire. Channel order is
 row-major, +x along columns, +y along rows, emitters at z=0 facing +z.
 Phasor convention: p = sum(exp(j*(k*r + phase))/r). Consequently the
-transmit phase at a target is -k*r modulo 2*pi (not a positive delay).
+phase code at a target is -k*r modulo 2*pi. The FPGA interprets the code
+as a modulo-period waveform delay (acc - offset); its physical emitted
+phase has the opposite sign under the exp(+j*w*t) convention.
 No calibrated pressure, element directivity, reflections, or haptic threshold.
 """
 
@@ -357,7 +359,7 @@ def trajectory_bounds(config):
 
 
 def focus_phases(config, focus_mm, array):
-    """Quantized phase *advance* codes for the documented phasor convention."""
+    """Quantized modulo-period delay codes for the documented phasor convention."""
     r = np.linalg.norm(array_coordinates(array) - np.asarray(focus_mm), axis=1) / 1000
     cycles = np.remainder(-r * config.carrier_hz / 343.0, 1.0)
     return (np.floor(cycles * config.phase_steps + 0.5).astype(int) % config.phase_steps)
