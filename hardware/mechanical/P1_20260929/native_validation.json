@@ -1,0 +1,160 @@
+{
+  "passed": true,
+  "scope": "Native parts and nominal reference bodies; hardware/padding not modeled",
+  "documents": [
+    {
+      "file": "01_array_alignment_jig.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 79,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "02_bore_fit_coupon.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "03_wrist_and_board_base.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 43,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 73,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 8,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 8,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "04_wrist_cradle.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 9,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "05_pcb_standoff_35.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "06_m4_nut_knob.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_16_emitters.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 48,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "REF_pcb_80x88.SLDPRT",
+      "reopened": true,
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 31,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "file": "Array_jig_assembly.SLDASM",
+      "reopened": true,
+      "component_count": 3,
+      "transforms_verified": true,
+      "modeled_interferences": 0
+    },
+    {
+      "file": "Wrist_support_assembly.SLDASM",
+      "reopened": true,
+      "component_count": 10,
+      "transforms_verified": true,
+      "modeled_interferences": 0
+    }
+  ]
+}
