@@ -7,6 +7,7 @@ import threading
 import time
 
 from .protocol import VERSION, Decoder, Snapshot, encode
+from .receiver import Capture
 from .model import ArraySpec, Config, Workspace
 from .transport import DemoTransport, SerialTransport
 from .ble_transport import BleTransport
@@ -66,7 +67,9 @@ class Session(threading.Thread):
         if verb == "STOP":
             while True:
                 try:
-                    self.commands.get_nowait()
+                    discarded = self.commands.get_nowait()
+                    if discarded[2] == "CAPTURE":
+                        self.emit("rejected", verb="CAPTURE", text="采样请求被停止操作取消")
                 except queue.Empty:
                     break
         try:
@@ -111,6 +114,8 @@ class Session(threading.Thread):
                 if (frame.fields["simulated"] == "1") != self.is_demo:
                     raise RuntimeError("设备数据来源与所选连接模式不一致")
                 capabilities = set(frame.fields.get("caps", "").split(","))
+                if frame.fields.get("adc_capture") == "1":
+                    capabilities.add("ADC_CAPTURE")
                 if not {"CONFIG", "MODE", "START", "PAUSE", "STOP", "STATE", "PHASE"} <= capabilities:
                     raise RuntimeError("设备缺少必要协议能力")
                 if int(frame.fields.get("hb_ms", 0)) < 2000:
@@ -129,6 +134,15 @@ class Session(threading.Thread):
                 self.ready = True
                 self.emit("ready", device=frame.fields.get("device", "FPGA"), demo=self.is_demo,
                           limits=self.limits, capabilities=sorted(capabilities), array=self.array, workspace=self.workspace)
+            elif frame.verb == "CAPTURE":
+                try:
+                    capture = Capture.parse(frame.fields)
+                except (ValueError, KeyError, TypeError) as error:
+                    self.emit("rejected", verb="CAPTURE", text=f"无效采样窗口：{error}")
+                    return
+                if capture.boot != self.boot or capture.simulated != self.is_demo:
+                    raise RuntimeError("采样来源或启动标识与当前连接不一致")
+                self.emit("capture", capture=capture)
             elif frame.verb in ("CONFIG", "MODE", "START", "PAUSE", "STOP"):
                 if frame.fields.get("applied") != "1" or not frame.fields.get("rev", "").isdigit():
                     raise RuntimeError("控制应答缺少已生效标志或配置版本")
@@ -197,6 +211,11 @@ class Session(threading.Thread):
                         self.emit("rejected", verb=verb, text="上一控制命令尚未应答")
                     else:
                         try:
+                            if verb == "CAPTURE":
+                                if "ADC_CAPTURE" not in self.capabilities:
+                                    raise ValueError("设备固件不支持接收采样")
+                                if any(p.verb == "CAPTURE" for p in self.pending.values()):
+                                    raise ValueError("上一采样请求尚未完成")
                             if verb == "CONFIG":
                                 config = Config.from_wire(fields)
                                 mismatch = self.workspace.incompatibility(config)

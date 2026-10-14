@@ -28,7 +28,9 @@ def main():
     hello = demo.handle(encode('CMD', 1, 'HELLO'))
     config = replace(configs[-1], cx_um=1000, cy_um=-1000)
     applied = demo.handle(encode('CMD', 2, 'CONFIG', **config.wire(), **array.wire()))
+    capture = demo.handle(encode('CMD', 3, 'CAPTURE'))
     data = dict(array=array.wire(), frames=[raw.decode('ascii') for raw in hello+applied],
+                receiver_capture=capture[0].decode('ascii'),
                 vectors=vectors, document=dict(schema='haptics-config-3', config=config.wire()))
     target = ROOT/'mobile_app/test/fixtures/python_reference.json'
     target.parent.mkdir(parents=True, exist_ok=True)

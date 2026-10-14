@@ -4,7 +4,7 @@
 
 This repository prepares the 2026 FPGA haptic graphics project. `README.md` is the entry point; `设计思路.md` records current architecture; `FPGA赛道选题建议(1).md` preserves historical research. `CLAUDE.md` provides project context.
 
-`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, `ble_transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`; BLE mapping and pending decisions belong in `desktop_app/BLE.md`. HAP3 is a host-side draft, not yet agreed with FPGA firmware. No HDL, PCB, or hardware measurements exist yet.
+`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, `ble_transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`; BLE mapping and pending decisions belong in `desktop_app/BLE.md`. HAP3 remains a draft for FPGA firmware. `hardware/Haptics_4x4_R5_12VDC/` holds the PCB prototype package; `firmware/nucleo_f411re/` implements the STM32 serial/array prototype. No HDL or hardware measurements exist yet.
 
 ## Build, Test, and Development Commands
 
@@ -16,8 +16,11 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python -m desktop_app --demo`: connect a simulated device, initially idle.
 - `python -m unittest discover -s desktop_app/tests -v`: run automated checks.
 - `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
+- `python -m desktop_app.tests.receiver_gui_smoke`: check the debug ADC waveform panel, Demo source labels and CSV export; `receiver.py` analyzes voltage windows and `receiver_panel.py` owns this UI.
 - `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
 - `rg --files --hidden`: inspect workspace files.
+- `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.
+- `python firmware/nucleo_f411re/tests/test_firmware.py`: native C/Python cross-checks using a host GCC compiler.
 - In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
 - `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
 
@@ -40,5 +43,7 @@ Use `unittest` files named `test_*.py`; no coverage threshold exists. Test coord
 Use focused imperative messages, consistent with `docs: add system design plan`. PRs should explain behavior, rationale, interface changes, validation, and relevant issues; include screenshots for UI changes. Exclude personal files, credentials, and runtime outputs.
 
 ## Project Constraints
+
+Receiver hardware targets the final FPGA system; the F411 is a temporary validation platform. Preserve its divider and analog front end, adapting firmware and host software first. Do not redesign hardware merely to fill the MCU ADC range; justify any circuit change against measured problems and the final FPGA acquisition interface. Keep assembly and labeling checks separate from circuit redesign.
 
 Tang Mega 60K is selected; hardware starts at 4×4 then expands to 8×8. Drawings use arbitrary coordinates, never emitter-grid indices. Current software compiles sketches to at most 32 strokes and 256 coordinates, with one moving focus. Preserve legacy 64-point imports. Keep shared-edge subtraction and output-off transfers explicit; save original geometry, relations and dimensions separately from the wire plan. FPGA owns eventual high-speed scanning; Demo is a slow path demonstration. Preserve all coordinates when switching arrays. Distinguish simulated states, digital readback, theory, and measurements; prioritize single-focus validation before extensions.
