@@ -1,6 +1,8 @@
 # HAP3 设备协议草案（串口／BLE）
 
-更新日期：2026-09-25。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的上位机侧草案，尚未与 FPGA 端共同定稿。客户端与 Demo 已实现，真实固件尚未实现和联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
+更新日期：2026-09-28。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的草案，尚未与 FPGA 端共同定稿。已有 [NUCLEO-F411RE 串口验证固件](../firmware/nucleo_f411re/README.md)，完成编译及宿主机交叉测试，尚未实板联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
+
+F411RE 实现固定 4×4、11 mm、40 kHz、64 级相位；不支持的参数整包拒绝。它要求每次 REMOTE 握手后重新 CONFIG，才允许 START；新增错误码 `CONFIG_REQUIRED`、`SCAN_TOO_FAST`、`DMA_UNDERRUN` 等及可选 `drive_on` 状态字段，具体时序量化与限制见固件说明。上位机保持对其他合法 HAP3 设备的兼容。
 
 HAP3 在实际坐标基础上增加多段路径和关闭输出的跳转，拒绝 HAP1／HAP2 固件，避免旧设备将断开轮廓连起来。旧 JSON 文件可迁移；串口不自动降级。
 
@@ -108,9 +110,28 @@ STATE 必须同时回传实际扫描开关、当前段序号及位置，PC 不�
 | `STOP` | 两种模式均可；关闭输出，回到 IDLE 并将进度归零 |
 | `SNAP` | 请求完整状态，不改变输出 |
 
-除 HELLO 的专用应答外，成功命令返回 `ACK applied=1 rev=N`；除 PING 外紧跟 STATE。ERR 格式为 `ERR SEQ VERB code=...`，示例码包括 `BUSY`、`LOCAL_CONTROL`、`BAD_CONFIG`、`OUT_OF_WORKSPACE`、`HARDWARE_MISMATCH`、`NOT_RUNNING`、`BAD_MODE`、`UNKNOWN_COMMAND`。非法命令不改变已生效配置或运行状态。
+除 HELLO / CAPTURE 的专用应答外，成功命令返回 `ACK applied=1 rev=N`；除 PING 外紧跟 STATE。ERR 格式为 `ERR SEQ VERB code=...`，示例码包括 `BUSY`、`LOCAL_CONTROL`、`BAD_CONFIG`、`OUT_OF_WORKSPACE`、`HARDWARE_MISMATCH`、`NOT_RUNNING`、`BAD_MODE`、`UNKNOWN_COMMAND`。非法命令不改变已生效配置或运行状态。
 
 Demo 的本地 NEXT/PLAY/STOP 为模拟物理按键，不是串口命令。NEXT 只在 LOCAL+IDLE 生效，校验新图形范围后 `rev` 加一；本地停止键在两种模式均有效。
+
+### 4.1 CAPTURE：可选 ADC 短窗口扩展
+
+2026-09-28 新增，F411 与电脑 Demo 已实现；手机仅验证兼容，不提供波形页面。HELLO 可加独立字段 `adc_capture=1`，缺省表示不支持；基础 `caps` 和 STATE 不变。旧客户端忽略该可选字段，新电脑端仅在声明能力后启用采集。
+
+命令为 `CMD SEQ CAPTURE`，不带参数。成功时只发一帧延迟 ACK，窗口完成前不提前确认，也不触发完整 STATE。下面是应答字段示意，`raw` 实际必须包含 200 个逗号分隔整数，不能使用省略号：
+
+```text
+boot=boot_id rev=1 uptime_ms=1234 simulated=0 tx_running=1
+pin=PA0 fs_hz=400000 bits=12 n=200 raw=<200个0至4095的十进制整数>
+```
+
+帧仍按第 1 节格式及 CRC 编码，ACK 原样返回请求序号。`rev/uptime_ms/tx_running` 在采样启动时记录；运行状态不是整个窗口的输出门控，也不用于改变播放状态。`boot/simulated` 必须与会话一致。客户端严格校验版本固定的引脚、位数、采样率、样本数及数值范围，拒绝坏帧，不能以历史波形填充新结果。
+
+采样可在待机、播放或本地模式请求，不要求 CONFIG，不改变图形，也不刷新心跳。单个窗口 200 点、400 kS/s，占 0.5 ms；F411 同时最多一个未完成请求，启动间隔至少 200 ms，电脑连续查看间隔至少 500 ms。窗口外不采样，不能当作连续示波器或整幅图形测量。
+
+F411 采样外设等待上限 20 ms；结果等串口发送队列空闲再回传，不阻塞 STOP/按键处理。错误码包括 `UNSUPPORTED`、`BAD_FIELDS`、`ADC_BUSY`、`ADC_RATE_LIMIT`、`ADC_START_FAILED`、`ADC_ERROR`、`ADC_TIMEOUT`。新 HELLO 取消旧会话采样；STOP 关闭发射，已开始的采样仍可返回并保留启动时元数据。客户端既有 ACK/STATE 超时仍有效。
+
+ADC 原码按 `code × Vref / 4095` 换算，默认 Vref=3300 mV，允许手工校准；去均值后估计交流 RMS、峰峰值及 40 kHz 正交投影峰值。默认 ×3.4 仅近似还原原接收板末级分压前的交流幅值，不能增加有效分辨率或恢复削顶。数据没有声压单位、位置坐标或校准相位。Demo 同格式返回 `simulated=1` 的确定性合成波形。
 
 ## 5. STATE：原子数字快照
 

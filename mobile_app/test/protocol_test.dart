@@ -27,6 +27,7 @@ void main() {
       }
       expect(decoder.rejected, 0);
       expect(frames.length, 4);
+      expect(frames.first.fields['adc_capture'], '1');
       final snapshot = Snapshot(frames.last.fields);
       expect(snapshot.array.count, 64);
       expect(snapshot.revision, 1);
@@ -37,6 +38,17 @@ void main() {
       );
     },
   );
+  test('optional receiver extension preserves the shared frame encoding', () {
+    final raw = reference['receiver_capture'] as String;
+    final frame = Frame.decode(ascii.encode(raw));
+    expect(frame.kind, 'ACK');
+    expect(frame.verb, 'CAPTURE');
+    expect(frame.fields['simulated'], '1');
+    expect(frame.fields['fs_hz'], '400000');
+    expect(frame.fields['n'], '200');
+    expect(frame.fields['raw']!.split(',').length, 200);
+    expect(ascii.decode(frame.encode()), raw);
+  });
   test('corrupt and oversized lines are rejected then recover at newline', () {
     final raw = const Frame('CMD', 2, 'STOP').encode();
     final corrupted = List<int>.from(raw)..[8] = 88;
