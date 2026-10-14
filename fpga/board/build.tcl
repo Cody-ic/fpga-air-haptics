@@ -69,7 +69,7 @@ set_option -use_cpu_as_gpio 1
 # 布局直接报
 #   PR2017 : 'array_pos[0]' cannot be placed ... dedicated pin (CPU/SSPI)
 # 官方 138K 例程（pmod_led）的工程配置里 CPU 和 SSPI 两项都是 true ✓，
-# 实测补上这一条之后这 5 个脚立刻能布局（见 _scratch/ 里的一次性验证工程）。
+# 实测补上这一条之后这 5 个脚立刻能布局（138K 那版工程里验证过；该验证工程是临时的，已删）。
 set_option -use_sspi_as_gpio 1
 
 # 时序报告默认只打印最差的一小批路径（我们一直是 50 条），于是"修掉 20 条之后
