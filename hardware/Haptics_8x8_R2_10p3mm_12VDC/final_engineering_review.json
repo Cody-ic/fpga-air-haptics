@@ -1,0 +1,138 @@
+{
+  "checked_date": "2026-10-14",
+  "project_file": "Haptics_8x8_R2_10p3mm_checked.epro2",
+  "project_sha256": "b36760dca47a7697b3a980386de4d648fc3ddd5fa24f5ec0fef5ea73369ac2a1",
+  "scope": "Independent final source-project review after native import, four-layer stack configuration and paste-property correction.",
+  "array": {
+    "rows": 8,
+    "columns": 8,
+    "pitch_mm": 10.3,
+    "centre_mm": [
+      83.5,
+      65.5
+    ],
+    "first_emitter_mm": [
+      47.45,
+      29.45
+    ],
+    "last_emitter_mm": [
+      119.55,
+      101.55
+    ]
+  },
+  "board_outline_and_mounting_holes_unchanged": true,
+  "pcb_geometry": {
+    "component": {
+      "count": 324,
+      "unchanged_from_reviewed_engineering_candidate": true
+    },
+    "line": {
+      "count": 1469,
+      "unchanged_from_reviewed_engineering_candidate": true
+    },
+    "via": {
+      "count": 539,
+      "unchanged_from_reviewed_engineering_candidate": true
+    },
+    "pad": {
+      "count": 4,
+      "unchanged_from_reviewed_engineering_candidate": true
+    },
+    "poly": {
+      "count": 1,
+      "unchanged_from_reviewed_engineering_candidate": true
+    }
+  },
+  "footprint_pad_copper_hole_and_body_geometry_unchanged": true,
+  "schematic_components_and_pin_networks_preserved": true,
+  "connectivity": {
+    "components": 324,
+    "component_pads": 970,
+    "connected_pads": 896,
+    "effective_nets": 214,
+    "differing_connectivity_groups": 0
+  },
+  "source_resistors_and_registers": {
+    "100ohm_resistors": 64,
+    "shift_registers": 8,
+    "placement_and_footprints_preserved": true,
+    "source_short_lines": 72,
+    "source_short_vias": 8,
+    "unchanged": true
+  },
+  "clocks": {
+    "SRCLK_signal_vias": 9,
+    "RCLK_signal_vias": 20,
+    "ground_return_vias_preserved": 20,
+    "one_return_via_repositioned_for_R136_clearance": true,
+    "nearest_ground_distance_mm_range": [
+      0.8206,
+      1.397
+    ],
+    "nearest_ground_distance_mm_limits": [
+      0.5,
+      2
+    ]
+  },
+  "four_layer_stack": {
+    "copper_order": [
+      "Top",
+      "Inner1 GND",
+      "Inner2 signal/power",
+      "Bottom"
+    ],
+    "copper": [
+      {
+        "layer_id": 1,
+        "thickness_mm": 0.035001
+      },
+      {
+        "layer_id": 15,
+        "thickness_mm": 0.015189
+      },
+      {
+        "layer_id": 16,
+        "thickness_mm": 0.015189
+      },
+      {
+        "layer_id": 2,
+        "thickness_mm": 0.035001
+      }
+    ],
+    "dielectric": [
+      {
+        "layer_id": 361,
+        "thickness_mm": 0.210388
+      },
+      {
+        "layer_id": 362,
+        "thickness_mm": 1.064997
+      },
+      {
+        "layer_id": 363,
+        "thickness_mm": 0.210388
+      }
+    ],
+    "template": "JLC04161H-7628",
+    "nominal_board_mm": 1.6,
+    "saved_copper_and_dielectric_thickness_total_mm": 1.586153
+  },
+  "paste_properties": {
+    "R_C_smd_pads": 424,
+    "corrected_explicit_zero_pads": 422,
+    "C21_default_zero_pads": 2,
+    "R33_C77_through_hole_pads_preserved": 4,
+    "negative_100mm_expansions_remaining": 0
+  },
+  "native_project_checks": {
+    "DRC_errors": 0,
+    "current_copper_pours": 5,
+    "filled_current_copper_pours": 5,
+    "C1_paste_zero_readback_verified": true
+  },
+  "method": "All changed routes use explicit fixed manual vertices; no autorouting or route search.",
+  "limits": [
+    "Native DRC and source geometry do not replace electrical or acoustic measurements.",
+    "MA40S4S case diameter 9.9±0.3mm gives a 0.1mm worst-case case gap at 10.3mm pitch."
+  ]
+}
