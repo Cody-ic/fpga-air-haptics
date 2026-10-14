@@ -7,3 +7,5 @@ desktop_app/.runtime/
 desktop_app/exports/
 desktop_app/dist/
 desktop_app/build/
+mobile_app/.runtime/
+mobile_app/dist/
