@@ -1,6 +1,10 @@
 haptics_openocd.local.gdb
 haptics_run.local.cfg
+haptics_channel_test.local.cfg
+haptics_pin_test.local.cfg
 build/
 Debug/
 Release/
+ChannelTest/
+PinTest/
 .settings/
