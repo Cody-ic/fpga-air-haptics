@@ -1,0 +1,18 @@
+{
+  "checked_date": "2026-10-08",
+  "package_sha256": {
+    "Haptics_8x8_R1_release.epro2": "d59a5173c7a7d10d6f889b0d26eec94ea50bd67ed0a983006c6bb8510237170e",
+    "Haptics_8x8_R1_release_Gerber.zip": "5d7a17bea2ca0411eeaf96f2e93fda2713f377a3ce03ce8ec85afc30fd29a628"
+  },
+  "boundary": "Nominal round drill position/diameter and SMD opening centre coverage; no assembly, stencil thickness, paste volume or fabrication tolerance validation.",
+  "holes_checked": 649,
+  "drill_position_size_errors": [],
+  "minimum_nominal_ring": {
+    "ref": "via:dac10c809f0e4b5f",
+    "minimum_nominal_ring_mm": 0.15239999999999998
+  },
+  "smd_pads_checked": 820,
+  "smd_without_mask_opening": [],
+  "smd_without_paste_opening": [],
+  "footprint_paste_suppressed": []
+}
