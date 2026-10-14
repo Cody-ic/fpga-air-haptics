@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "fully_defined_sketches": 16,
+  "fixed_sketch_relations": 0,
+  "printable_part_types": 6,
+  "printed_or_load_tested": false,
+  "note": "P2 common Z0 datum, 16 through bores, resistor window verified against R5 positions."
+}
