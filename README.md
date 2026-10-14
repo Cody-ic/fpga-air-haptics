@@ -4,7 +4,7 @@
 
 2026 年全国大学生嵌入式芯片与系统设计竞赛 FPGA 创新设计赛道参赛准备项目。
 
-> 更新于 **2026-10-07**。已有电脑上位机、Windows 便携 EXE、Android 测试应用、Demo、R5 4×4 PCB 打样包及 NUCLEO-F411RE 串口验证固件。F103 CubeMX/CubeIDE 工程已完成优化、烧录、USB-UART 通信与 ADC 数据回传联调，电脑端提供波形、JSONL 原码和 CSV 分析；输出波形、声场与触觉效果尚待实测。最新 P4 机械包采用竖直发射板、水平掌面参考与可换腕托/接收架，尚未试打印。FPGA 逻辑已在独立分支提交 [PR #8](https://github.com/Cody-ic/fpga-air-haptics/pull/8)，尚待综合和上板；HAP3 仍需共同定稿，蓝牙模块未选定。
+> 更新于 **2026-10-14**。仓库包含电脑上位机、Android 测试应用、串口/BLE/Demo、F411 与 F103 原型固件、4×4 / 8×8 PCB 和机械打印包。Tang MEGA 138K Pro 的 4×4 / 11 mm 配置已完成仿真、高云构建、临时下载和真实串口相位回读。F103 使用统一宏切换业务与测试。8×8 PCB 仍待移位输出适配及实板验证，机械包尚未试打印；实际声场与触觉效果尚未验证。FPGA 接收板采样链路与蓝牙模块选型仍待完成。
 
 ## 项目简介
 
@@ -26,14 +26,15 @@ flowchart LR
     M[可选测量链路] -.实测数据.-> P
 ```
 
-Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、引脚分配与工具配置应对照[官方资料](https://wiki.sipeed.com/hardware/zh/tang/tang-mega-60k/mega-60k.html)确认。
+当前使用 Sipeed Tang MEGA 138K Pro，搭载高云 GW5AST-LV138FPG676A。旧 Tang Mega 60K
+记录作为历史方案保留，不能照搬引脚；当前约束、工具与验证结果见 [上板说明](fpga/board/README.md)。
 
 ## 当前设计方向
 
 | 部分 | 计划内容 | 尚待确定 |
 |---|---|---|
-| FPGA | 板内相位求解、轨迹播放、同步输出 | 定点位宽、资源占用、实测更新率 |
-| 阵列与驱动 | 从小规模验证扩展至模块化阵列 | 换能器、间距、驱动器、供电与最终通道数 |
+| FPGA | 已实现板内相位求解、轨迹播放和 16 路输出，完成数字联调 | 驱动波形、实测声场与触觉效果 |
+| 阵列与驱动 | 4×4 R5 使用 MA40S4S、11 mm 间距和 12 V 供电；已有 8×8 手工布线包 | 8×8 移位输出适配、装配与实板验证 |
 | 本地操作 | PCB 外接按键，选择、播放和停止图形 | 按键数量、状态指示与接口 |
 | 放手引导 | 已完成 P4 固定定位架、可换腕托与接收架；操作语音仍为提案 | 实物试打、承重与手型适配、声学工作位置及语音实现 |
 | 电脑软件 | 已实现组合草图、几何关系与尺寸、手掌预览、Demo、串口与 BLE 适配 | 协议共同定稿、蓝牙选型、FPGA 固件与真实板卡联调 |
@@ -58,6 +59,7 @@ Tang Mega 60K 是 Sipeed 开发板，搭载高云 FPGA；具体底板版本、�
 - [PCB 版本导航](hardware/README.md)：4×4 R5 打样包、8×8 R1 手工布线扩展板及历史副本；8×8 尚待移位输出后端与实板验证。
 - [FPGA 固件评审](https://github.com/Cody-ic/fpga-air-haptics/pull/8)：独立分支的串口、轨迹、相位、输出及板级约束；验证边界见对应分支文档。
 - [上位机使用说明](desktop_app/README.md)：组合草图、尺寸和顺序、手掌预览、Demo 与数据边界。
+- [FPGA 工程说明](fpga/README.md)：HAP3 串口、轨迹、相位求解、输出及仿真；文件名中的 `hap2_` 是历史命名。
 - [HAP3 串口协议](desktop_app/PROTOCOL.md)：坐标路径、设备能力声明、完整配置提交、原子状态快照和看门狗。
 - [上位机联调与验证计划](上位机联调与验证计划.md)：FPGA 最小对接清单、通信报文、异常验收、首轮图形和实验记录模板。
 - [Android 应用说明](mobile_app/README.md)：触屏绘图、保存与导入、BLE、APK 构建和验证范围。
@@ -83,7 +85,7 @@ python -m desktop_app --demo
 python -m unittest discover -s desktop_app/tests -v
 ```
 
-可选 GUI 集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 64 位可用 PyInstaller 构建独立 EXE，见[启动与打包说明](desktop_app/README.md#启动)；本机构建产物位于 `desktop_app/dist/`，不提交到 Git。本机测试环境：Python 3.10.11、Tk 8.6、NumPy 2.2.6、pyserial 3.5；实际打包依赖版本记录在 `build-info.json`，截图需要 Pillow。当前分支没有 HDL 工程；FPGA 分支的仿真命令见 PR #8，综合与上板尚待完成。
+可选界面集成测试：`python -m desktop_app.tests.gui_smoke`。Windows 可用 PyInstaller 构建独立程序，产物位于忽略的 `desktop_app/dist/`，见[启动与打包说明](desktop_app/README.md#启动)。手机端检查、MCU 构建和 FPGA 仿真分别见 [mobile_app/README.md](mobile_app/README.md)、[F103 工程说明](firmware/stm32f103c8_cube/README.md) 与 [fpga/README.md](fpga/README.md)。FPGA 的高云构建脚本为 `fpga/board/build.tcl`。
 
 上位机默认打开草图编辑器，支持连续直线、矩形、圆、拖动成圆弧和控制点曲线，可组合多个轮廓、擦除线条、设置必要几何关系与尺寸、整体倍数缩放和指定呈现顺序。原打点操作已并入连续直线工具。公共线按顺序仅呈现一次，段间关闭输出；编译后最多 32 段、256 个坐标。图形按实际坐标保存，换阵列不会改变位置。Demo 可设置 4×4、6×6、8×8、12×12、16×16 及自定义行列；真实硬件规模由 FPGA 握手声明。普通界面保留绘图与播放，勾选“调试模式”查看相位、声场和串口日志。
 
