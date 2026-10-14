@@ -15,8 +15,22 @@ set root [file normalize [file dirname [info script]]]
 cd $root
 
 # ---- 1. 建工程 ----
-# 器件：GW5AT-LV60PG484A，封装 PBGA484A，器件版本 B（和板子上那颗一致）
-create_project -name haptics60k -dir $root -pn GW5AT-LV60PG484AC1/I0 \
+# 器件：**GW5AST-138B，封装 FCPBG676A（676 球），型号 GW5AST-LV138FPG676AC1/I0**。
+# 2026-10-14 定案：板子是 **Tang MEGA 138K Pro**，芯片 GW5AST-LV138FPG676A，
+# 和之前按 60K、以及按 138K（非 Pro，484 球）建的工程都不是同一颗 ✗ ——
+# 676 球和 484 球的球位编号毫无对应关系，引脚必须照这块板子的资料重排
+# （现在是 tang_mega_138k_pro.cst，来源见那个文件开头的注释）。
+#
+# ⚠️ **教育版 IDE 的器件库里没有 676 球这个封装**（只有 PBGA484A），
+#    官方也写明「138K Pro 目前未被教育版支持，需要 V1.9.9 或更新的商业版 IDE」✗。
+#    所以这个脚本要配**商业版（Standard）**的 Gowin IDE 跑。
+#    商业版授权不用买：Sipeed 提供免费在线 Float Lic，填 ip 106.55.34.119 / port 10559
+#    （不通就用域名 gowinlic.sipeed.com 对应的 IP）。
+#
+# 如果 Programmer 报 ID code mismatch，说明芯片是 **138C** 而不是 138B ✗
+# → 把 -device_version 改成 C 再跑一次 ✓。芯片到底 B 还是 C，看 FPGA 表面
+#   镭雕印记**第三行第 5 个字符**（官方说明：是 B 就是版本 B，是 C 就是 C）。
+create_project -name haptics138kpro -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
     -device_version B -force
 
 # ---- 2. 设计文件（自动按扩展名认类型，.v = Verilog）----
@@ -29,11 +43,11 @@ puts "设计文件 [llength $srcs] 个"
 add_file {*}$srcs
 
 # ---- 3. 约束 ----
-# 注意：必须给**绝对路径**。工程文件建在 $root/haptics60k/ 里，布局布线阶段
-# 会拿工程目录当基准去解析相对路径，写成 tang_mega_60k.cst 就会找不到
+# 注意：必须给**绝对路径**。工程文件建在 $root/haptics138kpro/ 里，布局布线阶段
+# 会拿工程目录当基准去解析相对路径，写成 tang_mega_138k_pro.cst 就会找不到
 # （报 CM2001: Cannot open file）。
-add_file [file join $root tang_mega_60k.cst]
-add_file [file join $root tang_mega_60k.sdc]
+add_file [file join $root tang_mega_138k_pro.cst]
+add_file [file join $root tang_mega_138k_pro.sdc]
 
 # ---- 4. 顶层 + 跑 ----
 set_option -top_module board_top
@@ -46,6 +60,17 @@ set_option -output_base_name board_top
 # （每次跑都会被重新生成）；只有这个命令行开关真的有效，实测生成文件里会变成
 #   set CPU regular_io = true
 set_option -use_cpu_as_gpio 1
+
+# 只放开 CPU 还不够：138K 上这 5 个脚是「双功能」脚，一半属于 CPU 配置口、
+# 一半属于 SSPI 配置口——器件文件里写着
+#   P19 = D06/SSPI_CLK   R19 = D07/SSPI_WPN   U21 = D05/SI
+#   T20 = D08/SO         Y21 = SSPI_CS_N（只属于 SSPI）
+# 60K 上它们没有这层 SSPI 别名，所以以前只开 CPU 就能过 ✗；换到 138K 之后
+# 布局直接报
+#   PR2017 : 'array_pos[0]' cannot be placed ... dedicated pin (CPU/SSPI)
+# 官方 138K 例程（pmod_led）的工程配置里 CPU 和 SSPI 两项都是 true ✓，
+# 实测补上这一条之后这 5 个脚立刻能布局（见 _scratch/ 里的一次性验证工程）。
+set_option -use_sspi_as_gpio 1
 
 # 时序报告默认只打印最差的一小批路径（我们一直是 50 条），于是"修掉 20 条之后
 # 又有 21 条顶上来"，看起来像白改 ✗。把这个数字放大，一次就能看到**所有**违例路径，

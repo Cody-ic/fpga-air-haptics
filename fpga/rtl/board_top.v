@@ -7,17 +7,15 @@
 //   2. 复位标识 boot：协议要求「每次复位都变、同一会话里不变」。
 //      用一个**不受复位影响**的自由计数器当熵源，复位放开那一拍锁存。
 //   3. 把板上按键（低有效、需要内部上拉）取反成逻辑里的高有效，并交给 hap2_local 消抖。
-//   4. 把 16 路输出、串口、状态灯引到引脚（引脚号在 fpga/board/tang_mega_60k.cst 里绑）。
+//   4. 把 16 路输出、串口、状态灯引到引脚（引脚号在 fpga/board/tang_mega_138k_pro.cst 里绑）。
 //
-// 目标板：Sipeed Tang Mega 60K（GW5AT-LV60PG484A，NEO DOCK 底板）。
-// 板上 sys_clk 是 50 MHz，和固件默认参数一致，所以**不需要锁相环**。
+// 目标板：Sipeed Tang MEGA 138K Pro（GW5AST-LV138FPG676A，676 球 FCPBG676A 封装）。
+// 板上 50 MHz 在 P16，和固件默认参数一致，所以**不需要锁相环**。
 module board_top #(
-    parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（Tang Mega 60K = 50 MHz）
+    parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（138K Pro 的 P16 = 50 MHz）
     parameter integer BAUD          = 115200,
-    // 阵列规模：4×4 = 16 路。板子两个 PMOD 里的 P19/R19/T21/U21 是芯片的
-    // 配置复用脚（D06/D07/D04/D05），靠 build.tcl 里的 `-use_cpu_as_gpio 1`
-    // 放开（不放开会报 PR2017 dedicated pin (CPU)）。先把 `HW_ROWS` 改成 2
-    // 就能退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
+    // 阵列规模：4×4 = 16 路，分在 PMOD1（8 路）+ PMOD2（8 路）两个连接器上。
+    // 改成 2 就退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
     parameter integer HW_ROWS       = 4,
     parameter integer HW_COLS       = 4,
     parameter integer HW_PITCH_UM   = 10000,        // 阵元间距（微米）
@@ -35,12 +33,12 @@ module board_top #(
     parameter integer WS_Z_MIN_UM   =   20000,
     parameter integer WS_Z_MAX_UM   =  300000
 ) (
-    input  wire clk,          // 板上 50 MHz 晶振（V22）
-    input  wire key_rst_n,    // 复位键（Y12），低有效；没有按键就接 1'b1
-    input  wire key0_n,       // 用户按键 0（AA13）→ 换下一个图形
-    input  wire key1_n,       // 用户按键 1（AB13）→ 播放／暂停
-    input  wire uart_rx_pin,  // 电脑 → 板子
-    output wire uart_tx_pin,  // 板子 → 电脑
+    input  wire clk,          // 板上 50 MHz 晶振（P16）
+    input  wire key_rst_n,    // 复位键（K16），低有效；没有按键就接 1'b1
+    input  wire key0_n,       // 用户按键 0（F15）→ 换下一个图形
+    input  wire key1_n,       // 用户按键 1（G15）→ 播放／暂停
+    input  wire uart_rx_pin,  // 电脑 → 板子（N16，接板载调试器 BL616 的 TX）
+    output wire uart_tx_pin,  // 板子 → 电脑（P15，接板载调试器 BL616 的 RX）
     // 送给驱动电路的方波（单端驱动：每路一根线，多数半桥驱动芯片自己管死区）。
     // ⚠️ 半桥要互补输入时：把下面这行改成
     //     output wire [HW_ROWS*HW_COLS-1:0] array_pos, array_neg
@@ -78,14 +76,13 @@ module board_top #(
     end
 
     // ---------------- 3. 按键：低有效 → 高有效 ----------------
-    // 板上按键没有外部上拉，Gowin 工程里给这几个脚开内部上拉（见 .cst）；
+    // 板上按键在 .cst 里开了内部上拉；
     // 不按时被上拉成高电平，按下去接地变低电平。所以这里取反，
     // 逻辑里统一成「1 = 按下」，消抖模块就不用关心板子怎么接的。
     wire key_next = ~key0_n;
     wire key_play = ~key1_n;
-    // 板上第三个用户键在 1.5 V 的 bank 里，那一组只剩复位键了，所以本地"停止"
-    // 先不接按键（播放键本身既能暂停也能继续）。要接的话在 .cst 里分配一个脚，
-    // 再把这里改成 ~key2_n 即可。
+    // 板上还有第 4 个用户键（G16，官方资料里当复位/重配置用），本地"停止"先不接它
+    // （播放键本身既能暂停也能继续）。要接的话在 .cst 里加一行，再把这里改成 ~key2_n。
     wire key_stop = 1'b0;
 
     // ---------------- 4. 主逻辑 ----------------
@@ -137,8 +134,10 @@ module board_top #(
     );
 
     // ---------------- 5. 状态灯 ----------------
-    // 5 颗灯分别是：正在驱动换能器、正在扫描、走步器在跑、本地模式、串口在发。
+    // 3 颗灯分别是：正在驱动换能器、正在扫描、走步器在跑。
     // 上板时一眼就能看出板子走到哪一步了。
-    assign led = {walk_running, scan_on, output_on};
+    // ⚠️ 板上用户灯是**低电平点亮**（官方 LED 例程：assign led = ~led_reg），
+    //    所以这里取反——逻辑 1 对应"灯亮"，不用在示波器前反着想。
+    assign led = ~{walk_running, scan_on, output_on};
 
 endmodule

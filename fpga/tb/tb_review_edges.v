@@ -22,7 +22,7 @@ module tb_review_edges;
         .clk(clk), .ext_rst_n(ext_rst_n), .rst_n(por_n)
     );
     reg board_rst_n = 1'b1;
-    // board_top 默认是 2×4 = 8 路（原因见 board/tang_mega_60k.cst：板子两个 PMOD 里
+    // board_top 默认是 2×4 = 8 路（原因见 board/tang_mega_138k_pro.cst：板子 PMOD 里
     // 有 4 个脚是芯片的配置复用脚，命令行工程里布局过不去，所以先用 8 路干净脚）
     wire [15:0] board_pos;   // board_top 默认 4x4 = 16 路
     board_top #(.CLK_HZ(1_000_000), .POR_MS(1), .STATE_MS(0)) u_board (

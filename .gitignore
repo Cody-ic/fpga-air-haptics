@@ -21,3 +21,7 @@ fpga/board/*.pnr
 fpga/board/*.gprj
 # 命令行综合（build.tcl）建的工程目录：报告和网表都在里面，不进仓库
 fpga/board/haptics60k/
+fpga/board/haptics138k/
+fpga/board/haptics138kpro/
+# 临时验证工程（引脚能不能布局的小实验）
+fpga/board/_scratch/
