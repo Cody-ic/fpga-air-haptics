@@ -8,6 +8,8 @@ This repository prepares the 2026 FPGA haptic graphics project. `README.md` is t
 
 ## Build, Test, and Development Commands
 
+`mobile_app/` is the Flutter Android companion. `lib/` holds touch sketches, models, protocol, BLE/Demo sessions and the library; `test/` holds Dart checks and Python reference vectors. See `mobile_app/README.md` for Android setup and known limits.
+
 Run from the repository root with Python 3.10+ and Tk:
 
 - `python -m pip install -r desktop_app/requirements.txt`: install dependencies.
@@ -16,12 +18,16 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
 - `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
 - `rg --files --hidden`: inspect workspace files.
+- In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
+- `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
 
-Quote PowerShell paths containing spaces or parentheses. PyInstaller uses `touchsee.spec`; keep `dist/` and `build/` ignored. The desktop shortcut targets the EXE; rebuild after runtime edits. No formatter, linter, or HDL build is configured.
+Quote PowerShell paths containing spaces or parentheses. Keep `dist/`, `build/` and `.runtime/` ignored. The desktop shortcut targets the EXE; rebuild after desktop runtime edits. Mobile releases currently use local debug signing. No HDL build is configured.
 
 ## Coding Style & Naming Conventions
 
 Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial/BLE I/O in workers. Normal interface text should explain user actions; engineering details belong in debug mode or advanced connection settings.
+
+Use standard Dart formatting, two-space indentation and `flutter_lints` for mobile. Keep protocol semantics aligned with Python; changing either requires cross-language fixture checks. Mobile imports preserve compiled desktop paths, not desktop CAD constraints.
 
 Write research in Chinese and Markdown in UTF-8. Preserve filenames, numbered sections, and technical abbreviations. Use ATX headings, hyphen bullets, and blank lines. Use absolute dates. Cite new external technical claims in section 9; distinguish vendor publication years and historical rules from confirmed current information.
 
