@@ -341,10 +341,15 @@ class SerialAdapterTests(unittest.TestCase):
             port.write.return_value = 4
             transport = SerialTransport("COM99", 31250)
             self.assertEqual(constructor.call_args.kwargs['baudrate'], 31250)
+            self.assertEqual(constructor.call_args.kwargs['bytesize'], 8)
+            self.assertEqual(constructor.call_args.kwargs['parity'], 'N')
+            self.assertEqual(constructor.call_args.kwargs['stopbits'], 1)
+            self.assertFalse(constructor.call_args.kwargs['xonxoff'])
             self.assertFalse(port.dtr)
             self.assertFalse(port.rts)
             self.assertEqual(port.port, "COM99")
             port.open.assert_called_once()
+            port.reset_input_buffer.assert_called_once()
             self.assertEqual(transport.read(), b"example")
             with self.assertRaises(IOError):
                 transport.write(b"12345")

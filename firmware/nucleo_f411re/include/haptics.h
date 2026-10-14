@@ -5,9 +5,27 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef HAP_LINE
 #define HAP_LINE 8192
+#endif
+#ifndef HAP_POINTS
 #define HAP_POINTS 256
+#endif
+#ifndef HAP_STROKES
 #define HAP_STROKES 32
+#endif
+#ifndef HAP_PATH_BYTES
+#define HAP_PATH_BYTES 1025
+#endif
+#ifndef HAP_SCAN_BYTES
+#define HAP_SCAN_BYTES 4097
+#endif
+#ifndef HAP_FOCUS_US
+#define HAP_FOCUS_US 250
+#endif
+#ifndef HAP_DEVICE_NAME
+#define HAP_DEVICE_NAME "NUCLEO-F411RE"
+#endif
 #define HAP_CHANNELS 16
 #define HAP_STEPS 64
 #define HAP_CYCLES 40 /* One millisecond, with four focus updates. */
@@ -24,13 +42,16 @@ typedef struct {
     int32_t carrier_hz, phase_steps, cx_um, cy_um, z_um, radius_um;
     int32_t repeat_millihz, mod_hz, level, path_closed, blank_us;
     Shape shape;
-    char path_xy_um[1025], scan_paths[4097];
+    char path_xy_um[HAP_PATH_BYTES], scan_paths[HAP_SCAN_BYTES];
     Point points[HAP_POINTS];
     uint16_t start[HAP_STROKES], count[HAP_STROKES], strokes;
     float length[HAP_STROKES], total_weight;
     bool multi;
     uint16_t channel_mask;
     uint8_t phase_offsets[HAP_CHANNELS];
+#ifdef HAP_CACHED_SEGMENTS
+    float segment_length[HAP_POINTS], closing_length;
+#endif
 } Config;
 
 typedef struct {
@@ -84,6 +105,7 @@ void config_default(Config *);
 const char *config_compile(Config *);
 void geometry_sample(const Config *, uint64_t us, Sample *, float *remaining_us);
 void phase_solve(Sample *);
+uint8_t phase_solve_channel(const Sample *, unsigned);
 void phase_solve_config(const Config *, Sample *);
 void wave_render(const Config *, uint64_t elapsed_us, WaveBlock *);
 uint16_t hap_crc(const void *, size_t);

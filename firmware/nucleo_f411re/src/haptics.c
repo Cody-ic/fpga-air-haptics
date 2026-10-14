@@ -7,11 +7,27 @@
 
 static const char *shapes[] = {"POINT","LINE_X","LINE_Y","CIRCLE","SQUARE","TRIANGLE","ARROW","CUSTOM"};
 static const char *states[] = {"IDLE","RUNNING","PAUSED","FAULT"};
+#ifdef HAP_SHARED_SCRATCH
+/* Parsing/configuration finishes before reply serialization begins. IRQs
+ * never use either member, and service callbacks cannot reenter protocol. */
+static union { Config configuration; char reply[HAP_LINE+1]; } scratch;
+#define candidate scratch.configuration
+#define tx scratch.reply
+#else
 static Config candidate; /* Foreground only; avoid an 8 KB stack allocation. */
 static char tx[HAP_LINE+1];
+#endif
 static size_t tx_used;
 static uint32_t telemetry_interval_ms = 500;
 static void (*background_service)(void);
+
+static const char *decimal64(uint64_t value, char buffer[21])
+{
+    char *p = buffer+20;
+    *p = 0;
+    do { *--p = (char)('0'+value%10u); value /= 10u; } while (value);
+    return p;
+}
 
 uint16_t hap_crc(const void *bytes, size_t length)
 {
@@ -76,9 +92,10 @@ static void snapshot(Device *d)
     sample_now(d);
     const Config *c = &d->config;
     const Sample *s = &d->latched;
+    char sample_text[21], uptime_text[21];
     begin("TEL", 0, "STATE");
-    append(" boot=%s sample=%llu uptime_ms=%llu rev=%lu mode=%s state=%s output=%u scan_on=%u stroke_index=%u simulated=0 reason=%s",
-        d->boot, (unsigned long long)++d->sample, (unsigned long long)d->now_ms,
+    append(" boot=%s sample=%s uptime_ms=%s rev=%lu mode=%s state=%s output=%u scan_on=%u stroke_index=%u simulated=0 reason=%s",
+        d->boot, decimal64(++d->sample,sample_text), decimal64(d->now_ms,uptime_text),
         (unsigned long)d->revision, d->local ? "LOCAL" : "REMOTE", states[d->state],
         d->state == RUNNING && s->output, s->scan_on, s->stroke, d->reason);
     append(" carrier_hz=%ld phase_steps=%ld cx_um=%ld cy_um=%ld z_um=%ld radius_um=%ld repeat_millihz=%ld mod_hz=%ld level=%ld shape=%s path_xy_um=%s path_closed=%ld scan_paths=%s blank_us=%ld",
@@ -266,11 +283,11 @@ static void process(Device *d)
         if (d->capture_seq && d->hw.capture_cancel) d->hw.capture_cancel();
         d->capture_seq = 0;
         begin("ACK",(unsigned)seq,verb);
-        append(" proto=3 device=NUCLEO-F411RE boot=%s simulated=0 hb_ms=3000 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION max_rows=16 max_cols=16 max_channels=16 max_nodes=64 max_scan_points=256 max_strokes=32",d->boot);
+        append(" proto=3 device=%s boot=%s simulated=0 hb_ms=3000 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION max_rows=16 max_cols=16 max_channels=16 max_nodes=64 max_scan_points=%u max_strokes=%u",HAP_DEVICE_NAME,d->boot,HAP_POINTS,HAP_STROKES);
         array_fields();
         if (d->hw.capture_start && d->hw.capture_poll && d->hw.capture_cancel)
             append(" adc_capture=1");
-        append(" x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000 z_min_um=20000 z_max_um=300000 carrier_hz=40000 phase_steps=64 focus_hz=4000");
+        append(" x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000 z_min_um=20000 z_max_um=300000 carrier_hz=40000 phase_steps=64 focus_hz=%u",1000000u/HAP_FOCUS_US);
         send_frame(d); snapshot(d); return;
     }
     if (!d->connected) error = "HANDSHAKE_REQUIRED";
@@ -402,9 +419,10 @@ void hap_poll(Device *d, uint64_t now_ms, bool allow_telemetry)
         if (d->capture_error) {
             begin("ERR",d->capture_seq,"CAPTURE"); append(" code=%s",d->capture_error);
         } else {
+            char uptime_text[21];
             begin("ACK",d->capture_seq,"CAPTURE");
-            append(" boot=%s rev=%lu uptime_ms=%llu simulated=0 tx_running=%u pin=PA0 fs_hz=%u bits=12 n=%u raw=",
-                   d->boot,(unsigned long)d->capture_revision,(unsigned long long)d->capture_started_ms,
+            append(" boot=%s rev=%lu uptime_ms=%s simulated=0 tx_running=%u pin=PA0 fs_hz=%u bits=12 n=%u raw=",
+                   d->boot,(unsigned long)d->capture_revision,decimal64(d->capture_started_ms,uptime_text),
                    d->capture_tx_running,HAP_ADC_HZ,HAP_ADC_SAMPLES);
             for (unsigned i=0; i<HAP_ADC_SAMPLES; ++i) append("%s%u",i?",":"",d->capture_data[i]);
         }

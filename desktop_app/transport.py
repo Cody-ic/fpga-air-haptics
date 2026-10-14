@@ -17,14 +17,17 @@ class SerialTransport:
 
     def __init__(self, port, baudrate):
         # Avoid flow-control toggling where supported; some drivers can glitch
-        # DTR/RTS on open. Firmware must always boot with output disabled.
+        # DTR/RTS on open. Never treat opening a port as a START command.
         self.port = serial.Serial(port=None, baudrate=baudrate, timeout=0.03,
-                                  write_timeout=0.25, rtscts=False, dsrdtr=False)
+                                  write_timeout=0.25, bytesize=serial.EIGHTBITS,
+                                  parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+                                  xonxoff=False, rtscts=False, dsrdtr=False)
         self.port.dtr = False
         self.port.rts = False
         self.port.port = port
         try:
             self.port.open()
+            self.port.reset_input_buffer()
         except Exception:
             self.port.close()
             raise
