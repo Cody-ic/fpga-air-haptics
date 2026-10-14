@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 仓库现状
 
-**已有桌面上位机，尚无 HDL/PCB 工程。** `desktop_app/` 包含 Tkinter 界面、自定义图形、声场参考模型、双向串口会话、Demo 和测试。项目文档为 `README.md`、`设计思路.md`、`FPGA赛道选题建议(1).md`、`AGENTS.md` 和本文件。当前架构以 `设计思路.md` 为准，实际软件接口见 `desktop_app/PROTOCOL.md`，原选题文档用于历史调研。
+**已有桌面上位机，尚无 HDL/PCB 工程。** `desktop_app/` 包含 Tkinter 界面、自定义图形、声场参考模型、双向串口、BLE 适配、Demo 和测试。项目文档为 `README.md`、`设计思路.md`、`FPGA赛道选题建议(1).md`、`AGENTS.md` 和本文件。当前架构以 `设计思路.md` 为准，上位机侧协议草案见 `desktop_app/PROTOCOL.md`，BLE 适配及待定事项见 `desktop_app/BLE.md`。协议尚未与 FPGA 端共同确定，蓝牙模块未选型，软件夹具测试不代表无线实测；原选题文档用于历史调研。
 
 根目录可执行 `python -m desktop_app --demo` 和 `python -m unittest discover -s desktop_app/tests -v`，GUI 测试为 `python -m desktop_app.tests.gui_smoke`。安装依赖见 `desktop_app/requirements.txt`。Demo 和模拟串口测试不能作为物理硬件验证。
 

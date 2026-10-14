@@ -624,6 +624,10 @@ def main(runtime_path=None):
 
     root.after(500, run_step)
     root.mainloop()
+    if not errors and not steps:
+        from desktop_app.tests.gui_ble_smoke import main as ble_smoke
+        if ble_smoke(runtime_path=runtime):
+            errors.append("BLE GUI scenario failed; see gui-ble-smoke.json")
     result = {"passed": not errors and not steps, "errors": errors, "remaining_steps": len(steps)}
     (runtime / "gui-smoke.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))
