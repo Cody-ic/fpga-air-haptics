@@ -36,6 +36,43 @@
 输出级使用 `acc - offset`；保持首次相位表就绪前、待机及暂停时关闭输出。
 综合记录见第 4 节。旧 60K / 484 球记录只能作为历史资料，接线以当前 Pro 约束为准。
 
+## ⚠️ 烧录踩坑：下载器要选对"USB 位置"，不然一直卡 0%
+
+2026-10-14 实测（商业版 IDE V1.9.12.04）。症状：板子开着机、流水灯在跑、两个电源灯都亮、
+USB 插的是 `USB JTAG&UART` 口，电脑也认得下载器（设备管理器里两个 USB Serial Converter
+＋两个 COM 口），但 Programmer 一烧就**卡在 0%**，命令行 `--scan` 也**永远等不到应答**；
+换个电脑（队友的）用同一根线同一块板子却能烧。
+
+原因不在板子也不在线，而在**下载器的两个 USB 接口**：这块板载调试器（BL616 芯片，
+USB 侧模拟成 FTDI 双通道设备）在设备管理器里是两个 converter，对应两个"USB location"。
+Gowin 工具默认打开的那个（本机是 **location 562**）接的是**串口通道**，JTAG 在**另一个**
+（本机是 **location 561**）。所以现象就是"下载器认得到、JTAG 完全不应答"。
+
+**怎么修（GUI）**：`Edit → Setting → Cable Setting` → 点 **Query** → 选 **USB location = 561**
+那一项（不要选 562）→ **Save** → 再烧。
+
+**怎么修（命令行，最稳）**：
+
+```powershell
+& "D:\OneDrive\Desktop\Gowin\Gowin_V1.9.12.04_x64\Programmer\bin\programmer_cli.exe" `
+  --device GW5AST-138B --run 2 `
+  --fsFile D:\OneDrive\Desktop\fpga-air-haptics\fpga\board\haptics138kpro\impl\pnr\board_top.fs `
+  --cable-index 4 --location 561 --frequency 2.5MHz
+```
+
+`--run 2` 是 SRAM 编程（断电即失）；要固化到 flash 再另说。
+`--location` 一给，`--channel` 就被忽略（手册 4.4 节）——这也是当初 `--channel 0/1` 都试不通的原因。
+
+**怎么确认链路通**（不用烧，只读芯片）：
+
+```powershell
+& "...\programmer_cli.exe" --scan --cable-index 4 --location 561
+```
+
+通了会打印 `ID: 0x0001081B` —— 对照官方文档，`0x0001081B` 就是 **GW5AST-138B**，
+所以**器件版本选 B 是对的**，不用改 C。换 USB 口之后 location 号可能变，重新跑一次
+`--scan-cables` 看两个口分别是多少即可。
+
 2026-10-12 审查补充：串口和按键已加入两级输入同步；上电复位与启动标识有明确初值。
 第一次综合仍须核查初始化设置和同步器路径。当前 `boot` 仅用于同次上电期间区分复位，
 断电重启可能重复，跨断电唯一标识仍待设计。数字仿真通过不代表已经完成上板验证。
