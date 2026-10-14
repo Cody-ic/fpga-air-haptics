@@ -1,14 +1,14 @@
 `timescale 1ns/1ps
 
-// 相位计算：把「焦点现在在哪」翻译成「每一路比基准提前多少相位」。
+// 相位计算：把「焦点现在在哪」翻译成每路的模周期波形延后码。
 //
 // 参考实现是 desktop_app/model.py 的 focus_phases()：
 //
 //     r_i    = |第 i 路阵元坐标 − 焦点|                  （米）
 //     code_i = floor( frac(−r_i·f/c)·S + 0.5 ) mod S     c = 343 m/s
 //
-// 物理含义很直白：声波从第 i 路走到焦点要花 r_i/c 秒，所以这一路得先把相位
-// 往回拧这么多，各路的声波才会在焦点上同相叠加。c 是声速，S 是 phase_steps，
+// 声波走到焦点要花 r_i/c 秒，因此输出级将负的模周期延后码从累加器中减去，
+// 等价于提前 r_i/c 发射，各路声波才能在焦点同相叠加。c 是声速，S 是 phase_steps，
 // 坐标一律用 0.5 微米为单位（阵元坐标可能是半个间距，正好是整数）。
 //
 // 三个化简点：
@@ -164,7 +164,7 @@ module hap2_phase #(
             wire [47:0] rounded_l = frac_l + (48'd1 << (shift_q - 1));
             /* verilator lint_on UNUSEDSIGNAL */
             wire [8:0]  units_l   = rounded_l[FRAC-1:0] >> shift_q;
-            // 取负号（声波晚到要提前补）再对 S 取模
+            // 负的模周期延后码；输出级使用 acc - off，等价于提前补偿传播延迟
             wire [8:0]  smask_l   = steps_q[8:0] - 9'd1;
             // 取模之后一定小于 S ≤ 256，而掩码的第 8 位恒为 0，所以只用低 8 位
             /* verilator lint_off UNUSEDSIGNAL */

@@ -134,3 +134,11 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           --top-module tb_review_edges -o review_edges_sim -Mdir "$BUILD_DIR/obj_review" \
           rtl/*.v tb/tb_review_edges.v
 "$BUILD_DIR/obj_review/review_edges_sim"
+
+echo
+echo "=== 聚焦物理回归（实际输出基波 + 传播延迟，11 mm 阵列）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_focus_propagation -o focus_propagation_sim -Mdir "$BUILD_DIR/obj_focus" \
+          rtl/fix_sqrt.v rtl/fix_div.v rtl/hap2_phase.v rtl/hap2_out.v \
+          tb/tb_focus_propagation.v
+"$BUILD_DIR/obj_focus/focus_propagation_sim"

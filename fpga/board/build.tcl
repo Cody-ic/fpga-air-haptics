@@ -5,7 +5,7 @@
 #
 # 它会做四件事：
 #   1. 在当前目录建一个工程（已存在就覆盖），器件固定成板子上那颗
-#   2. 把 ../../rtl/*.v 全部加进设计文件
+#   2. 把脚本旁 ../rtl/*.v 全部加进设计文件（使用绝对路径）
 #   3. 加物理约束（引脚）和时序约束（时钟）
 #   4. 顶层设为 board_top，然后 run all（综合 + 布局布线）
 #
@@ -34,9 +34,9 @@ create_project -name haptics138kpro -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
     -device_version B -force
 
 # ---- 2. 设计文件（自动按扩展名认类型，.v = Verilog）----
-set srcs [lsort [glob -nocomplain ../../rtl/*.v]]
+set srcs [lsort [glob -nocomplain [file join $root .. rtl *.v]]]
 if {[llength $srcs] == 0} {
-    puts "ERROR: 没找到 ../../rtl/*.v，请确认这个脚本放在 fpga/board/ 下"
+    puts "ERROR: 没找到 fpga/rtl/*.v，请确认这个脚本放在 fpga/board/ 下"
     exit 1
 }
 puts "设计文件 [llength $srcs] 个"

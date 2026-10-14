@@ -343,9 +343,9 @@ module tb_out;
         for (ch = 0; ch < count; ch = ch + 1) begin
             // 期望：以第 0 路为基准，码之差（按档数取模）× 每档拍数
             k = ((codes[c_off + 0*count + ch] - codes[c_off + 0*count + 0]) % steps + steps) % steps;
-            // 码大的意思是「提前」，所以它的下一个上升沿落在基准沿之后
-            // 「一个周期减去提前量」的位置上
-            timeout = period_ticks - (k * period_ticks) / steps;
+            // 码表示延后量，比较一个周期内的相对上升沿位置。
+            // 零差值对应下一周期同相的沿，而不是已经发生的基准沿。
+            timeout = (k == 0) ? period_ticks : (k * period_ticks) / steps;
             checks = checks + 1;
             if (edge_at[ch] < 0) begin
                 $display("[输出-相位] 第 %0d 路没有出现上升沿  **失败**", ch);

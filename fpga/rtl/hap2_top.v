@@ -24,7 +24,7 @@ module hap2_top #(
     parameter integer        MAX_LINE     = 4096,
     parameter integer        HW_ROWS      = 4,
     parameter integer        HW_COLS      = 4,
-    parameter integer        HW_PITCH_UM  = 10000,
+    parameter integer        HW_PITCH_UM  = 11000,
     // ---- 设备声明的工作空间（微米）----
     // 握手时发给电脑，命令层也拿同一组值去查「图形有没有越界」。
     // 上板时按真实阵列的有效口径改小一点更安全。
