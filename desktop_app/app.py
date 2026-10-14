@@ -22,11 +22,16 @@ from matplotlib.figure import Figure
 import numpy as np
 
 from .controller import Session
+from .ble_transport import BleProfile, BleScan
+from .ble_settings import BleSettings
 from .model import ArraySpec, ARRAY_PRESETS, Config, SHAPES, array_coordinates, config_from_document, field_slice, focus_phases, trajectory_path, trajectory_point
 from .sketch_editor import SketchEditor
 from .sketch import Sketch
 from .playback import PlaybackPanel
 from .presets import PresetPreview
+from .receiver_panel import ReceiverPanel
+from .calibration_panel import CalibrationPanel
+from .array_geometry import Geometry
 from .transport import available_ports
 
 if sys.platform == "win32":
@@ -101,14 +106,27 @@ class PlotPanel(ttk.Frame):
         self.colorbar = self.figure.colorbar(image, ax=self.field, fraction=0.038, pad=0.03)
         self.colorbar.ax.tick_params(labelsize=8)
         self.colorbar.set_label("相对 |p|（非声压单位）", fontsize=8)
-        phase_grid = np.asarray(phases).reshape(array.rows, array.cols)
-        self.phase.imshow(phase_grid, origin="lower", cmap="twilight", vmin=0,
-                          vmax=config.phase_steps - 1, aspect="equal")
-        self.phase.set_title(f"{array.rows}×{array.cols} 阵列 · {array.count} 路相位", fontsize=10)
-        self.phase.set_xlabel("列 / +x", fontsize=8)
-        self.phase.set_ylabel("行 / +y", fontsize=8)
-        self.phase.set_xticks(sorted(set([0, array.cols - 1])))
-        self.phase.set_yticks(sorted(set([0, array.rows - 1])))
+        if array.mapping == 'EXPLICIT_XYZ':
+            coords = array_coordinates(array)
+            normals = np.asarray(array.resolved_geometry().normals)
+            vertical_axis = 1 if plane == 'XY' else 2
+            self.phase.scatter(coords[:, 0], coords[:, vertical_axis], c=phases, cmap='twilight',
+                               vmin=0, vmax=config.phase_steps-1, s=45)
+            self.phase.quiver(coords[:, 0], coords[:, vertical_axis], normals[:, 0]*5,
+                              normals[:, vertical_axis]*5, angles='xy', scale_units='xy', scale=1, alpha=.45)
+            self.phase.set_aspect('equal', adjustable='datalim')
+            self.phase.set_title(f'{plane} 阵元投影 · 颜色为相位 / 箭头为朝向', fontsize=8)
+            self.phase.set_xlabel('x / mm', fontsize=8)
+            self.phase.set_ylabel('y / mm' if plane == 'XY' else 'z / mm', fontsize=8)
+        else:
+            phase_grid = np.asarray(phases).reshape(array.rows, array.cols)
+            self.phase.imshow(phase_grid, origin="lower", cmap="twilight", vmin=0,
+                              vmax=config.phase_steps - 1, aspect="equal")
+            self.phase.set_title(f"{array.rows}×{array.cols} 阵列 · {array.count} 路相位", fontsize=10)
+            self.phase.set_xlabel("列 / +x", fontsize=8)
+            self.phase.set_ylabel("行 / +y", fontsize=8)
+            self.phase.set_xticks(sorted(set([0, array.cols - 1])))
+            self.phase.set_yticks(sorted(set([0, array.rows - 1])))
         path = trajectory_path(config)
         self.path.plot(path[:, 0], path[:, 1], color=BLUE, lw=1.5)
         self.path.scatter([focus[0]], [focus[1]], color=TEAL, s=35, zorder=3)
@@ -137,6 +155,7 @@ class App:
                          "axes.unicode_minus": False, "font.size": 9})
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="acoustic-model")
         self.session = None
+        self.geometry_profile = None
         self.state = None
         self.hardware = None
         self.workspace = None
@@ -159,12 +178,18 @@ class App:
         self.last_log_refresh = 0.0
         self.closing = False
         self.mode_choice = tk.StringVar(value="Demo 模拟设备")
+        self.ble_choice = tk.StringVar()
+        self.ble_profile = BleProfile()
+        self.ble_peers = {}
+        self.ble_scan = None
+        self.connection_layout = None
+        self.connection_hint = tk.StringVar()
         self.port_choice = tk.StringVar()
         self.baud_choice = tk.StringVar(value="115200")
         self.device_label = tk.StringVar(value="未连接")
         self.status_line = tk.StringVar(value="点击画布开始绘制。")
         self.actual_line = tk.StringVar(value="等待板端回读；没有实际输出数据。")
-        self.source_line = tk.StringVar(value="请选择 Demo 或真实串口并连接")
+        self.source_line = tk.StringVar(value="请选择连接方式；没有设备可使用 Demo")
         self.config_line = tk.StringVar(value="连接设备后可发送图形。")
         self.plane = tk.StringVar(value="XY")
         self.mute = tk.BooleanVar(value=False)
@@ -193,7 +218,7 @@ class App:
         self.refresh_ports()
         self.tabs.select(self.editor_tab)
         self.toggle_debug()
-        self.root.after(60, self.tick)
+        self.tick_id = self.root.after(60, self.tick)
         self.root.bind("<Control-o>", lambda _: self.load_config())
         self.root.bind("<Control-s>", lambda _: self.save_config())
 
@@ -228,25 +253,39 @@ class App:
         ttk.Label(header, textvariable=self.device_label, style="Heading.TLabel").pack(side="right")
         connection = ttk.Frame(self.root, padding=(22, 4, 22, 10))
         connection.pack(fill="x")
-        self.connection_picker = ttk.Combobox(connection, textvariable=self.mode_choice,
-                                             values=["Demo 模拟设备", "真实串口"], state="readonly", width=17)
-        self.connection_picker.pack(side="left", padx=(0, 8))
+        connection_controls = ttk.Frame(connection)
+        connection_controls.pack(fill="x")
+        connection_controls.columnconfigure(1, weight=1)
+        self.connection_picker = ttk.Combobox(connection_controls, textvariable=self.mode_choice,
+                                             values=["Demo 模拟设备", "真实串口", "BLE 蓝牙"], state="readonly", width=17)
+        self.connection_picker.grid(row=0, column=0, padx=(0, 8))
         self.connection_picker.bind("<<ComboboxSelected>>", lambda _: self.update_controls())
-        self.port_picker = ttk.Combobox(connection, textvariable=self.port_choice, width=11)
+        self.serial_options = ttk.Frame(connection_controls)
+        self.port_picker = ttk.Combobox(self.serial_options, textvariable=self.port_choice, width=11)
         self.port_picker.pack(side="left", padx=(0, 8))
-        self.refresh_button = ttk.Button(connection, text="刷新串口", command=self.refresh_ports)
+        self.refresh_button = ttk.Button(self.serial_options, text="刷新串口", command=self.refresh_ports)
         self.refresh_button.pack(side="left", padx=(0, 10))
-        self.baud_label = ttk.Label(connection, text="波特率")
+        self.baud_label = ttk.Label(self.serial_options, text="波特率")
         self.baud_label.pack(side="left")
-        self.baud_picker = ttk.Combobox(connection, textvariable=self.baud_choice, width=9,
+        self.baud_picker = ttk.Combobox(self.serial_options, textvariable=self.baud_choice, width=9,
                                        values=[str(rate) for rate in BAUD_RATES], height=12, state="normal")
         self.baud_picker.pack(side="left", padx=8)
-        self.connect_button = ttk.Button(connection, text="连接", style="Primary.TButton", command=self.connect)
-        self.connect_button.pack(side="left", padx=(0, 6))
-        self.disconnect_button = ttk.Button(connection, text="断开", command=self.disconnect)
-        self.disconnect_button.pack(side="left")
-        ttk.Label(connection, text="波特率可输入，需与板端一致", style="Muted.TLabel").pack(side="left", padx=8)
-        self.protocol_label = ttk.Label(connection, text="HAP3 · 双向串口 · 8N1", style="Muted.TLabel")
+        self.ble_options = ttk.Frame(connection_controls)
+        self.ble_options.columnconfigure(0, weight=1)
+        self.ble_picker = ttk.Combobox(self.ble_options, textvariable=self.ble_choice, width=28, state="readonly")
+        self.ble_picker.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.scan_button = ttk.Button(self.ble_options, text="扫描设备", command=self.scan_ble)
+        self.scan_button.grid(row=0, column=1, padx=(0, 8))
+        self.ble_settings_button = ttk.Button(self.ble_options, text="连接设置", command=self.configure_ble)
+        self.ble_settings_button.grid(row=0, column=2, padx=(0, 8))
+        self.connect_button = ttk.Button(connection_controls, text="连接", style="Primary.TButton", command=self.connect)
+        self.connect_button.grid(row=0, column=2, padx=(0, 6))
+        self.disconnect_button = ttk.Button(connection_controls, text="断开", command=self.disconnect)
+        self.disconnect_button.grid(row=0, column=3)
+        connection_info = ttk.Frame(connection)
+        connection_info.pack(fill="x", pady=(5, 0))
+        ttk.Label(connection_info, textvariable=self.connection_hint, style="Muted.TLabel").pack(side="left")
+        self.protocol_label = ttk.Label(connection_info, text="HAP3 草案", style="Muted.TLabel")
         self.protocol_label.pack(side="right")
         ttk.Label(self.root, textvariable=self.status_line, style="Muted.TLabel", padding=(22,7),
                   wraplength=1040).pack(side="bottom", fill="x")
@@ -328,7 +367,7 @@ class App:
         mode_row = ttk.Frame(left)
         mode_row.grid(row=8, column=0, sticky="ew")
         mode_row.columnconfigure((0,1), weight=1)
-        self.local_button = ttk.Button(mode_row, text="设备按键控制", command=lambda: self.send("MODE", value="LOCAL"))
+        self.local_button = ttk.Button(mode_row, text="设备本地控制", command=lambda: self.send("MODE", value="LOCAL"))
         self.local_button.grid(row=0, column=0, sticky="ew", padx=(0,4))
         self.remote_button = ttk.Button(mode_row, text="电脑控制", command=lambda: self.send("MODE", value="REMOTE"))
         self.remote_button.grid(row=0, column=1, sticky="ew", padx=(4,0))
@@ -469,6 +508,10 @@ class App:
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=14)
         self.device_details = ttk.Frame(content)
         ttk.Button(self.device_details, text="用此阵列更新电脑预测", command=self.preview).pack(anchor="w")
+        self.geometry_load_button = ttk.Button(self.device_details, text='导入阵列坐标（预测 / Demo）', command=self.load_geometry)
+        self.geometry_load_button.pack(anchor='w', pady=6)
+        ttk.Button(self.device_details, text='导出当前阵列坐标', command=self.export_geometry).pack(anchor='w')
+        ttk.Label(self.device_details, text='三维阵列采用文件中的逐路坐标；真实设备的坐标以固件回传为准。选择行列预设可恢复平面阵列。', wraplength=650).pack(anchor='w', pady=6)
         ttk.Label(self.device_details, text="Demo 默认 0.5 次/秒，仅演示扫描路径；运行时每 0.05 秒回传，其他状态每 0.5 秒回传。"
                   "本程序未模拟 FPGA 的高速更新时序，也未验证触觉效果。",
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
@@ -477,6 +520,16 @@ class App:
         ttk.Label(self.device_details, textvariable=self.workspace_line, wraplength=650, style="Muted.TLabel").pack(anchor="w")
 
     def _measurement_tab(self, parent):
+        self.measured_tab = parent
+        self.measurement_tabs = ttk.Notebook(parent)
+        self.measurement_tabs.pack(fill="both", expand=True)
+        self.receiver_panel = ReceiverPanel(self.measurement_tabs, self.request_capture)
+        scan_tab = ttk.Frame(self.measurement_tabs)
+        self.measurement_tabs.add(self.receiver_panel, text="接收波形")
+        self.measurement_tabs.add(scan_tab, text="空间扫描 CSV")
+        self.calibration_panel = CalibrationPanel(self.measurement_tabs, self)
+        self.measurement_tabs.add(self.calibration_panel, text='相位校准')
+        parent = scan_tab
         top = ttk.Frame(parent, padding=10)
         top.pack(fill="x")
         ttk.Button(top, text="导入扫描 CSV", command=self.import_measurement).pack(side="left")
@@ -491,6 +544,10 @@ class App:
         self.measurement_canvas = FigureCanvasTkAgg(self.measurement_figure, parent)
         self.measurement_canvas.get_tk_widget().pack(fill="both",expand=True)
         self.measurement_colorbar = None
+
+    def request_capture(self):
+        return bool(not self.calibration_panel.busy and self.ready and self.session and "ADC_CAPTURE" in self.capabilities
+                    and self.session.command("CAPTURE"))
 
     def set_config(self, config, document=None):
         config.validate()
@@ -534,6 +591,7 @@ class App:
         self.size_label.set("正方形半边长 / mm" if self.vars["shape"].get() == SHAPES["SQUARE"] else "预设图形半径 / mm")
 
     def select_hardware(self, _event=None):
+        self.geometry_profile = None
         size = ARRAY_PRESETS[self.demo_array_choice.get()]
         if size is not None:
             self.hw_rows.set(str(size[0]))
@@ -543,10 +601,34 @@ class App:
     def preview_array(self):
         if self.ready and self.hardware is not None:
             return self.hardware
+        if self.geometry_profile is not None:
+            return ArraySpec.from_geometry(self.geometry_profile)
         pitch = float(self.hw_pitch.get()) * 1000
         if not np.isfinite(pitch) or abs(pitch - round(pitch)) > 1e-6:
             raise ValueError("阵元间距精度为 1 µm")
         return ArraySpec(int(self.hw_rows.get()), int(self.hw_cols.get()), round(pitch)).validate()
+
+    def load_geometry(self):
+        if self.session and self.session.is_alive():
+            return
+        path = filedialog.askopenfilename(parent=self.root, filetypes=[('阵列坐标', '*.json')])
+        if path:
+            try:
+                self.geometry_profile = Geometry.load(path)
+                self.hw_rows.set(str(self.geometry_profile.rows))
+                self.hw_cols.set(str(self.geometry_profile.cols))
+                self.hw_pitch.set(str(self.geometry_profile.pitch_um/1000))
+                self.status_line.set(f'已载入 {len(self.geometry_profile.elements)} 路三维坐标，可连接 Demo 或更新预测。')
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                messagebox.showerror('阵列文件无效', str(error), parent=self.root)
+
+    def export_geometry(self):
+        path = filedialog.asksaveasfilename(parent=self.root, defaultextension='.json', initialfile='array-geometry.json', filetypes=[('阵列坐标', '*.json')])
+        if path:
+            try:
+                self.preview_array().resolved_geometry().save(path)
+            except (OSError, ValueError) as error:
+                messagebox.showerror('导出失败', str(error), parent=self.root)
 
     def sync_editor(self):
         if self.syncing_geometry:
@@ -595,15 +677,62 @@ class App:
         except Exception as error:
             self.status_line.set(str(error))
 
+    def configure_ble(self):
+        if self.session and self.session.is_alive() or self.ble_scan is not None:
+            return
+        def apply(profile):
+            self.ble_profile = profile
+            self.status_line.set("蓝牙连接设置已应用，下次连接时使用。")
+        BleSettings(self.root, self.ble_profile, apply)
+
+    def scan_ble(self):
+        if self.ble_scan is not None:
+            self.ble_scan.cancel()
+            self.status_line.set("正在取消扫描…")
+            return
+        if self.closing or self.session and self.session.is_alive() or self.mode_choice.get() != "BLE 蓝牙":
+            return
+        self.ble_choice.set("")
+        self.ble_peers.clear()
+        self.ble_picker["values"] = []
+        self.ble_scan = BleScan()
+        self.ble_scan.start()
+        self.status_line.set("正在查找附近设备，请开启电脑蓝牙并让模块进入可发现状态…")
+        self.update_controls()
+
+    def _pump_ble_scan(self):
+        scan = self.ble_scan
+        if scan is None or scan.is_alive():
+            return
+        self.ble_scan = None
+        if scan.cancelled.is_set() or self.mode_choice.get() != "BLE 蓝牙":
+            self.status_line.set("蓝牙扫描已取消。")
+            return
+        peers, error = scan.results.get_nowait()
+        if error:
+            self.status_line.set(error)
+            self.log("error", error)
+            return
+        self.ble_peers = {peer.label: peer for peer in peers}
+        self.ble_picker["values"] = list(self.ble_peers)
+        # Do not auto-select the strongest nearby device; it may be unrelated.
+        self.status_line.set(f"找到 {len(peers)} 个蓝牙设备，请选择你们的模块后连接。" if peers else
+                             "未发现设备。请检查蓝牙、模块供电及是否已被其他设备连接，再重新扫描。")
+
     def connect(self):
-        if self.session and self.session.is_alive():
+        if self.closing or self.ble_scan is not None or self.session and self.session.is_alive():
             return
         demo = self.mode_choice.get().startswith("Demo")
-        if not demo and not self.port_choice.get().strip():
-            messagebox.showinfo("选择串口", "请先选择或输入 FPGA 的 COM 端口。", parent=self.root)
+        ble = self.mode_choice.get() == "BLE 蓝牙"
+        peer = self.ble_peers.get(self.ble_choice.get()) if ble else None
+        if ble and peer is None:
+            messagebox.showinfo("选择蓝牙设备", "请先扫描，再选择你们的蓝牙模块。", parent=self.root)
+            return
+        if not demo and not ble and not self.port_choice.get().strip():
+            messagebox.showinfo("选择串口", "请先选择或输入设备的 COM 端口。", parent=self.root)
             return
         baud = 115200  # Demo has no physical UART and does not use this field.
-        if not demo:
+        if not demo and not ble:
             try:
                 value = self.baud_choice.get().strip()
                 if not value.isascii() or not value.isdecimal():
@@ -618,6 +747,7 @@ class App:
         self.generation += 1
         self.state, self.received, self.ready, self.busy = None, 0.0, False, False
         self.hardware, self.workspace, self.capabilities = None, None, set()
+        self.receiver_panel.reset()
         self.await_revision, self.await_sample, self.pending_verb = None, None, None
         self.await_verb = self.pending_config = self.confirmed_config = None
         self.mute.set(False)
@@ -630,11 +760,17 @@ class App:
             self.status_line.set("Demo 阵列参数无效，请检查行列数和间距。")
             return
         self.hardware_line.set("等待设备报告实际阵列；软件最大容量不代表已安装数量")
-        self.session = Session(demo, self.port_choice.get().strip(), baud, demo_array=demo_array)
+        record_root = (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "TouchSee" / "measurements"
+                       if getattr(sys, "frozen", False) else Path(__file__).resolve().parent / ".runtime" / "receiver")
+        if ble:
+            self.session = Session(demo=False, ble_device=peer.device, ble_profile=self.ble_profile, record_root=record_root)
+        else:
+            self.session = Session(demo, self.port_choice.get().strip(), baud, demo_array=demo_array, record_root=record_root)
         self.session.start()
         self.update_controls()
 
     def disconnect(self):
+        self.calibration_panel.cancel()
         if self.session:
             self.confirmed_config = self.pending_config = None
             self.session.close()
@@ -643,6 +779,12 @@ class App:
             self.update_controls()
 
     def send(self, verb, **fields):
+        if self.calibration_panel.busy:
+            if verb == 'STOP':
+                self.calibration_panel.cancel()
+            else:
+                self.status_line.set('正在校准，请等待完成或取消。')
+            return
         if not self.session or not self.ready:
             return
         if verb == "START" and not self.can_play():
@@ -669,6 +811,8 @@ class App:
                     (self.state.boot, self.state.revision, self.state.config))
 
     def can_play(self):
+        if self.calibration_panel.busy:
+            return False
         if not (self.ready and self.state and time.monotonic()-self.received < 1.6
                 and not self.busy and self.await_revision is None and self.config_confirmed()
                 and self.state.mode == "REMOTE" and self.state.state in ("IDLE", "PAUSED")):
@@ -698,9 +842,9 @@ class App:
             except ValueError as error:
                 messagebox.showerror("无法载入编辑器", str(error), parent=self.root)
 
-    def _queue_plot(self, name, config, phases, focus, enabled, title, array=None):
+    def _queue_plot(self, name, config, phases, focus, enabled, title, array=None, channel_mask=None):
         array = array or self.preview_array()
-        self.wanted[name] = (self.generation, config, array, tuple(phases), tuple(focus), enabled, self.plane.get(), title)
+        self.wanted[name] = (self.generation, config, array, tuple(phases), tuple(focus), enabled, self.plane.get(), title, channel_mask)
 
     def preview(self):
         if not self.debug_mode.get():
@@ -729,14 +873,14 @@ class App:
 
     def plot_actual(self):
         state = self.state
-        source = "Demo 模拟回读" if state.simulated else "FPGA 数字回读"
+        source = "Demo 模拟回读" if state.simulated else "设备数字回读"
         self._queue_plot("actual", state.config, state.phases, state.focus_mm, state.output,
-                         f"{source} · 相位快照 #{state.sample} → 理论声场（非实测）", state.array)
+                         f"{source} · 启用 {state.channel_mask.bit_count()} 路 · 相位快照 #{state.sample} → 理论声场（非实测）", state.array, state.channel_mask)
 
     @staticmethod
     def _compute_plot(request):
-        generation, config, array, phases, focus, enabled, plane, title = request
-        x,y,values = field_slice(config, phases, focus, enabled=enabled, resolution=71, plane=plane, array=array)
+        generation, config, array, phases, focus, enabled, plane, title, mask = request
+        x,y,values = field_slice(config, phases, focus, enabled=enabled, resolution=71, plane=plane, array=array, channel_mask=mask)
         return generation, (config, array, phases, focus, enabled, plane, x,y,values,title)
 
     def _pump_plots(self):
@@ -774,6 +918,7 @@ class App:
     def tick(self):
         if self.closing:
             return
+        self._pump_ble_scan()
         if self.session:
             for _ in range(150):
                 try:
@@ -783,6 +928,10 @@ class App:
                 kind = event["kind"]
                 if kind in ("tx", "rx", "error", "warning", "rejected", "opening"):
                     self.log(kind, event.get("text", ""))
+                if kind == "opening":
+                    self.status_line.set(event["text"])
+                elif kind == "taking_control":
+                    self.status_line.set(event["text"])
                 if kind == "ready":
                     self.ready = True
                     self.hardware = event["array"]
@@ -791,7 +940,8 @@ class App:
                                             f"y [{self.workspace.y_min_um/1000:g}, {self.workspace.y_max_um/1000:g}] mm，"
                                             f"z [{self.workspace.z_min_um/1000:g}, {self.workspace.z_max_um/1000:g}] mm。触觉范围尚待实测。")
                     self.capabilities = set(event["capabilities"])
-                    self.hardware_line.set(f"设备报告：{self.hardware.rows}×{self.hardware.cols} · {self.hardware.count} 个阵元 · 间距 {self.hardware.pitch_um/1000:g} mm · 全阵列参与聚焦")
+                    geometry_label = '逐路三维坐标' if self.hardware.mapping == 'EXPLICIT_XYZ' else f'平面间距 {self.hardware.pitch_um/1000:g} mm'
+                    self.hardware_line.set(f"设备报告：{self.hardware.count} 个阵元 · {geometry_label}")
                     self.device_label.set("Demo 已连接" if event["demo"] else f"已连接：{event['device']}")
                     self.status_line.set("连接成功，发送图形后即可播放。")
                 elif kind == "ack":
@@ -801,8 +951,15 @@ class App:
                         self.await_verb = verb
                         self.await_sample = event["after_sample"]
                         self.await_revision = int(event["fields"]["rev"])
-                    if verb not in ("PING", "HELLO"):
+                    if verb not in ("PING", "HELLO", "CAPTURE", "GEOMETRY") and not self.calibration_panel.busy:
                         self.status_line.set("设备已接收，正在确认状态…")
+                elif kind == "capture":
+                    self.receiver_panel.accept(event["capture"], event["when"])
+                elif kind == "recording":
+                    self.receiver_panel.recorded(event["directory"], event["count"])
+                elif kind == "recording_error":
+                    self.receiver_panel.record_failed(event["text"])
+                    self.log("error", event["text"])
                 elif kind == "state":
                     self.state, self.received = event["state"], event["when"]
                     if (self.await_sample is not None and self.state.sample > self.await_sample
@@ -818,8 +975,12 @@ class App:
                         self.status_line.set({"CONFIG": "图形发送成功，设备已确认，可以播放。" if self.config_confirmed()
                                               else "设备返回的图形与发送内容不一致，请重新发送。",
                                               "START": "设备已开始播放。", "PAUSE": "设备已暂停。",
-                                              "STOP": "设备已停止。"}.get(completed, "设备已确认。"))
+                                              "STOP": "设备已停止。",
+                                              "MODE": "已切换到电脑控制，发送图形后即可播放。" if self.state.mode == "REMOTE"
+                                              else "已切换到设备本地控制。"}.get(completed, "设备已确认。"))
                 elif kind in ("error", "rejected"):
+                    if event.get("verb") == "CAPTURE":
+                        self.receiver_panel.reject(event.get("text", "采样失败"))
                     if kind == "error" or event.get("verb") == self.pending_verb:
                         self.busy = False
                         self.pending_verb = None
@@ -857,18 +1018,27 @@ class App:
             if self.tabs.index(self.tabs.select()) == 4:
                 self.render_log()
             self.last_log_refresh = time.monotonic()
-        self.root.after(80, self.tick)
+        self.tick_id = self.root.after(80, self.tick)
 
     def update_controls(self):
         self.update_file_line()
         alive = bool(self.session and self.session.is_alive())
         fresh = bool(self.ready and self.state and time.monotonic() - self.received < 1.6)
+        self.calibration_panel.tick(fresh and self.state.state == 'IDLE' and self.state.mode == 'REMOTE'
+                                    and not self.busy and self.await_revision is None
+                                    and {'ADC_CAPTURE', 'CALIBRATION'} <= self.capabilities)
+        calibrating = self.calibration_panel.busy
+        self.receiver_panel.tick(fresh, "ADC_CAPTURE" in self.capabilities,
+                                 self.debug_mode.get() and self.tabs.select() == str(self.measured_tab)
+                                 and self.measurement_tabs.select() == str(self.receiver_panel),
+                                 blocked=self.busy or calibrating)
         remote = fresh and self.state.mode == "REMOTE"
         idle = fresh and self.state.state == "IDLE"
-        free = not self.busy and self.await_revision is None
-        for button, enabled in ((self.connect_button,not alive), (self.disconnect_button,alive),
+        free = not self.busy and self.await_revision is None and not calibrating
+        scanning = self.ble_scan is not None
+        for button, enabled in ((self.connect_button,not alive and not scanning), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
-                                (self.remote_button,idle and free), (self.copy_button,fresh),
+                                (self.remote_button,fresh and free and (idle or self.state.mode == "LOCAL")), (self.copy_button,fresh),
                                 (self.start_button,self.can_play()),
                                 (self.pause_button,remote and free and self.state.state == "RUNNING" if fresh else False),
                                 (self.stop_button,self.ready), (self.header_stop,self.ready),
@@ -881,19 +1051,39 @@ class App:
         play_label = "继续播放" if fresh and self.state.state == "PAUSED" else "播放"
         self.start_button.configure(text=play_label)
         self.playback.play_button.configure(text=play_label)
-        self.connection_picker.configure(state="disabled" if alive else "readonly")
+        self.connection_picker.configure(state="disabled" if alive or scanning else "readonly")
         serial_selected = self.mode_choice.get() == "真实串口"
+        ble_selected = self.mode_choice.get() == "BLE 蓝牙"
+        demo_selected = self.mode_choice.get().startswith("Demo")
+        if self.connection_layout != self.mode_choice.get():
+            self.serial_options.grid_remove()
+            self.ble_options.grid_remove()
+            if ble_selected:
+                self.ble_options.grid(row=0, column=1, sticky="ew")
+            elif serial_selected:
+                self.serial_options.grid(row=0, column=1, sticky="w")
+            self.connection_layout = self.mode_choice.get()
+        self.connection_hint.set("先扫描并选择你们的蓝牙模块；连接后需由设备确认。" if ble_selected else
+                                 "波特率可输入，需与板端一致。" if serial_selected else
+                                 "无硬件演示：连接后先发送图形，再播放。")
+        self.protocol_label.configure(text="HAP3 草案 · BLE GATT" if ble_selected else
+                                      "HAP3 草案 · 串口 8N1" if serial_selected else "HAP3 草案 · 内存模拟")
         self.port_picker.configure(state="normal" if not alive and serial_selected else "disabled")
         self.baud_picker.configure(state="normal" if not alive and serial_selected else "disabled")
         self.refresh_button.configure(state="normal" if not alive else "disabled")
-        self.demo_array_picker.configure(state="readonly" if not alive and not serial_selected else "disabled")
+        self.ble_picker.configure(state="readonly" if not alive and not scanning else "disabled")
+        self.scan_button.configure(state="disabled" if alive else "normal",
+                                   text="取消扫描" if scanning else "扫描设备")
+        self.ble_settings_button.configure(state="disabled" if alive or scanning else "normal")
+        self.demo_array_picker.configure(state="readonly" if not alive and demo_selected else "disabled")
+        self.geometry_load_button.configure(state='disabled' if alive else 'normal')
         for entry in self.hw_entries:
-            entry.configure(state="normal" if not alive and not serial_selected else "disabled")
+            entry.configure(state="normal" if not alive and demo_selected and self.geometry_profile is None else "disabled")
         self.editor.apply_button.configure(state="normal" if remote and idle and free and "SCAN_PATHS" in self.capabilities else "disabled")
         demo_live = self.ready and self.session and self.session.is_demo
         for button in self.demo_buttons:
-            button.configure(state="normal" if demo_live else "disabled")
-        self.mute_check.configure(state="normal" if demo_live else "disabled")
+            button.configure(state="normal" if demo_live and not calibrating else "disabled")
+        self.mute_check.configure(state="normal" if demo_live and not calibrating else "disabled")
         if self.state:
             age = time.monotonic()-self.received
             state = self.state
@@ -904,9 +1094,9 @@ class App:
             if fresh:
                 if self.debug_mode.get():
                     self.source_line.set("DEMO 模拟设备 · 数字状态为模拟值，声场为理论预测" if state.simulated else
-                                         "真实 FPGA 回读 · 仅确认数字输出寄存器状态，不代表换能器实测")
+                                         "设备回读 · 仅确认数字输出状态，不代表换能器实测")
                 else:
-                    mode = "设备按键控制" if state.mode == "LOCAL" else "电脑控制"
+                    mode = "设备本地控制" if state.mode == "LOCAL" else "电脑控制"
                     self.source_line.set(f"{'Demo 路径演示' if state.simulated else '设备已连接'} · {status} · {mode}")
                 self.source_banner.configure(bg="#fff0d5" if state.simulated else "#dff2ed", fg=AMBER if state.simulated else TEAL)
             elif self.ready:
@@ -942,7 +1132,8 @@ class App:
                         "PAUSE": "正在等待设备暂停…", "STOP": "正在等待设备停止…"}.get(action, "正在等待设备确认…")
         if fresh and self.state.mode == "LOCAL":
             feedback = "设备按键控制中；电脑显示设备返回的播放状态。"
-        self.playback.update_state(self.state, fresh, feedback)
+        self.playback.update_state(self.state, fresh, feedback,
+                                   self.session.connection_label if self.session else "")
         self.preset_preview.apply_button.configure(state=self.apply_button["state"])
 
     def draft_signature(self):
@@ -1055,7 +1246,7 @@ class App:
                 writer.writerow(["source","boot","sample","config_rev","state","output","age_s","channel","x_mm","y_mm","phase_code","phase_steps"])
                 age=time.monotonic()-self.received
                 for channel,(xyz,phase) in enumerate(zip(array_coordinates(state.array),state.phases)):
-                    writer.writerow(["DEMO" if state.simulated else "FPGA_DIGITAL_READBACK",state.boot,state.sample,state.revision,
+                    writer.writerow(["DEMO" if state.simulated else "DEVICE_DIGITAL_READBACK",state.boot,state.sample,state.revision,
                                      state.state,int(state.output),round(age,3),channel,xyz[0],xyz[1],phase,state.config.phase_steps])
         except OSError as error:
             messagebox.showerror("导出失败",str(error),parent=self.root)
@@ -1104,12 +1295,17 @@ class App:
         if not self.confirm_replace_draft("关闭"):
             return
         self.closing=True
+        self.calibration_panel.cancel()
+        self.root.after_cancel(self.tick_id)
+        if self.ble_scan is not None:
+            self.ble_scan.cancel()
         if self.session:
             self.session.close()
         self.executor.shutdown(wait=False,cancel_futures=True)
-        deadline=time.monotonic()+1.5
+        deadline=time.monotonic()+4.5
         def finish():
-            if self.session and self.session.is_alive() and time.monotonic()<deadline:
+            working = (self.session and self.session.is_alive()) or (self.ble_scan and self.ble_scan.is_alive())
+            if working and time.monotonic()<deadline:
                 self.root.after(50,finish)
             else:
                 self.root.destroy()

@@ -1,0 +1,152 @@
+{
+  "passed": true,
+  "pcb_mount_pattern_verified": [
+    [
+      -32.5,
+      32.5
+    ],
+    [
+      -18.5,
+      -43.5
+    ],
+    [
+      21.5,
+      -43.5
+    ],
+    [
+      35.5,
+      32.5
+    ]
+  ],
+  "meshes": [
+    {
+      "name": "01_array_alignment_jig.STL",
+      "triangles": 17666,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        87.0,
+        95.0,
+        10.599999427795412
+      ],
+      "volume_mm3": 34807.43810131894,
+      "cad_volume_relative_error": 3.656286864857317e-05,
+      "printable": true
+    },
+    {
+      "name": "02_bore_fit_coupon.STL",
+      "triangles": 3216,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        62.0,
+        20.0,
+        5.0
+      ],
+      "volume_mm3": 4470.535350374954,
+      "cad_volume_relative_error": 6.231669652203936e-05,
+      "printable": true
+    },
+    {
+      "name": "03_wrist_and_board_base.STL",
+      "triangles": 7608,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        150.0,
+        188.0,
+        156.0
+      ],
+      "volume_mm3": 238068.1298483065,
+      "cad_volume_relative_error": 7.819343050365909e-07,
+      "printable": true
+    },
+    {
+      "name": "04_wrist_cradle.STL",
+      "triangles": 1872,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        132.0,
+        41.24678421020508,
+        48.0
+      ],
+      "volume_mm3": 94683.95363974036,
+      "cad_volume_relative_error": 6.706739517628655e-05,
+      "printable": true
+    },
+    {
+      "name": "05_pcb_standoff_35.STL",
+      "triangles": 1648,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        8.0,
+        8.0,
+        35.0
+      ],
+      "volume_mm3": 1441.3692992789317,
+      "cad_volume_relative_error": 0.00010439663879948687,
+      "printable": true
+    },
+    {
+      "name": "06_m4_nut_knob.STL",
+      "triangles": 2408,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        22.0,
+        21.999353408813477,
+        9.0
+      ],
+      "volume_mm3": 3156.952050663453,
+      "cad_volume_relative_error": 3.763297892011047e-05,
+      "printable": true
+    },
+    {
+      "name": "REF_16_emitters.STL",
+      "triangles": 25344,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 16,
+      "size_mm": [
+        42.900001525878906,
+        42.89992141723633,
+        7.099999904632568
+      ],
+      "volume_mm3": 8744.20482868114,
+      "cad_volume_relative_error": 4.208977481194371e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_pcb_80x88.STL",
+      "triangles": 2924,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        80.0,
+        88.0,
+        1.5999999046325692
+      ],
+      "volume_mm3": 11132.537949790574,
+      "cad_volume_relative_error": 8.806469527360159e-07,
+      "printable": false
+    }
+  ],
+  "array_face_above_base_bottom_mm": 53.2,
+  "bare_cradle_center_clearance_mm": [
+    43.8,
+    103.8
+  ],
+  "default_bare_clearance_mm": 69.8,
+  "minimum_guide_web_mm": 0.5999999999999996,
+  "minimum_case_to_pcb_gap_mm": 3.2,
+  "printed_or_load_tested": false
+}

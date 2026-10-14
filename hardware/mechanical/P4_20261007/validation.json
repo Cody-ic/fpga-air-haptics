@@ -1,0 +1,591 @@
+{
+  "passed": true,
+  "meshes": [
+    {
+      "name": "01_array_alignment_jig.STL",
+      "triangles": 14840,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        87.0,
+        95.0,
+        5.000000000000002
+      ],
+      "volume_mm3": 33121.4393614133,
+      "cad_volume_relative_error": 4.277306958236881e-05,
+      "printable": true
+    },
+    {
+      "name": "02_bore_fit_coupon.STL",
+      "triangles": 3216,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        62.0,
+        20.0,
+        5.0
+      ],
+      "volume_mm3": 4470.535350374954,
+      "cad_volume_relative_error": 6.231669652203936e-05,
+      "printable": true
+    },
+    {
+      "name": "03_fixed_base.STL",
+      "triangles": 4508,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        150.0,
+        188.0,
+        140.0
+      ],
+      "volume_mm3": 238700.28124203757,
+      "cad_volume_relative_error": 5.967076365557586e-07,
+      "printable": true
+    },
+    {
+      "name": "04_wrist_cradle.STL",
+      "triangles": 1872,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        132.0,
+        41.24678421020508,
+        48.0
+      ],
+      "volume_mm3": 94683.95363974036,
+      "cad_volume_relative_error": 6.706739517628655e-05,
+      "printable": true
+    },
+    {
+      "name": "05_pcb_standoff_10.STL",
+      "triangles": 2392,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        8.0,
+        7.999698638916016,
+        10.0
+      ],
+      "volume_mm3": 411.8482766324706,
+      "cad_volume_relative_error": 3.5255073439922824e-05,
+      "printable": true
+    },
+    {
+      "name": "07_vertical_tx_frame.STL",
+      "triangles": 7584,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        102.0,
+        110.0,
+        8.0
+      ],
+      "volume_mm3": 34935.800103805945,
+      "cad_volume_relative_error": 4.661931072627279e-06,
+      "printable": true
+    },
+    {
+      "name": "08_tx_fixed_shoe.STL",
+      "triangles": 2224,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        24.0,
+        46.0,
+        19.0
+      ],
+      "volume_mm3": 7761.018322261229,
+      "cad_volume_relative_error": 8.320940869779102e-06,
+      "printable": true
+    },
+    {
+      "name": "09_fixed_receiver_arm.STL",
+      "triangles": 4580,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        132.0,
+        40.0,
+        69.30000305175781
+      ],
+      "volume_mm3": 58109.20780089928,
+      "cad_volume_relative_error": 5.746879520101643e-06,
+      "printable": true
+    },
+    {
+      "name": "10_receiver_edge_tray.STL",
+      "triangles": 3878,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        81.0,
+        54.0,
+        12.40000057220459
+      ],
+      "volume_mm3": 11235.76984486747,
+      "cad_volume_relative_error": 6.969141140890692e-06,
+      "printable": true
+    },
+    {
+      "name": "11_receiver_M3_edge_clip.STL",
+      "triangles": 1064,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        8.0,
+        9.0,
+        3.0
+      ],
+      "volume_mm3": 188.76501492071634,
+      "cad_volume_relative_error": 1.389698083519361e-05,
+      "printable": true
+    },
+    {
+      "name": "REF_16_emitters.STL",
+      "triangles": 25344,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 16,
+      "size_mm": [
+        42.900001525878906,
+        42.89992141723633,
+        7.099999904632568
+      ],
+      "volume_mm3": 8744.20482868114,
+      "cad_volume_relative_error": 4.208977481194371e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_common_flat_datum.STL",
+      "triangles": 12,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        103.0,
+        111.0,
+        4.0
+      ],
+      "volume_mm3": 45732.0,
+      "cad_volume_relative_error": 0.0,
+      "printable": false
+    },
+    {
+      "name": "REF_M3_nylock.STL",
+      "triangles": 1160,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        6.350852966308594,
+        5.5,
+        4.0
+      ],
+      "volume_mm3": 76.51705691121006,
+      "cad_volume_relative_error": 3.0280905376582555e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_M3_washer.STL",
+      "triangles": 2808,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        7.0,
+        6.999802112579346,
+        0.5
+      ],
+      "volume_mm3": 15.220621172655804,
+      "cad_volume_relative_error": 2.5966333402769414e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_M3x25_screw.STL",
+      "triangles": 1592,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        5.5,
+        5.499855995178223,
+        28.0
+      ],
+      "volume_mm3": 247.9436609004747,
+      "cad_volume_relative_error": 0.00018472232813951175,
+      "printable": false
+    },
+    {
+      "name": "REF_M3x30_screw.STL",
+      "triangles": 1528,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        5.5,
+        5.499831676483154,
+        33.0
+      ],
+      "volume_mm3": 283.2777612813547,
+      "cad_volume_relative_error": 0.00019279887049700363,
+      "printable": false
+    },
+    {
+      "name": "REF_M3x90_screw.STL",
+      "triangles": 1440,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        5.5,
+        5.5,
+        93.0
+      ],
+      "volume_mm3": 707.3037374612314,
+      "cad_volume_relative_error": 0.00020306558466004962,
+      "printable": false
+    },
+    {
+      "name": "REF_M4_nylock.STL",
+      "triangles": 1184,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        8.082903861999512,
+        7.0,
+        5.0
+      ],
+      "volume_mm3": 149.3492883631658,
+      "cad_volume_relative_error": 3.292730583703445e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_M4_washer.STL",
+      "triangles": 2832,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        9.0,
+        8.99974536895752,
+        0.7999999523162842
+      ],
+      "volume_mm3": 39.275185299431406,
+      "cad_volume_relative_error": 2.5614900871625367e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_M4x20_screw.STL",
+      "triangles": 1816,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        7.0,
+        6.999481201171875,
+        24.0
+      ],
+      "volume_mm3": 405.20691934718894,
+      "cad_volume_relative_error": 0.00014443117606085924,
+      "printable": false
+    },
+    {
+      "name": "REF_M4x25_screw.STL",
+      "triangles": 1672,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        7.0,
+        6.999390125274658,
+        29.0
+      ],
+      "volume_mm3": 468.01562853501036,
+      "cad_volume_relative_error": 0.00017448690460129232,
+      "printable": false
+    },
+    {
+      "name": "REF_M4x30_screw.STL",
+      "triangles": 1608,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        7.0,
+        6.999823093414307,
+        34.0
+      ],
+      "volume_mm3": 530.83193884616,
+      "cad_volume_relative_error": 0.00018311220803473606,
+      "printable": false
+    },
+    {
+      "name": "REF_pcb_80x88.STL",
+      "triangles": 2924,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        80.0,
+        88.0,
+        1.5999999046325692
+      ],
+      "volume_mm3": 11132.537949790574,
+      "cad_volume_relative_error": 8.806469527360159e-07,
+      "printable": false
+    },
+    {
+      "name": "REF_receiver_pcb.STL",
+      "triangles": 780,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        60.00000190734863,
+        34.61900234222412,
+        1.5999999046325684
+      ],
+      "volume_mm3": 3289.065342195782,
+      "cad_volume_relative_error": 6.8216865179225675e-06,
+      "printable": false
+    },
+    {
+      "name": "REF_receiver_U1.STL",
+      "triangles": 1584,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        9.899999618530273,
+        9.899921417236328,
+        7.099999904632568
+      ],
+      "volume_mm3": 546.5127914858178,
+      "cad_volume_relative_error": 4.21086331439405e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_rubber_foot_16x6.STL",
+      "triangles": 1648,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 1,
+      "size_mm": [
+        16.0,
+        15.999883651733398,
+        6.0
+      ],
+      "volume_mm3": 1206.3246740854404,
+      "cad_volume_relative_error": 3.888096657572268e-05,
+      "printable": false
+    },
+    {
+      "name": "REF_top_resistor_envelopes.STL",
+      "triangles": 96,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 8,
+      "size_mm": [
+        3.0,
+        19.3799991607666,
+        1.2000000476837158
+      ],
+      "volume_mm3": 46.079978485106494,
+      "cad_volume_relative_error": 4.669030716065845e-07,
+      "printable": false
+    },
+    {
+      "name": "REF_tx_rear_clearances.STL",
+      "triangles": 1372,
+      "watertight": true,
+      "oriented": true,
+      "connected_solids": 2,
+      "size_mm": [
+        77.75799942016602,
+        40.00000071525574,
+        50.0
+      ],
+      "volume_mm3": 32454.233885970385,
+      "cad_volume_relative_error": 4.1712302449647316e-06,
+      "printable": false
+    }
+  ],
+  "pcb_mount_pattern_verified": [
+    [
+      -32.5,
+      32.5
+    ],
+    [
+      -18.5,
+      -43.5
+    ],
+    [
+      21.5,
+      -43.5
+    ],
+    [
+      35.5,
+      32.5
+    ]
+  ],
+  "common_datum": {
+    "reference": "one external unprinted flat plate, top Z=0",
+    "flat_guide_height_mm": 5.0,
+    "pcb_support_posts": false,
+    "external_pcb_holder_required": true,
+    "modeled_face_height_spread_mm": 0.0,
+    "through_bore_vertical_probes": 784,
+    "resistor_checks": [
+      {
+        "designator": "R2",
+        "x_mm": 29.5,
+        "y_mm": -32.444,
+        "window_clear": true
+      },
+      {
+        "designator": "R4",
+        "x_mm": 29.5,
+        "y_mm": -29.904000000000003,
+        "window_clear": true
+      },
+      {
+        "designator": "R6",
+        "x_mm": 29.5,
+        "y_mm": -27.363999999999997,
+        "window_clear": true
+      },
+      {
+        "designator": "R8",
+        "x_mm": 29.5,
+        "y_mm": -24.823999999999998,
+        "window_clear": true
+      },
+      {
+        "designator": "R10",
+        "x_mm": 29.5,
+        "y_mm": -19.744,
+        "window_clear": true
+      },
+      {
+        "designator": "R12",
+        "x_mm": 29.5,
+        "y_mm": -17.204,
+        "window_clear": true
+      },
+      {
+        "designator": "R14",
+        "x_mm": 29.5,
+        "y_mm": -22.284,
+        "window_clear": true
+      },
+      {
+        "designator": "R16",
+        "x_mm": 29.5,
+        "y_mm": -14.664000000000001,
+        "window_clear": true
+      }
+    ],
+    "resistor_envelope_assumed_mm": [
+      3.0,
+      1.6,
+      1.2
+    ],
+    "nominal_resistor_to_guide_top_gap_mm": 4.4,
+    "physical_coplanarity_measured": false
+  },
+  "receiver_front_matches_palm_reference": true,
+  "wrist_to_palm_reference_mm": [
+    0.0,
+    60.0,
+    0.0
+  ],
+  "common_M4_cartridge_mount_verified": true,
+  "arm_tray_M3_axes_verified": true,
+  "base_shoe_M4_axes_verified": true,
+  "frame_shoe_M4_axes_verified": true,
+  "rear_cross_screw_drive_entry_verified": true,
+  "receiver_three_clips_verified": true,
+  "receiver_side_stops_verified": true,
+  "base_M4x20_thread_protrusion_mm": 1.4,
+  "nominal_screw_head_to_table_gap_mm": 1.2,
+  "tx_rear_open_window_verified": true,
+  "vertical_layout": {
+    "revision": "P4-20261007",
+    "units": "mm",
+    "frame": "Origin at base bottom centre; X left/right; +Y wrist toward emitter; +Z up; table plane Z=-6 mm",
+    "emitter_front_center_mm": [
+      0,
+      49.8,
+      70.0
+    ],
+    "emitter_normal": [
+      0,
+      -1,
+      0
+    ],
+    "palm_reference_mm": [
+      0,
+      -7.0,
+      126.0
+    ],
+    "palm_plane_normal": [
+      0,
+      0,
+      -1
+    ],
+    "wrist_pad_contact_reference_mm": [
+      0,
+      -67,
+      126.0
+    ],
+    "receiver_U1_front_center_mm": [
+      0,
+      -7.0,
+      126.0
+    ],
+    "receiver_normal": [
+      0,
+      1,
+      0
+    ],
+    "receiver_arm_length_mm": 69.3,
+    "receiver_face_depth_mm": 18.7,
+    "actual_hand_position_measured": false,
+    "actual_case_gap_measured": false,
+    "minimum_installed_foot_height_mm": 6,
+    "table_plane_z_mm": -6,
+    "firmware_coordinate_transform_applied": false
+  },
+  "wired_connector_keepout_mm": [
+    27.484,
+    -43.554,
+    42.484,
+    -3.554
+  ],
+  "wired_rear_depth_reserved_mm": 50.0,
+  "actual_wiring_measured": false,
+  "nominal_palm_to_frame_top_gap_mm": 10.0,
+  "fixed_mounts_only": true,
+  "printed_or_load_tested": false,
+  "unknowns": [
+    "receiver case soldering gap",
+    "PCB thickness",
+    "remaining component envelopes",
+    "actual fastener tolerances",
+    "foot compression",
+    "human palm pose",
+    "acoustic response"
+  ]
+}

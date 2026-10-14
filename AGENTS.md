@@ -4,11 +4,15 @@
 
 This repository prepares the 2026 FPGA haptic graphics project. `README.md` is the entry point; `设计思路.md` records current architecture; `FPGA赛道选题建议(1).md` preserves historical research. `CLAUDE.md` provides project context.
 
-`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, `golden.py` exports golden phase vectors for RTL comparison, and `protocol.py`, `controller.py`, `transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`.
+`desktop_app/` contains the Python UI, sketch compiler, model, serial/BLE transports, Demo and tests. `golden.py` exports phase vectors; wire semantics belong in `desktop_app/PROTOCOL.md`, and BLE mapping in `desktop_app/BLE.md`.
 
-`fpga/` contains the HDL: `rtl/` holds the RTL, `tb/` holds the Verilog testbench plus the vector generator and run script, and `fpga/README.md` explains how to simulate. The RTL currently implements HAP2; the desktop app has since moved to HAP3 (see `desktop_app/PROTOCOL.md`), so the firmware needs a version update. No PCB or hardware measurements exist yet, and nothing has run on a board.
+`fpga/rtl/` implements HAP3 control, trajectories, phases and outputs; `fpga/tb/` contains simulation checks, and `fpga/board/` holds the Tang MEGA 138K Pro build and pin constraints. The 4×4 / 11 mm configuration has passed temporary download and serial readback; acoustic performance remains unverified.
+
+`firmware/nucleo_f411re/` and `firmware/stm32f103c8_cube/` hold MCU prototypes. `hardware/` holds PCB releases and `hardware/mechanical/` contains printable fixtures. Hardware validation limits belong in their README files.
 
 ## Build, Test, and Development Commands
+
+`mobile_app/` is the Flutter Android companion. `lib/` holds touch sketches, models, protocol, BLE/Demo sessions and the library; `test/` holds Dart checks and Python reference vectors. See `mobile_app/README.md` for Android setup and known limits.
 
 Run from the repository root with Python 3.10+ and Tk:
 
@@ -16,14 +20,23 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python -m desktop_app --demo`: connect a simulated device, initially idle.
 - `python -m unittest discover -s desktop_app/tests -v`: run automated checks.
 - `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
+- `python -m desktop_app.tests.receiver_gui_smoke`: check the debug ADC waveform panel, Demo source labels and CSV export; `receiver.py` analyzes voltage windows and `receiver_panel.py` owns this UI.
 - `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
 - `rg --files --hidden`: inspect workspace files.
+- `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.
+- `python firmware/nucleo_f411re/tests/test_firmware.py`: native C/Python cross-checks using a host GCC compiler.
+- `python firmware/stm32f103c8_cube/tests/test_f103.py`: test F103 firmware modes and waveform buffers without flashing.
+- In `fpga/`: `bash tb/run_verilator.sh` runs 12 simulation benches; commercial Gowin builds use `board/build.tcl`.
+- In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
+- `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
 
-Quote PowerShell paths containing spaces or parentheses. PyInstaller uses `touchsee.spec`; keep `dist/` and `build/` ignored. The desktop shortcut targets the EXE; rebuild after runtime edits. No formatter, linter, or HDL build is configured.
+Quote PowerShell paths containing spaces or parentheses. Keep `dist/`, `build/` and `.runtime/` ignored. The desktop shortcut targets the EXE; rebuild after desktop runtime edits. Mobile releases currently use local debug signing. Gowin build paths should use ASCII characters on Windows.
 
 ## Coding Style & Naming Conventions
 
-Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial I/O in its worker. Normal interface text should explain user actions; engineering details belong in debug mode.
+Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial/BLE I/O in workers. Normal interface text should explain user actions; engineering details belong in debug mode or advanced connection settings.
+
+Use standard Dart formatting, two-space indentation and `flutter_lints` for mobile. Keep protocol semantics aligned with Python; changing either requires cross-language fixture checks. Mobile imports preserve compiled desktop paths, not desktop CAD constraints.
 
 Write research in Chinese and Markdown in UTF-8. Preserve filenames, numbered sections, and technical abbreviations. Use ATX headings, hyphen bullets, and blank lines. Use absolute dates. Cite new external technical claims in section 9; distinguish vendor publication years and historical rules from confirmed current information.
 
@@ -41,4 +54,6 @@ Use focused imperative messages, consistent with `docs: add system design plan`.
 
 ## Project Constraints
 
-Tang Mega 60K is selected; hardware starts at 4×4 then expands to 8×8. Drawings use arbitrary coordinates, never emitter-grid indices. Current software compiles sketches to at most 32 strokes and 256 coordinates, with one moving focus. Preserve legacy 64-point imports. Keep shared-edge subtraction and output-off transfers explicit; save original geometry, relations and dimensions separately from the wire plan. FPGA owns eventual high-speed scanning; Demo is a slow path demonstration. Preserve all coordinates when switching arrays. Distinguish simulated states, digital readback, theory, and measurements; prioritize single-focus validation before extensions.
+Receiver hardware targets the final FPGA system; the F411 is a temporary validation platform. Preserve its divider and analog front end, adapting firmware and host software first. Do not redesign hardware merely to fill the MCU ADC range; justify any circuit change against measured problems and the final FPGA acquisition interface. Keep assembly and labeling checks separate from circuit redesign.
+
+Tang MEGA 138K Pro is selected; the current 4×4 R5 array uses 11 mm pitch, then expands to 8×8. Drawings use arbitrary coordinates, never emitter-grid indices. Current software compiles sketches to at most 32 strokes and 256 coordinates, with one moving focus. Preserve legacy 64-point imports. Keep shared-edge subtraction and output-off transfers explicit; save original geometry, relations and dimensions separately from the wire plan. FPGA owns eventual high-speed scanning; Demo is a slow path demonstration. Preserve all coordinates when switching arrays. Distinguish simulated states, digital readback, theory, and measurements; prioritize single-focus validation before extensions.

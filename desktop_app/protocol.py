@@ -112,11 +112,17 @@ class Snapshot:
     reason: str
     scan_on: bool
     stroke_index: int
+    channel_mask: int = -1
+    phase_offsets: tuple = ()
 
     @classmethod
-    def parse(cls, fields):
+    def parse(cls, fields, resolved_array=None):
         config = Config.from_wire(fields)
         array = ArraySpec.from_wire(fields)
+        if resolved_array is not None:
+            if array != resolved_array:
+                raise ValueError('回读阵列与握手不一致')
+            array = resolved_array
         if fields["mode"] not in MODES or fields["state"] not in STATES:
             raise ValueError("设备状态非法")
         if fields["output"] not in ("0", "1") or fields["simulated"] not in ("0", "1"):
@@ -138,7 +144,11 @@ class Snapshot:
         if len(phases) != array.count or any(not 0 <= x < config.phase_steps for x in phases):
             raise ValueError("相位快照长度或数值错误")
         counters = [int(fields[k]) for k in ("sample", "uptime_ms", "rev")]
+        mask = int(fields.get('channel_mask', str((1 << array.count)-1)))
+        offsets = tuple(int(v) for v in fields.get('phase_offsets', ','.join(['0']*array.count)).split(','))
+        if not 0 < mask < (1 << array.count) or len(offsets) != array.count or any(not 0 <= v < config.phase_steps for v in offsets):
+            raise ValueError('通道校准回读无效')
         if min(counters) < 0 or not fields["boot"]:
             raise ValueError("状态计数非法")
         return cls(fields["boot"], *counters, fields["mode"], fields["state"], output,
-                   config, array, focus, phases, fields["simulated"] == "1", fields.get("reason", "NONE"), scan_on, stroke)
+                   config, array, focus, phases, fields["simulated"] == "1", fields.get("reason", "NONE"), scan_on, stroke, mask, offsets)
