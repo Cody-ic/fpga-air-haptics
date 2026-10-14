@@ -1,8 +1,8 @@
 # HAP3 设备协议草案（串口／BLE）
 
-更新日期：2026-09-28。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的草案，尚未与 FPGA 端共同定稿。已有 [NUCLEO-F411RE 串口验证固件](../firmware/nucleo_f411re/README.md)，完成编译及宿主机交叉测试，尚未实板联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
+更新日期：2026-09-30。本文是 `protocol.py`、`controller.py`、`demo.py` 当前使用的草案，尚未与 FPGA 端共同定稿。已有 [NUCLEO-F411RE 串口验证固件](../firmware/nucleo_f411re/README.md)，完成编译及宿主机交叉测试，尚未实板联调；BLE 模块也尚未选定。后续协议调整需同步修改两端及测试。
 
-F411RE 实现固定 4×4、11 mm、40 kHz、64 级相位；不支持的参数整包拒绝。它要求每次 REMOTE 握手后重新 CONFIG，才允许 START；新增错误码 `CONFIG_REQUIRED`、`SCAN_TOO_FAST`、`DMA_UNDERRUN` 等及可选 `drive_on` 状态字段，具体时序量化与限制见固件说明。上位机保持对其他合法 HAP3 设备的兼容。
+F411RE 固定 16 路、40 kHz、64 级相位，默认 4×4、11 mm 平面；也可编入逐路三维坐标表。不支持的参数整包拒绝。它要求每次 REMOTE 握手后重新 CONFIG，才允许 START；错误码包含 `CONFIG_REQUIRED`、`SCAN_TOO_FAST`、`DMA_UNDERRUN` 等及可选 `drive_on` 状态字段，具体时序量化与限制见固件说明。上位机保持对其他合法 HAP3 设备的兼容。
 
 HAP3 在实际坐标基础上增加多段路径和关闭输出的跳转，拒绝 HAP1／HAP2 固件，避免旧设备将断开轮廓连起来。旧 JSON 文件可迁移；串口不自动降级。
 
@@ -37,7 +37,7 @@ z_min_um=20000 z_max_um=300000
 
 `simulated=0` 为真实固件；Demo 固定为 1。客户端拒绝来源与连接模式不符的设备。`boot` 每次复位改变，同一会话保持不变。客户端要求 `hb_ms ≥ 2000`，Demo 使用 3000。
 
-`max_*` 表示容量，`hw_*` 表示实际接线阵列，两者不能混用。当前客户端支持物理行列各 1～16、间距 1000～30000 µm，只支持完整规则矩形阵列。通道 `r*hw_cols+c` 的坐标为：
+`max_*` 表示容量，`hw_*` 表示实际接线阵列，两者不能混用。行列各 1～16、名义间距 1000～30000 µm。默认 `ROW_MAJOR_XY` 表示完整规则平面矩形，通道 `r*hw_cols+c` 的坐标为：
 
 ```text
 x = (c - (hw_cols-1)/2) * hw_pitch_um
@@ -46,6 +46,16 @@ z = 0
 ```
 
 阵列中心为原点，列向 +x、行向 +y、发射方向为 +z。半间距位置可能包含 0.5 µm，板端定点实现需正确表示。
+
+### 2.1 可选三维坐标扩展
+
+三维设备使用 `mapping=EXPLICIT_XYZ geometry_id=<24位小写十六进制>`，声明 `GEOMETRY` 能力。`hw_rows*hw_cols` 仍为通道数，但行列与间距不能替代实际坐标。HELLO、CONFIG、STATE 均带同一标识，固件拒绝不匹配的 CONFIG。
+
+命令 `GEOMETRY start=0 count=16` 分块读取，count 为 1–16，不改变输出。专用 ACK 包含 `geometry_id start count sound_speed_mm_s elements`；每个元素为六个十进制整数 `x_nm,y_nm,z_nm,nx_ppm,ny_ppm,nz_ppm`，元素之间用 `|`，按通道顺序连续排列。有效 count 不能越过通道数。
+
+坐标范围 ±1 m，朝向模长约 1000000 ppm；声速范围 300000–380000 mm/s。标识为紧凑 JSON `[rows,cols,pitch_um,sound_speed_mm_s,elements]` 的 SHA-256 前 24 个十六进制字符，JSON 分隔符为 `,`、`:`，无空白。单块上限避免 256 路坐标挤爆 8192 字节帧。
+
+电脑在坐标表完整、标识核验成功后才宣布 ready，读取期间继续心跳。STATE 只回传标识，不重复坐标。文件格式和机械坐标来源见[阵列与校准说明](ARRAY_CALIBRATION.md)。旧手机端会明确拒绝此映射，平面协议兼容不变。
 
 坐标范围是固件接受命令的包围盒，不保证触觉清晰度。以上范围仅为 Demo 示例，实际固件应声明自身验证范围。客户端允许 x/y 边界在 ±400000 µm 内，z 边界在 20000～300000 µm 内，且每轴下界小于上界。
 
@@ -110,7 +120,7 @@ STATE 必须同时回传实际扫描开关、当前段序号及位置，PC 不�
 | `STOP` | 两种模式均可；关闭输出，回到 IDLE 并将进度归零 |
 | `SNAP` | 请求完整状态，不改变输出 |
 
-除 HELLO / CAPTURE 的专用应答外，成功命令返回 `ACK applied=1 rev=N`；除 PING 外紧跟 STATE。ERR 格式为 `ERR SEQ VERB code=...`，示例码包括 `BUSY`、`LOCAL_CONTROL`、`BAD_CONFIG`、`OUT_OF_WORKSPACE`、`HARDWARE_MISMATCH`、`NOT_RUNNING`、`BAD_MODE`、`UNKNOWN_COMMAND`。非法命令不改变已生效配置或运行状态。
+除 HELLO / CAPTURE / GEOMETRY 的专用应答外，成功命令返回 `ACK applied=1 rev=N`；除 PING 外紧跟 STATE。ERR 格式为 `ERR SEQ VERB code=...`，示例码包括 `BUSY`、`LOCAL_CONTROL`、`BAD_CONFIG`、`OUT_OF_WORKSPACE`、`HARDWARE_MISMATCH`、`NOT_RUNNING`、`BAD_MODE`、`UNKNOWN_COMMAND`。非法命令不改变已生效配置或运行状态。
 
 Demo 的本地 NEXT/PLAY/STOP 为模拟物理按键，不是串口命令。NEXT 只在 LOCAL+IDLE 生效，校验新图形范围后 `rev` 加一；本地停止键在两种模式均有效。
 
@@ -132,6 +142,16 @@ pin=PA0 fs_hz=400000 bits=12 n=200 raw=<200个0至4095的十进制整数>
 F411 采样外设等待上限 20 ms；结果等串口发送队列空闲再回传，不阻塞 STOP/按键处理。错误码包括 `UNSUPPORTED`、`BAD_FIELDS`、`ADC_BUSY`、`ADC_RATE_LIMIT`、`ADC_START_FAILED`、`ADC_ERROR`、`ADC_TIMEOUT`。新 HELLO 取消旧会话采样；STOP 关闭发射，已开始的采样仍可返回并保留启动时元数据。客户端既有 ACK/STATE 超时仍有效。
 
 ADC 原码按 `code × Vref / 4095` 换算，默认 Vref=3300 mV，允许手工校准；去均值后估计交流 RMS、峰峰值及 40 kHz 正交投影峰值。默认 ×3.4 仅近似还原原接收板末级分压前的交流幅值，不能增加有效分辨率或恢复削顶。数据没有声压单位、位置坐标或校准相位。Demo 同格式返回 `simulated=1` 的确定性合成波形。
+
+### 4.2 CALIBRATION：可选逐通道相位修正
+
+设备须声明 `CALIBRATION` 能力。命令为 `CALIBRATION action=trial/store geometry_id=<标识> mask=<十进制位掩码> offsets=<逐路逗号分隔相位码>`，四个字段必须齐全。平面设备标识按第 2.1 节的规则生成平面坐标后计算，不能省略；相位码为正向附加量 `0..phase_steps-1`，与名义聚焦相位相加取模。bit 0 对应通道 0，屏蔽通道实际保持 LOW。
+
+仅 REMOTE、IDLE、无采样请求在途可更改。`trial` 还要求已配置 POINT、mod_hz=0、level=100；它设置临时相位与非零掩码，不立即输出，仍需 START。`store` 要求全部通道使能，仅写 RAM，并同时替换全部通道修正。成功后 rev 递增并回传 STATE。
+
+STOP/本地停止/心跳停止/REMOTE 新握手撤销临时 trial、恢复已有修正并要求重新 CONFIG；CONFIG 总是恢复全通道和已保存修正。临时 trial 存在时不允许切换 LOCAL。断电清空保存值；试验中收到错误不能当作修正成功。主机完整核验 ACK、STATE、采样元数据及复测结果后才发送 store。错误码包含 `BAD_CALIBRATION`、`STEADY_POINT_REQUIRED`、`BUSY`；无效修改不部分生效。
+
+STATE 可选字段 `channel_mask`（十进制）与 `phase_offsets`（逐路码）说明实际门控与修正；缺省按全通道、零修正处理。`phases` 必须是叠加修正后的实际相位，不能再次由客户端加修正。详见[校准流程及边界](ARRAY_CALIBRATION.md)。
 
 ## 5. STATE：原子数字快照
 

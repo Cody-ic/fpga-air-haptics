@@ -29,6 +29,8 @@ typedef struct {
     uint16_t start[HAP_STROKES], count[HAP_STROKES], strokes;
     float length[HAP_STROKES], total_weight;
     bool multi;
+    uint16_t channel_mask;
+    uint8_t phase_offsets[HAP_CHANNELS];
 } Config;
 
 typedef struct {
@@ -74,12 +76,15 @@ typedef struct {
     const uint16_t *capture_data;
     const char *capture_error;
     bool capture_tx_running, capture_done, capture_ever;
+    uint8_t saved_offsets[HAP_CHANNELS];
+    bool calibration_trial;
 } Device;
 
 void config_default(Config *);
 const char *config_compile(Config *);
 void geometry_sample(const Config *, uint64_t us, Sample *, float *remaining_us);
 void phase_solve(Sample *);
+void phase_solve_config(const Config *, Sample *);
 void wave_render(const Config *, uint64_t elapsed_us, WaveBlock *);
 uint16_t hap_crc(const void *, size_t);
 void hap_init(Device *, Hardware, const char *boot);
