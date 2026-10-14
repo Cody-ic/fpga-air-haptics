@@ -49,6 +49,11 @@ IO_PORT "key1_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 //   JTAG 那一路而不是串口。
 //   所以方向按原理图恢复：**N16 = 收（接调试器 BL616 的 TX）、P15 = 发（接 BL616 的 RX）**。
 //   底板图 02_Schematic 里这两个网络经过 0 Ω 电阻 R95／R128 接到 BL616，可对照。
+//   ✅ **2026-10-14 最终确认：方向是对的** —— 上位机（`py -3.14 -m desktop_app`）选
+//      **COM6** + 115200，可以直接连上并完成 HELLO 握手。
+//   ⚠️ 一个坑：用 .NET `SerialPort`／裸命令行读这两个口时**什么都收不到**，但上位机
+//      （pyserial，打开时会拉 DTR/RTS）能正常通信 —— 判断"串口通不通"要以上位机为准；
+//      COM5 那一侧会把电脑发出去的内容"回环"回来，容易误判，别拿它当串口。
 IO_LOC  "uart_rx_pin" N16;
 IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 
