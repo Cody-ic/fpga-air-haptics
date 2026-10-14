@@ -1,0 +1,6 @@
+haptics_openocd.local.gdb
+haptics_run.local.cfg
+build/
+Debug/
+Release/
+.settings/

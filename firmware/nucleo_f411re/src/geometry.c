@@ -58,6 +58,9 @@ const char *config_compile(Config *c)
                     return "BAD_CONFIG";
                 if (n > c->start[k]) {
                     float len = distance(*p, c->points[n-1]);
+#ifdef HAP_CACHED_SEGMENTS
+                    c->segment_length[n] = len;
+#endif
                     if (len == 0) return "BAD_CONFIG";
                     c->length[k] += len;
                 }
@@ -73,13 +76,16 @@ const char *config_compile(Config *c)
         if (*s) return "BAD_CONFIG";
         if (legacy && c->path_closed && n > 1 && distance(c->points[0], c->points[n-1]) == 0)
             return "BAD_CONFIG";
+#ifdef HAP_CACHED_SEGMENTS
+        c->closing_length = legacy ? distance(c->points[n-1], c->points[0]) : 0;
+#endif
     }
     if (c->shape == CUSTOM && c->multi) {
         double active = 1e9 / c->repeat_millihz - c->strokes * c->blank_us;
         if (active <= 0) return "BAD_CONFIG";
-        /* A stroke needs at least two 250 us focus slots. Never silently lose it. */
+        /* Each stroke needs at least two focus slots. */
         for (unsigned i = 0; i < c->strokes; ++i)
-            if (active * fmaxf(100, c->length[i]) / c->total_weight < 500)
+            if (active * fmaxf(100, c->length[i]) / c->total_weight < 2*HAP_FOCUS_US)
                 return "SCAN_TOO_FAST";
     }
     float lo_x = 0, hi_x = 0, lo_y = 0, hi_y = 0;
@@ -102,11 +108,17 @@ const char *config_compile(Config *c)
     return NULL;
 }
 
-static void polyline(const Point *p, unsigned count, float target, float *x, float *y)
+#ifdef HAP_CACHED_SEGMENTS
+#define SEGMENTS(c, start) ((c)->segment_length + (start))
+#else
+#define SEGMENTS(c, start) NULL
+#endif
+
+static void polyline(const Point *p, unsigned count, const float *lengths, float target, float *x, float *y)
 {
     *x = (float)p[0].x; *y = (float)p[0].y;
     for (unsigned i = 1; i < count; ++i) {
-        float length = distance(p[i-1], p[i]);
+        float length = lengths ? lengths[i] : distance(p[i-1], p[i]);
         if (length > 0 && target <= length) {
             float f = target / length;
             *x = p[i-1].x + (p[i].x-p[i-1].x)*f;
@@ -134,7 +146,7 @@ void geometry_sample(const Config *c, uint64_t us, Sample *out, float *remaining
             float duration = active * fmaxf(100, c->length[i]) / c->total_weight;
             out->stroke = (uint8_t)i;
             if (offset < duration) {
-                polyline(p, c->count[i], offset/duration*c->length[i], &x, &y);
+                polyline(p, c->count[i], SEGMENTS(c, c->start[i]), offset/duration*c->length[i], &x, &y);
                 *remaining_us = duration - offset;
                 break;
             }
@@ -151,10 +163,14 @@ void geometry_sample(const Config *c, uint64_t us, Sample *out, float *remaining
     } else if (c->shape == CUSTOM) {
         unsigned count = c->count[0];
         float length = c->length[0];
+#ifdef HAP_CACHED_SEGMENTS
+        float closing = c->closing_length;
+#else
         float closing = distance(c->points[count-1], c->points[0]);
+#endif
         float d = fraction * (c->path_closed ? length+closing : 2*length);
         if (!c->path_closed && d > length) d = 2*length-d;
-        if (d <= length || !closing) polyline(c->points, count, d, &x, &y);
+        if (d <= length || !closing) polyline(c->points, count, SEGMENTS(c, 0), d, &x, &y);
         else {
             float f = (d-length)/closing;
             x = c->points[count-1].x + (c->points[0].x-c->points[count-1].x)*f;
@@ -172,25 +188,83 @@ void geometry_sample(const Config *c, uint64_t us, Sample *out, float *remaining
         static const Point arrow[] = {{-1000,0},{1000,0},{300,700},{1000,0},{300,-700},{1000,0},{-1000,0}};
         const Point *p = c->shape == SQUARE ? square : (c->shape == TRIANGLE ? triangle : arrow);
         unsigned count = c->shape == SQUARE ? 5 : (c->shape == TRIANGLE ? 4 : 7);
+#ifdef HAP_CACHED_SEGMENTS
+        static const float square_lengths[] = {0,2000,2000,2000,2000};
+        static const float triangle_lengths[] = {0,1732.038105816f,1732,1732.038105816f};
+        static const float arrow_lengths[] = {0,2000,989.949493661f,989.949493661f,989.949493661f,989.949493661f,2000};
+        const float *lengths = c->shape == SQUARE ? square_lengths : (c->shape == TRIANGLE ? triangle_lengths : arrow_lengths);
+#else
+        const float *lengths = NULL;
+#endif
         float length = 0;
-        for (unsigned i = 1; i < count; ++i) length += distance(p[i-1], p[i]);
-        polyline(p, count, fraction*length, &x, &y);
+        for (unsigned i = 1; i < count; ++i) length += lengths ? lengths[i] : distance(p[i-1], p[i]);
+        polyline(p, count, lengths, fraction*length, &x, &y);
         x *= c->radius_um/1000.0f; y *= c->radius_um/1000.0f;
     }
     out->x_um = c->cx_um + (int32_t)lroundf(x);
     out->y_um = c->cy_um + (int32_t)lroundf(y); out->z_um = c->z_um;
 }
 
-void phase_solve(Sample *s)
+#ifdef HAP_INTEGER_PHASE
+/* F103 has no FPU. This numerical unit is 1/8 um; it is not a claim about
+ * physical emitter placement. Array positions retain the generated geometry. */
+static void sqrt_digits(uint32_t word, unsigned digits, uint32_t *root, uint32_t *remainder)
 {
-    for (unsigned i = 0; i < HAP_CHANNELS; ++i) {
+    while (digits--) {
+        *remainder = (*remainder << 2u) | (word >> 30u);
+        word <<= 2u;
+        uint32_t trial = (*root << 2u) | 1u;
+        *root <<= 1u;
+        if (*remainder >= trial) { *remainder -= trial; *root |= 1u; }
+    }
+}
+
+static uint32_t distance_eighth_um(uint64_t square)
+{
+    if (!square) return 0;
+    uint32_t high = (uint32_t)(square >> 32u), low = (uint32_t)square;
+    uint32_t root = 0, remainder = 0;
+    if (high) {
+        unsigned top = (31u - (unsigned)__builtin_clz(high)) & ~1u;
+        sqrt_digits(high << (30u-top), top/2u+1u, &root, &remainder);
+        sqrt_digits(low, 16u, &root, &remainder);
+    } else {
+        unsigned top = (31u - (unsigned)__builtin_clz(low)) & ~1u;
+        sqrt_digits(low << (30u-top), top/2u+1u, &root, &remainder);
+    }
+    /* Validated focus bounds and int32 nm array coordinates keep the root
+     * below 2^25, so even the intermediate remainder fits in 32 bits. */
+    return root;
+}
+#endif
+
+uint8_t phase_solve_channel(const Sample *s, unsigned i)
+{
+#ifdef HAP_INTEGER_PHASE
+        int64_t dx = (int64_t)s->x_um * 8 - array_elements[i][0] / 125;
+        int64_t dy = (int64_t)s->y_um * 8 - array_elements[i][1] / 125;
+        int64_t dz = (int64_t)s->z_um * 8 - array_elements[i][2] / 125;
+        uint32_t distance = distance_eighth_um((uint64_t)(dx*dx + dy*dy + dz*dz));
+#if ARRAY_SOUND_MM_S % 5 == 0
+        uint32_t divisor = ARRAY_SOUND_MM_S / 5;
+        uint32_t steps = (distance * 64u + (divisor-1u)/2u) / divisor;
+#else
+        uint32_t steps = (uint32_t)(((uint64_t)distance * 320u + (ARRAY_SOUND_MM_S-1u)/2u) / ARRAY_SOUND_MM_S);
+#endif
+        return (uint8_t)(0u - steps) & 63u;
+#else
         float dx = s->x_um/1000.0f - array_elements[i][0]/1000000.0f;
         float dy = s->y_um/1000.0f - array_elements[i][1]/1000000.0f;
         float z = s->z_um/1000.0f - array_elements[i][2]/1000000.0f;
         float cycles = -sqrtf(dx*dx+dy*dy+z*z)*(40000.0f/ARRAY_SOUND_MM_S);
         float fraction = cycles-floorf(cycles);
-        s->phases[i] = (uint8_t)((unsigned)(fraction*64+.5f)&63);
-    }
+        return (uint8_t)((unsigned)(fraction*64+.5f)&63);
+#endif
+}
+
+void phase_solve(Sample *s)
+{
+    for (unsigned i = 0; i < HAP_CHANNELS; ++i) s->phases[i] = phase_solve_channel(s, i);
 }
 
 void phase_solve_config(const Config *c, Sample *s)
