@@ -36,42 +36,38 @@
 输出级使用 `acc - offset`；保持首次相位表就绪前、待机及暂停时关闭输出。
 综合记录见第 4 节。旧 60K / 484 球记录只能作为历史资料，接线以当前 Pro 约束为准。
 
-## ⚠️ 烧录踩坑：下载器要选对"USB 位置"，不然一直卡 0%
+## 下载卡在 0%：检查下载器的 USB 位置
 
 2026-10-14 实测（商业版 IDE V1.9.12.04）。症状：板子开着机、流水灯在跑、两个电源灯都亮、
 USB 插的是 `USB JTAG&UART` 口，电脑也认得下载器（设备管理器里两个 USB Serial Converter
 ＋两个 COM 口），但 Programmer 一烧就**卡在 0%**，命令行 `--scan` 也**永远等不到应答**；
 换个电脑（队友的）用同一根线同一块板子却能烧。
 
-原因不在板子也不在线，而在**下载器的两个 USB 接口**：这块板载调试器（BL616 芯片，
-USB 侧模拟成 FTDI 双通道设备）在设备管理器里是两个 converter，对应两个"USB location"。
-Gowin 工具默认打开的那个（本机是 **location 562**）接的是**串口通道**，JTAG 在**另一个**
-（本机是 **location 561**）。所以现象就是"下载器认得到、JTAG 完全不应答"。
+这次排查记录中，选中下载器的 **location 561** 后可以扫描和下载，**562** 无应答。
+这是该电脑、该次连接的记录，不是所有电脑通用的编号；更换 USB 口后编号也可能改变。
+设备管理器识别到设备，并不等于 Gowin 已打开正确的调试接口。
 
-**怎么修（GUI）**：`Edit → Setting → Cable Setting` → 点 **Query** → 选 **USB location = 561**
-那一项（不要选 562）→ **Save** → 再烧。
+**图形界面**：`Edit → Setting → Cable Setting` → **Query** → 选择能正确扫描器件的
+USB location → **Save**。不要照抄其他电脑的编号。
 
-**怎么修（命令行，最稳）**：
+**命令行**：先列出下载器，再用当前编号只读扫描。以下 561 是上述记录中的示例：
 
 ```powershell
-& "D:\OneDrive\Desktop\Gowin\Gowin_V1.9.12.04_x64\Programmer\bin\programmer_cli.exe" `
+$programmer = 'D:\tools\Gowin-1.9.12.04\Programmer\bin\programmer_cli.exe'
+& $programmer --scan-cables
+& $programmer --scan --cable-index 4 --location 561
+
+# 确认扫描成功后，填写本机生成的比特流路径；此命令会下载程序。
+& $programmer `
   --device GW5AST-138B --run 2 `
-  --fsFile D:\OneDrive\Desktop\fpga-air-haptics\fpga\board\haptics138kpro\impl\pnr\board_top.fs `
+  --fsFile 'D:\FPGADev\haptics138kpro-focus11mm\board_top_4x4_11mm.fs' `
   --cable-index 4 --location 561 --frequency 2.5MHz
 ```
 
 `--run 2` 是 SRAM 编程（断电即失）；要固化到 flash 再另说。
-`--location` 一给，`--channel` 就被忽略（手册 4.4 节）——这也是当初 `--channel 0/1` 都试不通的原因。
-
-**怎么确认链路通**（不用烧，只读芯片）：
-
-```powershell
-& "...\programmer_cli.exe" --scan --cable-index 4 --location 561
-```
-
-通了会打印 `ID: 0x0001081B` —— 对照官方文档，`0x0001081B` 就是 **GW5AST-138B**，
-所以**器件版本选 B 是对的**，不用改 C。换 USB 口之后 location 号可能变，重新跑一次
-`--scan-cables` 看两个口分别是多少即可。
+`--location` 与 `--channel` 的优先级见安装目录中的 Programmer 命令行手册第 4.4 节。
+扫描返回 `0x0001081B` 说明能读到对应器件，但 **B/C 共用这个识别码**，不能据此确认版本。
+当前 B 版配置已通过临时下载和串口回读；最终版本仍按第 0 节核对芯片标记。
 
 2026-10-12 审查补充：串口和按键已加入两级输入同步；上电复位与启动标识有明确初值。
 第一次综合仍须核查初始化设置和同步器路径。当前 `boot` 仅用于同次上电期间区分复位，
@@ -88,7 +84,7 @@ Gowin 工具默认打开的那个（本机是 **location 562**）接的是**串�
 | FPGA 型号 | **GW5AST-LV138FPG676A**，封装 **FCPBG676A**（676 球），Device Version **B 或 C** | 官方 Pro 例程的 cst 头 |
 | 板上时钟 | **50 MHz**，引脚 **P16** | 官方 Pro 例程的 sdc：`create_clock ... -period 20` |
 | 用户按键 | K16、F15、G15（低有效，3.3 V，**必须开内部上拉**） | 官方全引脚约束 |
-| 软件 | **商业版**高云云源软件（Gowin EDA）；教育版不支持这颗，见文首说明 | 
+| 软件 | **商业版**高云云源软件（Gowin EDA）；教育版不支持这颗，见文首说明 |
 
 器件版本 B 还是 C：看 FPGA 表面**镭雕印记第三行第 5 个字符**（官方说明：是 B 就是版本 B，
 是 C 就是 C）。扫描读到的 `0x0001081B` 同时对应 B/C，不能凭这个识别码确认版本。
