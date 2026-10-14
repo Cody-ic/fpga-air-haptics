@@ -71,6 +71,8 @@ flowchart LR
 
 当前方案以 `设计思路.md` 为准。旧调研中的性能目标、价格、赛事规则及“未检索到同类作品”等表述，不应直接当作实测结果或最新事实引用。
 
+- [接收探头定位与自动调参提案](docs/proposals/2026-10-14-position-aware-haptics-calibration.md)：复用已有接收幅值与相位校准，增加自动位置反馈、测量绑定及最终 FPGA 接入计划。
+
 ## 运行与测试
 
 MCU 先行验证：见 [NUCLEO-F411RE 固件、烧录与接线说明](firmware/nucleo_f411re/README.md)。板载 ST-LINK 虚拟串口使用 115200，支持现有上位机的“发送到设备→播放→状态回传”。PCB 文件见 [R5 首轮打样包](hardware/Haptics_4x4_R5_12VDC/README.md)。
