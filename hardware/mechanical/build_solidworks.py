@@ -7,6 +7,10 @@ import argparse
 import json
 import math
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from hardware.mechanical.export_array import geometry_from_parameters
 
 import pythoncom
 import win32com.client as wc
@@ -154,8 +158,7 @@ def chamfer_rectangle(x0, y0, x1, y1, c):
 
 
 def array_centers():
-    return [(PARAMS['pitch_mm']*(c-1.5), PARAMS['pitch_mm']*(r-1.5))
-            for r in range(4) for c in range(4)]
+    return [(x, y) for x, y, _ in geometry_from_parameters(PARAMS).positions_mm]
 
 
 def guide():
