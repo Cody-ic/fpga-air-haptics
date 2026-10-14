@@ -11,6 +11,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from hardware.mechanical.export_array import geometry_from_parameters
+from hardware.mechanical.pcb_layout import top_resistors
 
 import pythoncom
 import win32com.client as wc
@@ -34,6 +35,10 @@ def initialize():
         raise ValueError('This fixture matches the R5 4x4, 11 mm PCB only.')
     if not 82 <= PARAMS['wrist_bolt_height_mm'] <= 142:
         raise ValueError('Wrist bolt height must stay within the mast slots: 82–142 mm.')
+    if not PARAMS['body_nominal_diameter_mm'] < PARAMS['guide_bore_mm'] <= 10.6:
+        raise ValueError('Choose a sliding-fit bore above nominal body diameter, at most 10.6 mm.')
+    if not 0 < PARAMS['guide_depth_mm'] < PARAMS['body_nominal_height_mm']-.3:
+        raise ValueError('The guide must end below the shortest nominal case back.')
     for filename in ['sldworks', 'swconst']:
         lib = pythoncom.LoadTypeLib(str(SW_PATH / (filename + '.tlb')))
         attrs = lib.GetLibAttr()
@@ -169,11 +174,10 @@ def guide():
         p.circle(x,y,PARAMS['guide_bore_mm']/2)
     for x,y in PARAMS['mount_centers_mm']:
         p.circle(x,y,1.7)
-    p.end('Guide_16_bores_pitch11',0,PARAMS['guide_depth_mm'])
-    p.begin()
-    for x,y in PARAMS['mount_centers_mm']:
-        p.circle(x,y,3.6);p.circle(x,y,1.7)
-    p.end('PCB_front_datum_10p6',PARAMS['guide_depth_mm'],PARAMS['datum_to_pcb_front_mm'])
+    p.polygon(chamfer_rectangle(*PARAMS['resistor_window_mm'],1.5))
+    p.end('Guide_16_THROUGH_bores_and_R2_R16_window',0,PARAMS['guide_depth_mm'])
+    # Flat guide only. A separate workholding fixture must support the PCB;
+    # emitting front rims still register on the one external datum plate.
     return p.finish()
 
 
@@ -263,8 +267,27 @@ def reference_emitters():
     return p.finish()
 
 
+def reference_datum():
+    p=Part('REF_common_flat_datum','External flat reference plate, NOT a printed height reference',False)
+    p.begin();p.rect(*PARAMS['reference_plate_bounds_mm'])
+    p.end('Single_common_plane_Z0',-PARAMS['reference_plate_thickness_mm'],0)
+    return p.finish()
+
+
+def reference_resistors():
+    p=Part('REF_top_resistor_envelopes','R5 XY positions; assumed 3.0 x 1.6 x 1.2 mm envelopes, not measured',False)
+    width,length,height=PARAMS['resistor_envelope_mm']
+    p.begin()
+    for r in top_resistors():
+        x,y=r['x_mm'],r['y_mm']
+        p.rect(x-width/2,y-length/2,x+width/2,y+length/2)
+    # Origin is the PCB component-side plane; bodies point towards the datum.
+    p.end('Eight_front_resistor_clearance_envelopes',-height,0,merge=False)
+    return p.finish()
+
+
 BUILDERS=dict(guide=guide,coupon=fit_coupon,stand=stand,cradle=cradle,spacer=spacer,knob=knob,
-              pcb=reference_pcb,emitters=reference_emitters)
+              pcb=reference_pcb,emitters=reference_emitters,datum=reference_datum,resistors=reference_resistors)
 
 
 def main():
