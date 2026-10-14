@@ -4,7 +4,7 @@
 
 This repository prepares the 2026 FPGA haptic graphics project. `README.md` is the entry point; `设计思路.md` records current architecture; `FPGA赛道选题建议(1).md` preserves historical research. `CLAUDE.md` provides project context.
 
-`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`. No HDL, PCB, or hardware measurements exist yet.
+`desktop_app/` contains the Python application: `app.py` handles Tk UI, `sketch_editor.py` handles sketch interactions, `sketch.py` solves geometry and compiles paths, `editor.py` clips canvas lines, `model.py` supplies the reference model, and `protocol.py`, `controller.py`, `transport.py`, `ble_transport.py`, and `demo.py` handle communication. Tests live in `desktop_app/tests/`. Wire semantics belong in `desktop_app/PROTOCOL.md`; BLE mapping and pending decisions belong in `desktop_app/BLE.md`. HAP3 is a host-side draft, not yet agreed with FPGA firmware. No HDL, PCB, or hardware measurements exist yet.
 
 ## Build, Test, and Development Commands
 
@@ -21,7 +21,7 @@ Quote PowerShell paths containing spaces or parentheses. PyInstaller uses `touch
 
 ## Coding Style & Naming Conventions
 
-Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial I/O in its worker. Normal interface text should explain user actions; engineering details belong in debug mode.
+Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial/BLE I/O in workers. Normal interface text should explain user actions; engineering details belong in debug mode or advanced connection settings.
 
 Write research in Chinese and Markdown in UTF-8. Preserve filenames, numbered sections, and technical abbreviations. Use ATX headings, hyphen bullets, and blank lines. Use absolute dates. Cite new external technical claims in section 9; distinguish vendor publication years and historical rules from confirmed current information.
 

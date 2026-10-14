@@ -22,6 +22,8 @@ from matplotlib.figure import Figure
 import numpy as np
 
 from .controller import Session
+from .ble_transport import BleProfile, BleScan
+from .ble_settings import BleSettings
 from .model import ArraySpec, ARRAY_PRESETS, Config, SHAPES, array_coordinates, config_from_document, field_slice, focus_phases, trajectory_path, trajectory_point
 from .sketch_editor import SketchEditor
 from .sketch import Sketch
@@ -159,12 +161,18 @@ class App:
         self.last_log_refresh = 0.0
         self.closing = False
         self.mode_choice = tk.StringVar(value="Demo 模拟设备")
+        self.ble_choice = tk.StringVar()
+        self.ble_profile = BleProfile()
+        self.ble_peers = {}
+        self.ble_scan = None
+        self.connection_layout = None
+        self.connection_hint = tk.StringVar()
         self.port_choice = tk.StringVar()
         self.baud_choice = tk.StringVar(value="115200")
         self.device_label = tk.StringVar(value="未连接")
         self.status_line = tk.StringVar(value="点击画布开始绘制。")
         self.actual_line = tk.StringVar(value="等待板端回读；没有实际输出数据。")
-        self.source_line = tk.StringVar(value="请选择 Demo 或真实串口并连接")
+        self.source_line = tk.StringVar(value="请选择连接方式；没有设备可使用 Demo")
         self.config_line = tk.StringVar(value="连接设备后可发送图形。")
         self.plane = tk.StringVar(value="XY")
         self.mute = tk.BooleanVar(value=False)
@@ -193,7 +201,7 @@ class App:
         self.refresh_ports()
         self.tabs.select(self.editor_tab)
         self.toggle_debug()
-        self.root.after(60, self.tick)
+        self.tick_id = self.root.after(60, self.tick)
         self.root.bind("<Control-o>", lambda _: self.load_config())
         self.root.bind("<Control-s>", lambda _: self.save_config())
 
@@ -228,25 +236,39 @@ class App:
         ttk.Label(header, textvariable=self.device_label, style="Heading.TLabel").pack(side="right")
         connection = ttk.Frame(self.root, padding=(22, 4, 22, 10))
         connection.pack(fill="x")
-        self.connection_picker = ttk.Combobox(connection, textvariable=self.mode_choice,
-                                             values=["Demo 模拟设备", "真实串口"], state="readonly", width=17)
-        self.connection_picker.pack(side="left", padx=(0, 8))
+        connection_controls = ttk.Frame(connection)
+        connection_controls.pack(fill="x")
+        connection_controls.columnconfigure(1, weight=1)
+        self.connection_picker = ttk.Combobox(connection_controls, textvariable=self.mode_choice,
+                                             values=["Demo 模拟设备", "真实串口", "BLE 蓝牙"], state="readonly", width=17)
+        self.connection_picker.grid(row=0, column=0, padx=(0, 8))
         self.connection_picker.bind("<<ComboboxSelected>>", lambda _: self.update_controls())
-        self.port_picker = ttk.Combobox(connection, textvariable=self.port_choice, width=11)
+        self.serial_options = ttk.Frame(connection_controls)
+        self.port_picker = ttk.Combobox(self.serial_options, textvariable=self.port_choice, width=11)
         self.port_picker.pack(side="left", padx=(0, 8))
-        self.refresh_button = ttk.Button(connection, text="刷新串口", command=self.refresh_ports)
+        self.refresh_button = ttk.Button(self.serial_options, text="刷新串口", command=self.refresh_ports)
         self.refresh_button.pack(side="left", padx=(0, 10))
-        self.baud_label = ttk.Label(connection, text="波特率")
+        self.baud_label = ttk.Label(self.serial_options, text="波特率")
         self.baud_label.pack(side="left")
-        self.baud_picker = ttk.Combobox(connection, textvariable=self.baud_choice, width=9,
+        self.baud_picker = ttk.Combobox(self.serial_options, textvariable=self.baud_choice, width=9,
                                        values=[str(rate) for rate in BAUD_RATES], height=12, state="normal")
         self.baud_picker.pack(side="left", padx=8)
-        self.connect_button = ttk.Button(connection, text="连接", style="Primary.TButton", command=self.connect)
-        self.connect_button.pack(side="left", padx=(0, 6))
-        self.disconnect_button = ttk.Button(connection, text="断开", command=self.disconnect)
-        self.disconnect_button.pack(side="left")
-        ttk.Label(connection, text="波特率可输入，需与板端一致", style="Muted.TLabel").pack(side="left", padx=8)
-        self.protocol_label = ttk.Label(connection, text="HAP3 · 双向串口 · 8N1", style="Muted.TLabel")
+        self.ble_options = ttk.Frame(connection_controls)
+        self.ble_options.columnconfigure(0, weight=1)
+        self.ble_picker = ttk.Combobox(self.ble_options, textvariable=self.ble_choice, width=28, state="readonly")
+        self.ble_picker.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.scan_button = ttk.Button(self.ble_options, text="扫描设备", command=self.scan_ble)
+        self.scan_button.grid(row=0, column=1, padx=(0, 8))
+        self.ble_settings_button = ttk.Button(self.ble_options, text="连接设置", command=self.configure_ble)
+        self.ble_settings_button.grid(row=0, column=2, padx=(0, 8))
+        self.connect_button = ttk.Button(connection_controls, text="连接", style="Primary.TButton", command=self.connect)
+        self.connect_button.grid(row=0, column=2, padx=(0, 6))
+        self.disconnect_button = ttk.Button(connection_controls, text="断开", command=self.disconnect)
+        self.disconnect_button.grid(row=0, column=3)
+        connection_info = ttk.Frame(connection)
+        connection_info.pack(fill="x", pady=(5, 0))
+        ttk.Label(connection_info, textvariable=self.connection_hint, style="Muted.TLabel").pack(side="left")
+        self.protocol_label = ttk.Label(connection_info, text="HAP3 草案", style="Muted.TLabel")
         self.protocol_label.pack(side="right")
         ttk.Label(self.root, textvariable=self.status_line, style="Muted.TLabel", padding=(22,7),
                   wraplength=1040).pack(side="bottom", fill="x")
@@ -595,15 +617,62 @@ class App:
         except Exception as error:
             self.status_line.set(str(error))
 
+    def configure_ble(self):
+        if self.session and self.session.is_alive() or self.ble_scan is not None:
+            return
+        def apply(profile):
+            self.ble_profile = profile
+            self.status_line.set("蓝牙连接设置已应用，下次连接时使用。")
+        BleSettings(self.root, self.ble_profile, apply)
+
+    def scan_ble(self):
+        if self.ble_scan is not None:
+            self.ble_scan.cancel()
+            self.status_line.set("正在取消扫描…")
+            return
+        if self.closing or self.session and self.session.is_alive() or self.mode_choice.get() != "BLE 蓝牙":
+            return
+        self.ble_choice.set("")
+        self.ble_peers.clear()
+        self.ble_picker["values"] = []
+        self.ble_scan = BleScan()
+        self.ble_scan.start()
+        self.status_line.set("正在查找附近设备，请开启电脑蓝牙并让模块进入可发现状态…")
+        self.update_controls()
+
+    def _pump_ble_scan(self):
+        scan = self.ble_scan
+        if scan is None or scan.is_alive():
+            return
+        self.ble_scan = None
+        if scan.cancelled.is_set() or self.mode_choice.get() != "BLE 蓝牙":
+            self.status_line.set("蓝牙扫描已取消。")
+            return
+        peers, error = scan.results.get_nowait()
+        if error:
+            self.status_line.set(error)
+            self.log("error", error)
+            return
+        self.ble_peers = {peer.label: peer for peer in peers}
+        self.ble_picker["values"] = list(self.ble_peers)
+        # Do not auto-select the strongest nearby device; it may be unrelated.
+        self.status_line.set(f"找到 {len(peers)} 个蓝牙设备，请选择你们的模块后连接。" if peers else
+                             "未发现设备。请检查蓝牙、模块供电及是否已被其他设备连接，再重新扫描。")
+
     def connect(self):
-        if self.session and self.session.is_alive():
+        if self.closing or self.ble_scan is not None or self.session and self.session.is_alive():
             return
         demo = self.mode_choice.get().startswith("Demo")
-        if not demo and not self.port_choice.get().strip():
+        ble = self.mode_choice.get() == "BLE 蓝牙"
+        peer = self.ble_peers.get(self.ble_choice.get()) if ble else None
+        if ble and peer is None:
+            messagebox.showinfo("选择蓝牙设备", "请先扫描，再选择你们的蓝牙模块。", parent=self.root)
+            return
+        if not demo and not ble and not self.port_choice.get().strip():
             messagebox.showinfo("选择串口", "请先选择或输入 FPGA 的 COM 端口。", parent=self.root)
             return
         baud = 115200  # Demo has no physical UART and does not use this field.
-        if not demo:
+        if not demo and not ble:
             try:
                 value = self.baud_choice.get().strip()
                 if not value.isascii() or not value.isdecimal():
@@ -630,7 +699,10 @@ class App:
             self.status_line.set("Demo 阵列参数无效，请检查行列数和间距。")
             return
         self.hardware_line.set("等待设备报告实际阵列；软件最大容量不代表已安装数量")
-        self.session = Session(demo, self.port_choice.get().strip(), baud, demo_array=demo_array)
+        if ble:
+            self.session = Session(demo=False, ble_device=peer.device, ble_profile=self.ble_profile)
+        else:
+            self.session = Session(demo, self.port_choice.get().strip(), baud, demo_array=demo_array)
         self.session.start()
         self.update_controls()
 
@@ -774,6 +846,7 @@ class App:
     def tick(self):
         if self.closing:
             return
+        self._pump_ble_scan()
         if self.session:
             for _ in range(150):
                 try:
@@ -783,6 +856,8 @@ class App:
                 kind = event["kind"]
                 if kind in ("tx", "rx", "error", "warning", "rejected", "opening"):
                     self.log(kind, event.get("text", ""))
+                if kind == "opening":
+                    self.status_line.set(event["text"])
                 if kind == "ready":
                     self.ready = True
                     self.hardware = event["array"]
@@ -857,7 +932,7 @@ class App:
             if self.tabs.index(self.tabs.select()) == 4:
                 self.render_log()
             self.last_log_refresh = time.monotonic()
-        self.root.after(80, self.tick)
+        self.tick_id = self.root.after(80, self.tick)
 
     def update_controls(self):
         self.update_file_line()
@@ -866,7 +941,8 @@ class App:
         remote = fresh and self.state.mode == "REMOTE"
         idle = fresh and self.state.state == "IDLE"
         free = not self.busy and self.await_revision is None
-        for button, enabled in ((self.connect_button,not alive), (self.disconnect_button,alive),
+        scanning = self.ble_scan is not None
+        for button, enabled in ((self.connect_button,not alive and not scanning), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
                                 (self.remote_button,idle and free), (self.copy_button,fresh),
                                 (self.start_button,self.can_play()),
@@ -881,14 +957,33 @@ class App:
         play_label = "继续播放" if fresh and self.state.state == "PAUSED" else "播放"
         self.start_button.configure(text=play_label)
         self.playback.play_button.configure(text=play_label)
-        self.connection_picker.configure(state="disabled" if alive else "readonly")
+        self.connection_picker.configure(state="disabled" if alive or scanning else "readonly")
         serial_selected = self.mode_choice.get() == "真实串口"
+        ble_selected = self.mode_choice.get() == "BLE 蓝牙"
+        demo_selected = self.mode_choice.get().startswith("Demo")
+        if self.connection_layout != self.mode_choice.get():
+            self.serial_options.grid_remove()
+            self.ble_options.grid_remove()
+            if ble_selected:
+                self.ble_options.grid(row=0, column=1, sticky="ew")
+            elif serial_selected:
+                self.serial_options.grid(row=0, column=1, sticky="w")
+            self.connection_layout = self.mode_choice.get()
+        self.connection_hint.set("先扫描并选择你们的蓝牙模块；连接后需由设备确认。" if ble_selected else
+                                 "波特率可输入，需与板端一致。" if serial_selected else
+                                 "无硬件演示：连接后先发送图形，再播放。")
+        self.protocol_label.configure(text="HAP3 草案 · BLE GATT" if ble_selected else
+                                      "HAP3 草案 · 串口 8N1" if serial_selected else "HAP3 草案 · 内存模拟")
         self.port_picker.configure(state="normal" if not alive and serial_selected else "disabled")
         self.baud_picker.configure(state="normal" if not alive and serial_selected else "disabled")
         self.refresh_button.configure(state="normal" if not alive else "disabled")
-        self.demo_array_picker.configure(state="readonly" if not alive and not serial_selected else "disabled")
+        self.ble_picker.configure(state="readonly" if not alive and not scanning else "disabled")
+        self.scan_button.configure(state="disabled" if alive else "normal",
+                                   text="取消扫描" if scanning else "扫描设备")
+        self.ble_settings_button.configure(state="disabled" if alive or scanning else "normal")
+        self.demo_array_picker.configure(state="readonly" if not alive and demo_selected else "disabled")
         for entry in self.hw_entries:
-            entry.configure(state="normal" if not alive and not serial_selected else "disabled")
+            entry.configure(state="normal" if not alive and demo_selected else "disabled")
         self.editor.apply_button.configure(state="normal" if remote and idle and free and "SCAN_PATHS" in self.capabilities else "disabled")
         demo_live = self.ready and self.session and self.session.is_demo
         for button in self.demo_buttons:
@@ -942,7 +1037,8 @@ class App:
                         "PAUSE": "正在等待设备暂停…", "STOP": "正在等待设备停止…"}.get(action, "正在等待设备确认…")
         if fresh and self.state.mode == "LOCAL":
             feedback = "设备按键控制中；电脑显示设备返回的播放状态。"
-        self.playback.update_state(self.state, fresh, feedback)
+        self.playback.update_state(self.state, fresh, feedback,
+                                   self.session.connection_label if self.session else "")
         self.preset_preview.apply_button.configure(state=self.apply_button["state"])
 
     def draft_signature(self):
@@ -1104,12 +1200,16 @@ class App:
         if not self.confirm_replace_draft("关闭"):
             return
         self.closing=True
+        self.root.after_cancel(self.tick_id)
+        if self.ble_scan is not None:
+            self.ble_scan.cancel()
         if self.session:
             self.session.close()
         self.executor.shutdown(wait=False,cancel_futures=True)
-        deadline=time.monotonic()+1.5
+        deadline=time.monotonic()+4.5
         def finish():
-            if self.session and self.session.is_alive() and time.monotonic()<deadline:
+            working = (self.session and self.session.is_alive()) or (self.ble_scan and self.ble_scan.is_alive())
+            if working and time.monotonic()<deadline:
                 self.root.after(50,finish)
             else:
                 self.root.destroy()
