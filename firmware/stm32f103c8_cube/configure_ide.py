@@ -1,20 +1,85 @@
 """Restore application build options after CubeMX regenerates IDE metadata."""
 import argparse
+import copy
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import zlib
 
 ROOT = Path(__file__).resolve().parent
 NAME = "haptics_f103c8"
 BASE = "com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c."
 
 
-def configure_run():
+def configure_profiles(root):
+    """All IDE builds follow firmware_mode.h, including legacy profile names."""
+    settings = root.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']")
+    debug = next(c for c in settings.findall("cconfiguration")
+                 if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == "Debug")
+    for mode, description in (("ChannelTest", "Legacy build directory; mode selected in firmware_mode.h"),
+                              ("PinTest", "Legacy build directory; mode selected in firmware_mode.h")):
+        channel = next((c for c in settings.findall("cconfiguration")
+                        if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == mode), None)
+        if channel is not None:
+            continue
+        channel = copy.deepcopy(debug)
+        ids = {}
+        for element in channel.iter():
+            old = element.get("id")
+            if old and element.tag != "extension":
+                base = old.rstrip(".").rsplit(".", 1)[0]
+                ids[old] = base+"."+str(zlib.crc32((old+mode).encode("utf-8")))
+        for element in channel.iter():
+            for key, value in list(element.attrib.items()):
+                # Replace references as well as IDs, including folderInfo's final dot.
+                for old in sorted(ids, key=len, reverse=True):
+                    if value == old:
+                        value = ids[old]
+                        break
+                element.set(key, value)
+        channel.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").set("name", mode)
+        channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set("name", mode)
+        channel.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set(
+            "description", description)
+        for builder in channel.iter("builder"):
+            builder.set("buildPath", "${workspace_loc:/"+NAME+"}/"+mode)
+        settings.append(channel)
+    for config in settings.findall("cconfiguration"):
+        mode = config.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")
+        if mode in ("ChannelTest", "PinTest"):
+            config.find("storageModule[@moduleId='cdtBuildSystem']/configuration").set(
+                "description", "Legacy build directory; mode selected in firmware_mode.h")
+        for option in config.iter("option"):
+            if option.get("superClass") == BASE+"compiler.option.definedsymbols":
+                # The header is the sole user-facing mode/channel selection.
+                # Also migrate old launch defaults so they cannot override it.
+                for item in list(option):
+                    if item.get("value", "").split("=", 1)[0] in (
+                            "F103_CHANNEL_TEST", "F103_PIN_TEST", "F103_FIRMWARE_MODE",
+                            "F103_PIN_TEST_CHANNEL", "F103_PIN_TEST_ON_MS",
+                            "F103_GROUP_TEST", "F103_FIXED_TEST", "F103_GROUP_TEST_MASK",
+                            "F103_GROUP_TEST_FIRST_CHANNEL", "F103_GROUP_TEST_LAST_CHANNEL",
+                            "F103_GROUP_TEST_EFFECTIVE_MASK",
+                            "F103_GROUP_TEST_ON_MS", "F103_FIXED_TEST_MASK", "F103_FIXED_TEST_ON_MS",
+                            "F103_BUSINESS_SHAPE", "F103_BUSINESS_X_UM", "F103_BUSINESS_Y_UM",
+                            "F103_BUSINESS_Z_UM", "F103_BUSINESS_MOD_HZ", "F103_BUSINESS_LEVEL",
+                            "F103_AUTOSTART_MS", "F103_AUTO_RUN_LIMIT_MS"):
+                        option.remove(item)
+        for chain in config.iter("toolChain"):
+            for option in chain.findall("option"):
+                if option.get("superClass") == "com.st.stm32cube.ide.mcu.gnu.managedbuild.option.runtimelibrary_c":
+                    option.set("id", option.get("superClass")+"."+chain.get("id").rsplit(".", 1)[-1])
+
+
+def configure_run(profile="Debug"):
     """Restore the green Run button after CubeMX creates its ST-only launch."""
-    configuration = next(ET.parse(ROOT / ".cproject").getroot().iter("cconfiguration"))
+    configuration = next(c for c in ET.parse(ROOT / ".cproject").getroot().iter("cconfiguration")
+                         if c.find("storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name") == profile)
+    local_config = {"Debug": "haptics_run.local.cfg", "ChannelTest": "haptics_channel_test.local.cfg",
+                    "PinTest": "haptics_pin_test.local.cfg"}[profile]
     launch = ET.Element("launchConfiguration", type="org.eclipse.cdt.launch.applicationLaunchType")
     attributes = (
         ("string", "org.eclipse.cdt.launch.PROGRAM_NAME", "${stm32cubeide_openocd_path}/openocd.exe"),
-        ("string", "org.eclipse.cdt.launch.PROGRAM_ARGUMENTS", "-f haptics_run.local.cfg"),
+        ("string", "org.eclipse.cdt.launch.PROGRAM_ARGUMENTS", "-f "+local_config),
         ("string", "org.eclipse.cdt.launch.PROJECT_ATTR", NAME),
         ("string", "org.eclipse.cdt.launch.WORKING_DIRECTORY", "${workspace_loc:/"+NAME+"}"),
         ("int", "org.eclipse.cdt.launch.ATTR_BUILD_BEFORE_LAUNCH_ATTR", "1"),
@@ -23,15 +88,20 @@ def configure_run():
     )
     for kind, key, value in attributes:
         ET.SubElement(launch, kind+"Attribute", key=key, value=value)
-    for key, value in (
+    mappings = [
         ("org.eclipse.debug.core.MAPPED_RESOURCE_PATHS", "/"+NAME),
         ("org.eclipse.debug.core.MAPPED_RESOURCE_TYPES", "4"),
-        ("org.eclipse.debug.ui.favoriteGroups", "org.eclipse.debug.ui.launchGroup.run"),
-    ):
+    ]
+    # The ordinary and legacy Run entries all follow the shared mode header.
+    # Retain old names for existing toolbar defaults, without adding favorites.
+    if profile == "Debug":
+        mappings.append(("org.eclipse.debug.ui.favoriteGroups", "org.eclipse.debug.ui.launchGroup.run"))
+    for key, value in mappings:
         field = ET.SubElement(launch, "listAttribute", key=key)
         ET.SubElement(field, "listEntry", value=value)
     ET.indent(launch)
-    (ROOT / (NAME+".launch")).write_text(
+    launch_name = {"Debug": NAME, "ChannelTest": NAME+" Channel Test", "PinTest": NAME+" Pin Test"}[profile]
+    (ROOT / (launch_name+".launch")).write_text(
         '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
         + ET.tostring(launch, encoding="unicode")+"\n", encoding="utf-8")
 
@@ -60,18 +130,21 @@ def configure_debug(ide_root):
             raise SystemExit("Unsupported character in tool/project path: " + value)
         return "{" + value + "}"
 
-    (ROOT / "haptics_run.local.cfg").write_text(
-        f"add_script_search_dir {tcl_path(scripts[-1])}\n"
-        f"source {tcl_path(ROOT / (NAME + '.cfg'))}\n"
-        "gdb_port disabled\ntcl_port disabled\ntelnet_port disabled\n"
-        f"set elf {tcl_path(ROOT / 'Debug' / (NAME + '.elf'))}\n"
-        f"set image {tcl_path(ROOT / 'Debug' / (NAME + '.flash.bin'))}\n"
-        "if {![file exists $elf]} { error {Build the Debug configuration first.} }\n"
-        f"exec {tcl_path(objcopies[-1])} -O binary --gap-fill 0xff $elf $image\n"
-        "if {[file size $image] <= 0 || [file size $image] > 0xfc00} {\n"
-        "    error {Firmware exceeds the 63 KB application area; boot journal preserved.}\n"
-        "}\n"
-        "program $image verify reset exit 0x08000000\n", encoding="utf-8")
+    for profile, filename in (("Debug", "haptics_run.local.cfg"),
+                              ("ChannelTest", "haptics_channel_test.local.cfg"),
+                              ("PinTest", "haptics_pin_test.local.cfg")):
+        (ROOT / filename).write_text(
+            f"add_script_search_dir {tcl_path(scripts[-1])}\n"
+            f"source {tcl_path(ROOT / (NAME + '.cfg'))}\n"
+            "gdb_port disabled\ntcl_port disabled\ntelnet_port disabled\n"
+            f"set elf {tcl_path(ROOT / profile / (NAME + '.elf'))}\n"
+            f"set image {tcl_path(ROOT / profile / (NAME + '.flash.bin'))}\n"
+            f"if {{![file exists $elf]}} {{ error {{Build the {profile} configuration first.}} }}\n"
+            f"exec {tcl_path(objcopies[-1])} -O binary --gap-fill 0xff $elf $image\n"
+            "if {[file size $image] <= 0 || [file size $image] > 0xfc00} {\n"
+            "    error {Firmware exceeds the 63 KB application area; boot journal preserved.}\n"
+            "}\n"
+            "program $image verify reset exit 0x08000000\n", encoding="utf-8")
 
 
 def main():
@@ -96,6 +169,7 @@ def main():
                 option.set("id", key+"."+chain.get("id").rsplit(".", 1)[-1])
                 option.set("valueType", "enumerated")
                 option.set("value", key+".value.nano_c")
+            configure_profiles(root)
             for option in root.iter("option"):
                 super_class = option.get("superClass", "")
                 if super_class == BASE+"compiler.option.optimization.level":
@@ -122,6 +196,8 @@ def main():
             prolog += '<?fileVersion 4.0.0?>\n'
         path.write_text(prolog+ET.tostring(root,encoding="unicode"),encoding="utf-8")
     configure_run()
+    configure_run("ChannelTest")
+    configure_run("PinTest")
     if args.cubeide:
         configure_debug(args.cubeide)
 

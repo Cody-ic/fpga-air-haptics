@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<launchConfiguration type="org.eclipse.cdt.launch.applicationLaunchType">
+  <stringAttribute key="org.eclipse.cdt.launch.PROGRAM_NAME" value="${stm32cubeide_openocd_path}/openocd.exe" />
+  <stringAttribute key="org.eclipse.cdt.launch.PROGRAM_ARGUMENTS" value="-f haptics_pin_test.local.cfg" />
+  <stringAttribute key="org.eclipse.cdt.launch.PROJECT_ATTR" value="haptics_f103c8" />
+  <stringAttribute key="org.eclipse.cdt.launch.WORKING_DIRECTORY" value="${workspace_loc:/haptics_f103c8}" />
+  <intAttribute key="org.eclipse.cdt.launch.ATTR_BUILD_BEFORE_LAUNCH_ATTR" value="1" />
+  <booleanAttribute key="org.eclipse.cdt.launch.PROJECT_BUILD_CONFIG_AUTO_ATTR" value="false" />
+  <stringAttribute key="org.eclipse.cdt.launch.PROJECT_BUILD_CONFIG_ID_ATTR" value="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.239816890" />
+  <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
+    <listEntry value="/haptics_f103c8" />
+  </listAttribute>
+  <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_TYPES">
+    <listEntry value="4" />
+  </listAttribute>
+</launchConfiguration>

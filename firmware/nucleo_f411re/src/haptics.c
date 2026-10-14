@@ -277,20 +277,45 @@ static void process(Device *d)
     }
     const char *error = NULL;
     if (!strcmp(verb,"HELLO") && !n) {
+#if defined(F103_CHANNEL_TEST) && F103_CHANNEL_TEST
+        /* Diagnosis owns its sequence; observing it must not reset a channel. */
+        d->connected = true; d->last_ping_ms = d->now_ms;
+#else
         /* A new handshake is a new control session, never an implicit resume. */
         if (!d->local) stop(d,"NONE");
         d->configured = false; d->connected = true; d->last_ping_ms = d->now_ms;
+#endif
         if (d->capture_seq && d->hw.capture_cancel) d->hw.capture_cancel();
         d->capture_seq = 0;
         begin("ACK",(unsigned)seq,verb);
+#if defined(F103_CHANNEL_TEST) && F103_CHANNEL_TEST
+        append(" proto=3 device=%s boot=%s simulated=0 hb_ms=3000 profile=CHANNEL_TEST caps=STOP,STATE,PHASE,GEOMETRY max_rows=16 max_cols=16 max_channels=16 max_nodes=64 max_scan_points=%u max_strokes=%u",HAP_DEVICE_NAME,d->boot,HAP_POINTS,HAP_STROKES);
+#else
         append(" proto=3 device=%s boot=%s simulated=0 hb_ms=3000 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION max_rows=16 max_cols=16 max_channels=16 max_nodes=64 max_scan_points=%u max_strokes=%u",HAP_DEVICE_NAME,d->boot,HAP_POINTS,HAP_STROKES);
+#endif
         array_fields();
         if (d->hw.capture_start && d->hw.capture_poll && d->hw.capture_cancel)
             append(" adc_capture=1");
         append(" x_min_um=-100000 x_max_um=100000 y_min_um=-100000 y_max_um=100000 z_min_um=20000 z_max_um=300000 carrier_hz=40000 phase_steps=64 focus_hz=%u",1000000u/HAP_FOCUS_US);
+#ifdef F103_FIRMWARE_MODE
+        append(" fw_id=F103_SERIAL_20261010 firmware_mode=%u", F103_FIRMWARE_MODE);
+#if F103_PIN_TEST
+        append(" pin_channel=%u on_ms=%lu", F103_PIN_TEST_CHANNEL,
+               (unsigned long)F103_PIN_TEST_ON_MS);
+#elif F103_GROUP_TEST
+        append(" group_first=%u group_last=%u group_mask=%u on_ms=%lu",
+               (unsigned)F103_GROUP_TEST_FIRST_CHANNEL, (unsigned)F103_GROUP_TEST_LAST_CHANNEL,
+               (unsigned)F103_GROUP_TEST_EFFECTIVE_MASK,
+               (unsigned long)F103_GROUP_TEST_ON_MS);
+#endif
+#endif
         send_frame(d); snapshot(d); return;
     }
     if (!d->connected) error = "HANDSHAKE_REQUIRED";
+#if defined(F103_CHANNEL_TEST) && F103_CHANNEL_TEST
+    else if (strcmp(verb,"PING") && strcmp(verb,"SNAP") && strcmp(verb,"STOP") &&
+             strcmp(verb,"GEOMETRY") && strcmp(verb,"CAPTURE")) error = "CHANNEL_TEST_ONLY";
+#endif
     else if (!strcmp(verb,"GEOMETRY")) {
         int32_t start, count;
         if (n != 2 || !integer(get(fields,n,"start"),0,15,&start) ||

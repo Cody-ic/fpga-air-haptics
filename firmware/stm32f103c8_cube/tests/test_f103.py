@@ -34,7 +34,7 @@ class F103Tests(unittest.TestCase):
         output.mkdir(exist_ok=True)
         library = output / ("test_f103.dll" if os.name == "nt" else "test_f103.so")
         subprocess.run([compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror","-shared","-fPIC",
-            "-ICore/Inc","Core/Src/haptics.c","Core/Src/geometry.c","Core/Src/wave_f103.c",
+            "-DF103_FIRMWARE_MODE=0","-ICore/Inc","Core/Src/haptics.c","Core/Src/geometry.c","Core/Src/wave_f103.c",
             "tests/harness.c","-lm","-static-libgcc","-o",str(library.relative_to(ROOT))],cwd=ROOT,check=True)
         cls.dll=ct.CDLL(str(library))
         cls.dll.test_feed.argtypes=(ct.c_char_p,ct.c_size_t,ct.c_uint64)
@@ -49,6 +49,7 @@ class F103Tests(unittest.TestCase):
         cls.half_us=cls.dll.test_half_us()
         cls.dll.test_wave.argtypes=(ct.c_uint64,ct.POINTER(ct.c_uint16),ct.POINTER(ct.c_uint16),
                                    ct.c_uint16,ct.POINTER(Sample))
+        cls.dll.test_static_focus.argtypes=cls.dll.test_wave.argtypes
 
     def setUp(self):
         self.dll.test_init()
@@ -83,6 +84,30 @@ class F103Tests(unittest.TestCase):
         words_b,words_a,sample=self.ports(us)
         # Reconstruct logical channels from physical PB pins and PA8.
         return [b|(((a>>8)&1)<<2) for b,a in zip(words_b,words_a)],sample
+
+    def reference_wave(self, config, sample, start_us, mask=0xffff):
+        # Independent per-channel edge state machine; not cached carrier copies.
+        high = [False]*16
+        words = []
+        for index in range(self.half_words):
+            cycle, slot = divmod(index, 64)
+            time_us = start_us + cycle*25
+            density = ((time_us//25 % 100)*config.level) % 100 + config.level >= 100
+            modulation = not config.mod_hz or ((time_us % 1000000)*config.mod_hz) % 1000000 < 500000
+            enabled = sample.scan_on and config.level > 0 and density and modulation
+            for channel, phase in enumerate(sample.phases):
+                position = (slot + phase) % 64
+                if not cycle or not mask & (1 << channel) or position == 32:
+                    high[channel] = False
+                elif position == 0:
+                    high[channel] = enabled
+            words.append(sum(1 << ch for ch, value in enumerate(high) if value))
+        return words
+
+    def assert_cycle_readback(self, words):
+        expected = sum(1 << cycle for cycle in range(self.half_words//64)
+                       if any(words[cycle*64:(cycle+1)*64]))
+        self.assertEqual(self.dll.test_active_cycles(), expected)
 
     def test_limits_and_handshake(self):
         fields=self.command("HELLO")[0].fields
@@ -135,9 +160,11 @@ class F103Tests(unittest.TestCase):
         expected=tuple(focus_phases(Config(shape="POINT",level=100,mod_hz=0),(0,0,150),self.array))
         self.assertEqual(tuple(sample.phases),expected)
         for channel,phase in enumerate(sample.phases):
-            bits=[(w>>channel)&1 for w in words[64:128]]
+            bits=[(w>>channel)&1 for w in words[128:192]]
             self.assertEqual(sum(bits),32)
             self.assertEqual(bits,[int(((slot+phase)&63)<32) for slot in range(64)])
+        self.assertEqual(words,self.reference_wave(Config(shape="POINT",level=100,mod_hz=0),sample,0))
+        self.assert_cycle_readback(words)
 
     def test_modulation_level_channel_mask_and_blanking(self):
         c=Config(shape="POINT",level=100,mod_hz=0)
@@ -174,7 +201,7 @@ class F103Tests(unittest.TestCase):
                 self.assertTrue(all(a&~0x100 == baseline for a in words_a))
                 self.assertEqual(words_b[:64],[0]*64)
                 self.assertEqual(words_a[:64],[baseline]*64)
-                bits=[(a>>8)&1 for a in words_a[64:128]]
+                bits=[(a>>8)&1 for a in words_a[128:192]]
                 expected=[int(bool(mask&4) and ((slot+sample.phases[2])&63)<32)
                           for slot in range(64)]
                 self.assertEqual(bits,expected)
@@ -204,20 +231,81 @@ class F103Tests(unittest.TestCase):
                 for offset in (0, self.half_us, 2*self.half_us):
                     us = start + offset
                     words_b, words_a, sample = self.ports(us)
-                    for cycle in range(self.half_words // 64):
-                        time_us = us + cycle*25
-                        index = time_us // 25
-                        density = ((index % 100)*level) % 100 + level >= 100
-                        modulation = not mod_hz or ((time_us % 1000000)*mod_hz) % 1000000 < 500000
-                        on = cycle > 0 and level > 0 and density and modulation
-                        for slot in range(64):
-                            logical = 0
-                            if on:
-                                logical = sum(1 << ch for ch, phase in enumerate(sample.phases)
-                                              if ((slot + phase) & 63) < 32)
-                            k = cycle*64 + slot
-                            self.assertEqual(words_b[k], logical & 0xfffb)
-                            self.assertEqual(words_a[k], 0xe0 | (0x100 if logical & 4 else 0))
+                    reference = self.reference_wave(c,sample,us)
+                    self.assertEqual(words_b,[w & 0xfffb for w in reference])
+                    self.assertEqual(words_a,[0xe0 | (0x100 if w & 4 else 0) for w in reference])
+                    self.assert_cycle_readback(reference)
+
+    def test_all_phase_enables_start_only_at_natural_rising_edges(self):
+        # Sweep all phases, including the old short 58/39-slot PB0 intervals.
+        point = Config(shape="POINT",level=100,mod_hz=0)
+        self.configure(point)
+        initial = Sample()
+        self.dll.test_geometry(0,ct.byref(initial))
+        self.dll.test_phase(ct.byref(initial))
+        nominal = list(initial.phases)
+        for level, mod in ((100,0),(30,200),(73,997),(1,1000),(0,0)):
+            c = replace(point,level=level,mod_hz=mod)
+            self.configure(c)
+            for phase in range(64):
+                offsets = ",".join(str((phase-p)%64) for p in nominal)
+                result = self.command("CALIBRATION",action="store",mask=0xffff,offsets=offsets,
+                                      geometry_id=self.array.resolved_geometry().identity)
+                self.assertEqual(result[0].kind,"ACK",result)
+                self.dll.test_reset_wave()
+                stream = []
+                for us in (0,250,2500,999750):
+                    words,sample = self.wave(us)
+                    self.assertEqual(list(sample.phases),[phase]*16)
+                    self.assertEqual(words,self.reference_wave(c,sample,us))
+                    self.assert_cycle_readback(words)
+                    if us <= 250:
+                        stream += words
+                rises = [i for i,w in enumerate(stream) if w & 1 and (i==0 or not stream[i-1]&1)]
+                self.assertTrue(all(b-a >= 64 for a,b in zip(rises,rises[1:])),(phase,level,mod))
+
+    def test_scanned_circle_has_no_subperiod_rising_edges(self):
+        # This is the real default configuration, tested as a digital stream.
+        c = Config(shape="CIRCLE",level=30,mod_hz=200)
+        self.configure(c)
+        last_rise = [-64]*16
+        previous = 0
+        for us in range(0,2000000,self.half_us):
+            words,sample = self.wave(us)
+            self.assert_cycle_readback(words)
+            for slot,value in enumerate(words):
+                rising = value & ~previous
+                index = us//25*64 + slot
+                while rising:
+                    bit = rising & -rising
+                    channel = bit.bit_length()-1
+                    self.assertGreaterEqual(index-last_rise[channel],64,(us,channel,sample.phases[channel]))
+                    last_rise[channel] = index
+                    rising ^= bit
+                previous = value
+
+    def test_guard_resets_phase_and_can_truncate_final_pulse(self):
+        c = Config(shape="POINT",level=100,mod_hz=0)
+        self.configure(c)
+        sample = Sample()
+        self.dll.test_geometry(0,ct.byref(sample))
+        self.dll.test_phase(ct.byref(sample))
+        nominal = list(sample.phases)
+        stream = []
+        for us, phase in ((0,1),(250,63),(500,25),(750,6)):
+            self.assertEqual(self.command("CALIBRATION",action="trial",mask=1,
+                offsets=",".join(str((phase-p)%64) for p in nominal),
+                geometry_id=self.array.resolved_geometry().identity)[0].kind,"ACK")
+            self.dll.test_reset_wave()
+            words,sample = self.wave(us)
+            self.assertEqual(list(sample.phases),[phase]*16)
+            self.assertEqual(words[:64],[0]*64)
+            if us == 0:
+                # Explicit exception: the guard cuts this final pulse after one slot.
+                self.assertEqual(words[-2:],[0,1])
+            stream += words
+        rises = [i for i,w in enumerate(stream) if w and (i==0 or not stream[i-1])]
+        self.assertTrue(all(b-a >= 64 for a,b in zip(rises,rises[1:])))
 
     def test_integer_phase_against_double_precision_reference(self):
         self.configure(Config(shape="POINT"))
@@ -292,8 +380,78 @@ class F103Tests(unittest.TestCase):
         subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
             "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
             "-ffunction-sections","-fdata-sections",
-            "-DSTM32F103xB","-DUSE_HAL_DRIVER",*("-I"+p for p in includes),
+            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=0",
+            "-DF103_AUTO_RUN_LIMIT_MS=10000",*("-I"+p for p in includes),
             "tests/wave_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+            "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+            "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+        subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_static_focus_phases_carrier_and_calibration(self):
+        for x,y,z in ((0,0,150000),(3000,-4000,50000),(-55000,37000,230000)):
+            c=Config(shape="POINT",level=100,mod_hz=0,cx_um=x,cy_um=y,z_um=z)
+            self.configure(c)
+            nominal=focus_phases(c,(x/1000,y/1000,z/1000),self.array)
+            for phase in range(64):
+                offsets=tuple((phase+i-p)%64 for i,p in enumerate(nominal))
+                mask=0xffff if phase % 2 else 4
+                self.assertEqual(self.command("CALIBRATION",action="trial",mask=mask,
+                    offsets=",".join(map(str,offsets)),
+                    geometry_id=self.array.resolved_geometry().identity)[0].kind,"ACK")
+                a=(ct.c_uint16*64)(); b=(ct.c_uint16*64)(); sample=Sample()
+                self.dll.test_static_focus(123456789000,b,a,0xa5e7,ct.byref(sample))
+                expected=tuple((p+o)%64 for p,o in zip(nominal,offsets))
+                self.assertEqual(tuple(sample.phases),expected)
+                self.assertEqual((sample.x_um,sample.y_um,sample.z_um),(x,y,z))
+                words=[v | (4 if other & 0x100 else 0) for v,other in zip(b,a)]
+                self.assertTrue(all(other & ~0x100 == 0xa5e7 & ~0x100 for other in a))
+                self.assertTrue(all(v & 4 == 0 for v in b))
+                for channel,p in enumerate(expected):
+                    signal=[int(bool(mask & (1<<channel)) and (slot+p)%64 < 32)
+                            for slot in range(64)]
+                    self.assertEqual([(v>>channel)&1 for v in words],signal)
+                    self.assertEqual(sum(signal),32 if mask & (1<<channel) else 0)
+
+    def test_business_focus_driver_and_macro_defaults(self):
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        for index,extra in enumerate(((),("-DF103_AUTO_RUN_LIMIT_MS=10000",),
+                ("-DF103_BUSINESS_X_UM=3000","-DF103_BUSINESS_Y_UM=-4000","-DF103_BUSINESS_Z_UM=50000"))):
+            executable=ROOT/"build"/(f"test_business_focus_{index}.exe" if os.name=="nt" else f"test_business_focus_{index}")
+            subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+                "-ffunction-sections","-fdata-sections",
+                "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=0",
+                *extra,*("-I"+p for p in includes),
+                "tests/business_focus_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+                "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+                "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+            subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_invalid_business_macro_parameters(self):
+        for define in ("F103_BUSINESS_X_UM=-100001","F103_BUSINESS_Y_UM=100001",
+                "F103_BUSINESS_Z_UM=19999","F103_BUSINESS_Z_UM=300001",
+                "F103_BUSINESS_LEVEL=-1","F103_BUSINESS_LEVEL=101",
+                "F103_BUSINESS_MOD_HZ=-1","F103_BUSINESS_MOD_HZ=1001",
+                "F103_AUTO_RUN_LIMIT_MS=-1","F103_AUTOSTART_MS=2147483648",
+                "F103_BUSINESS_SHAPE=CUSTOM"):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                "-DF103_FIRMWARE_MODE=0","-D"+define,"tests/harness.c"],
+                cwd=ROOT,capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0,define)
+            self.assertTrue("#error" in result.stderr or "static assertion" in result.stderr,result.stderr)
+
+    def test_channel_diagnostic_profile(self):
+        executable=ROOT/"build"/("test_channel_driver.exe" if os.name == "nt" else "test_channel_driver")
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+            "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+            "-ffunction-sections","-fdata-sections",
+            "-DSTM32F103xB","-DUSE_HAL_DRIVER","-DF103_FIRMWARE_MODE=1",*("-I"+p for p in includes),
+            "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
             "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
             "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
         subprocess.run([str(executable)],cwd=ROOT,check=True)
@@ -309,6 +467,107 @@ class F103Tests(unittest.TestCase):
         self.assertEqual(capture.fs_hz,400000)
         snap=Snapshot.parse(self.command("SNAP")[1].fields)
         self.assertEqual(snap.uptime_ms,self.now)
+
+    def test_fixed_pin_profile_and_parameterized_pa8_mapping(self):
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        for label, extra in (("pb11",()),
+                             ("pb10",("-DF103_PIN_TEST_CHANNEL=10","-DF103_PIN_TEST_ON_MS=10000")),
+                             ("pa8",("-DF103_PIN_TEST_CHANNEL=2","-DF103_PIN_TEST_ON_MS=1500")),
+                             ("pa8_continuous",("-DF103_PIN_TEST_CHANNEL=2","-DF103_PIN_TEST_ON_MS=0")),
+                             ("pb11_short",("-DF103_PIN_TEST_ON_MS=1",)),
+                             ("pb11_long",("-DF103_PIN_TEST_ON_MS=0x7fffffffu",))):
+            executable=ROOT/"build"/("test_pin_"+label+(".exe" if os.name=="nt" else ""))
+            subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+                "-ffunction-sections","-fdata-sections","-DSTM32F103xB","-DUSE_HAL_DRIVER",
+                "-DF103_FIRMWARE_MODE=2",*extra,*("-I"+p for p in includes),
+                "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+                "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+                "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+            subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_invalid_pin_profile_parameters_fail_before_build(self):
+        for extra in (("-DF103_PIN_TEST_CHANNEL=-1",),("-DF103_PIN_TEST_CHANNEL=16",),
+                      ("-DF103_PIN_TEST_ON_MS=-1",),("-DF103_PIN_TEST_ON_MS=-1u",),
+                      ("-DF103_PIN_TEST_ON_MS=0x80000000u",)):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                "-DF103_FIRMWARE_MODE=2",*extra,"-x","c","-"],cwd=ROOT,
+                input='#include "app_f103.h"\n',text=True,capture_output=True)
+            self.assertNotEqual(result.returncode,0,extra)
+            self.assertIn("PinTest",result.stderr)
+
+    def test_group_profile_simultaneous_channels_and_pa8_mapping(self):
+        includes=("Core/Inc","Drivers/STM32F1xx_HAL_Driver/Inc",
+                  "Drivers/STM32F1xx_HAL_Driver/Inc/Legacy",
+                  "Drivers/CMSIS/Device/ST/STM32F1xx/Include","Drivers/CMSIS/Include")
+        for label, extra in (("range_8_13",()),
+                             ("range_8_13_timed",("-DF103_GROUP_TEST_ON_MS=2000",)),
+                             ("range_pa8_pb3",("-DF103_GROUP_TEST_FIRST_CHANNEL=2",
+                                               "-DF103_GROUP_TEST_LAST_CHANNEL=3")),
+                             ("range_pa8_pb3_timed",("-DF103_GROUP_TEST_FIRST_CHANNEL=2",
+                                                     "-DF103_GROUP_TEST_LAST_CHANNEL=3",
+                                                     "-DF103_GROUP_TEST_ON_MS=1500")),
+                             ("all_channels",("-DF103_GROUP_TEST_FIRST_CHANNEL=0",
+                                               "-DF103_GROUP_TEST_LAST_CHANNEL=15")),
+                             ("last_channel",("-DF103_GROUP_TEST_FIRST_CHANNEL=15",
+                                               "-DF103_GROUP_TEST_LAST_CHANNEL=15")),
+                             ("first_channel",("-DF103_GROUP_TEST_FIRST_CHANNEL=0",
+                                                "-DF103_GROUP_TEST_LAST_CHANNEL=0"))):
+            executable=ROOT/"build"/("test_group_"+label+(".exe" if os.name=="nt" else ""))
+            subprocess.run([self.compiler,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-Wno-pointer-to-int-cast","-Wno-int-to-pointer-cast",
+                "-ffunction-sections","-fdata-sections","-DSTM32F103xB","-DUSE_HAL_DRIVER",
+                "-DF103_FIRMWARE_MODE=3",*extra,*("-I"+p for p in includes),
+                "tests/channel_test_driver_harness.c","Core/Src/haptics.c","Core/Src/geometry.c",
+                "Core/Src/wave_f103.c","-lm","-static-libgcc","-Wl,--gc-sections",
+                "-o",str(executable.relative_to(ROOT))],cwd=ROOT,check=True)
+            subprocess.run([str(executable)],cwd=ROOT,check=True)
+
+    def test_invalid_group_profile_parameters_fail_before_build(self):
+        for extra in (("-DF103_GROUP_TEST_FIRST_CHANNEL=-1",),
+                      ("-DF103_GROUP_TEST_FIRST_CHANNEL=-1u",),
+                      ("-DF103_GROUP_TEST_LAST_CHANNEL=-1",),
+                      ("-DF103_GROUP_TEST_LAST_CHANNEL=-1u",),
+                      ("-DF103_GROUP_TEST_FIRST_CHANNEL=16",),
+                      ("-DF103_GROUP_TEST_LAST_CHANNEL=16",),
+                      ("-DF103_GROUP_TEST_FIRST_CHANNEL=13","-DF103_GROUP_TEST_LAST_CHANNEL=8"),
+                      ("-DF103_GROUP_TEST_MASK=0x3300u",),
+                      ("-DF103_GROUP_TEST_ON_MS=-1",),("-DF103_GROUP_TEST_ON_MS=-1u",),
+                      ("-DF103_GROUP_TEST_ON_MS=0x80000000u",)):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                "-DF103_FIRMWARE_MODE=3",*extra,"-x","c","-"],cwd=ROOT,
+                input='#include "app_f103.h"\n',text=True,capture_output=True)
+            self.assertNotEqual(result.returncode,0,extra)
+            self.assertIn("GroupTest",result.stderr)
+
+    def test_single_firmware_mode_selects_shared_translation_units(self):
+        # All application files include haptics.h; mode must be known before
+        # the shared protocol core, even where app_f103.h is not included.
+        for mode in (None, 0, 1, 2, 3):
+            expected=0 if mode is None else mode
+            defines=[] if mode is None else ["-DF103_FIRMWARE_MODE="+str(mode)]
+            source=(
+                '#include "haptics.h"\n'
+                '#include "app_f103.h"\n'
+                f'_Static_assert(F103_FIRMWARE_MODE=={expected}, "mode");\n'
+                f'_Static_assert(F103_CHANNEL_TEST=={int(expected!=0)}, "backend");\n'
+                f'_Static_assert(F103_PIN_TEST=={int(expected==2)}, "fixed pin");\n'
+                f'_Static_assert(F103_GROUP_TEST=={int(expected==3)}, "group");\n'
+                f'_Static_assert(F103_FIXED_TEST=={int(expected in (2,3))}, "fixed backend");\n'
+            )
+            subprocess.run([self.compiler,"-std=c11","-Wall","-Wextra","-Werror",
+                "-fsyntax-only","-ICore/Inc",*defines,"-x","c","-"],cwd=ROOT,
+                input=source,text=True,check=True)
+        for defines in (("-DF103_FIRMWARE_MODE=-1",), ("-DF103_FIRMWARE_MODE=4",),
+                        ("-DF103_FIRMWARE_MODE=-1u",), ("-DF103_CHANNEL_TEST=0",),
+                        ("-DF103_PIN_TEST=1",)):
+            result=subprocess.run([self.compiler,"-std=c11","-fsyntax-only","-ICore/Inc",
+                *defines,"-x","c","-"],cwd=ROOT,input='#include "haptics.h"\n',
+                text=True,capture_output=True)
+            self.assertNotEqual(result.returncode,0,defines)
+            self.assertIn("F103_FIRMWARE_MODE",result.stderr)
 
     def test_desktop_takeover_and_logged_adc_at_serial_wire_speed(self):
         # Actual F103 C core, with synthetic GPIO/ADC callbacks, not a board test.
