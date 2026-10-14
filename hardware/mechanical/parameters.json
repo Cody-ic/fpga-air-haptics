@@ -1,0 +1,19 @@
+{
+  "revision": "P1-20260929",
+  "array_rows": 4,
+  "array_cols": 4,
+  "pitch_mm": 11.0,
+  "body_nominal_diameter_mm": 9.9,
+  "body_nominal_height_mm": 7.1,
+  "guide_bore_mm": 10.4,
+  "guide_depth_mm": 5.0,
+  "datum_to_pcb_front_mm": 10.6,
+  "pcb_thickness_assumed_mm": 1.6,
+  "pcb_standoff_mm": 35.0,
+  "base_thickness_mm": 6.0,
+  "wrist_bolt_height_mm": 108.0,
+  "wrist_pad_assumed_mm": 3.0,
+  "mount_centers_mm": [[-32.5,32.5],[35.5,32.5],[-18.5,-43.5],[21.5,-43.5]],
+  "pcb_bounds_mm": [-38.5,-49.5,41.5,38.5],
+  "assumed_print_bed_mm": [200,200,200]
+}
