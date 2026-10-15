@@ -1,0 +1,143 @@
+{
+  "revision": "P5-20261015",
+  "acoustic_gap_mm": 70.0,
+  "pcb_thickness_mm": 1.6,
+  "tx_front_to_face_mm": 10.6,
+  "sensor_case_height_mm": 7.1,
+  "sensor_case_diameter_mm": 9.9,
+  "receiver_front_to_face_mm": 7.1,
+  "receiver_floor_mm": 4.0,
+  "receiver_underboard_clearance_mm": 12.0,
+  "receiver_clip_thickness_mm": 3.0,
+  "receiver_nut_slot_z_mm": [
+    5.8,
+    8.6
+  ],
+  "receiver_contacts_top_left_mm": [
+    [
+      27,
+      0.2,
+      33,
+      1.8
+    ],
+    [
+      45,
+      0.2,
+      51,
+      1.8
+    ],
+    [
+      9,
+      32.819,
+      15,
+      34.419
+    ],
+    [
+      47,
+      32.819,
+      53,
+      34.419
+    ]
+  ],
+  "receiver_anchors_local_mm": [
+    [
+      30,
+      4.5,
+      1
+    ],
+    [
+      48,
+      4.5,
+      1
+    ],
+    [
+      12,
+      -39.119,
+      -1
+    ],
+    [
+      50,
+      -39.119,
+      -1
+    ]
+  ],
+  "carrier_bounds_mm": [
+    -101,
+    -95,
+    81,
+    95
+  ],
+  "carrier_aperture_mm": [
+    -86,
+    -68,
+    66,
+    88
+  ],
+  "carrier_thickness_mm": 8.0,
+  "tx_front_boss_height_mm": 2.0,
+  "tx_boss_od_mm": 6.0,
+  "tx_rear_sleeve_mm": [
+    6.0,
+    5.0
+  ],
+  "body_plate_thickness_mm": 16.0,
+  "body_ledge_inner_depth_mm": 14,
+  "body_ledge_vertical_mm": 12.0,
+  "body_half_foot_length_mm": 94.0,
+  "body_placement_x_mm": [
+    -118.0,
+    98.0
+  ],
+  "body_carrier_holes_mm": [
+    [
+      -94,
+      -55
+    ],
+    [
+      -94,
+      55
+    ],
+    [
+      74,
+      -55
+    ],
+    [
+      74,
+      55
+    ]
+  ],
+  "m3_clearance_diameter_mm": 3.4,
+  "m4_clearance_diameter_mm": 4.5,
+  "tx_wired_back_clearance_mm": 50.0,
+  "receiver_test_pin_projection_assumed_mm": 8.0,
+  "assumed_print_bed_mm": [
+    200,
+    200,
+    200
+  ],
+  "print_margin_mm": 5.0,
+  "tx4": {
+    "array_center_top_left_mm": [
+      38.5,
+      38.5
+    ],
+    "rows": 4,
+    "cols": 4,
+    "pitch_mm": 11.0
+  },
+  "tx8": {
+    "array_center_top_left_mm": [
+      83.5,
+      65.5
+    ],
+    "rows": 8,
+    "cols": 8,
+    "pitch_mm": 10.3
+  },
+  "receiver": {
+    "sensor_center_top_left_mm": [
+      25.273,
+      24.491
+    ]
+  }
+}

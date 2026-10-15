@@ -1,0 +1,253 @@
+{
+  "coordinate_frame": "Top PCB view, top-left outline origin, X right, Y down, mm",
+  "receiver_contact_patches": [
+    {
+      "name": "A_upper_middle",
+      "contact_rectangle_mm": [
+        27,
+        0.2,
+        33,
+        1.8
+      ],
+      "nearest_per_side": {
+        "Top": {
+          "distance_mm": 4.226994999999999,
+          "obstacle": "C4/pad2"
+        },
+        "Bottom": {
+          "distance_mm": 12.955436387864362,
+          "obstacle": "U6/library_body"
+        }
+      }
+    },
+    {
+      "name": "B_upper_right",
+      "contact_rectangle_mm": [
+        45,
+        0.2,
+        51,
+        1.8
+      ],
+      "nearest_per_side": {
+        "Top": {
+          "distance_mm": 11.17269088761239,
+          "obstacle": "U4/library_body"
+        },
+        "Bottom": {
+          "distance_mm": 11.133999999999999,
+          "obstacle": "U8/library_body"
+        }
+      }
+    },
+    {
+      "name": "C_lower_left",
+      "contact_rectangle_mm": [
+        9,
+        32.819,
+        15,
+        34.419
+      ],
+      "nearest_per_side": {
+        "Top": {
+          "distance_mm": 6.235405762274016,
+          "obstacle": "U1/library_body"
+        },
+        "Bottom": {
+          "distance_mm": 10.234125797741987,
+          "obstacle": "U1/pad2"
+        }
+      }
+    },
+    {
+      "name": "D_lower_right",
+      "contact_rectangle_mm": [
+        47,
+        32.819,
+        53,
+        34.419
+      ],
+      "nearest_per_side": {
+        "Top": {
+          "distance_mm": 3.187002000000003,
+          "obstacle": "U9/pad1"
+        },
+        "Bottom": {
+          "distance_mm": 2.867000000000001,
+          "obstacle": "U9/library_body"
+        }
+      }
+    }
+  ],
+  "transmitter_mounts": {
+    "tx4": [
+      {
+        "hole_xy_mm": [
+          6.000001,
+          6.000001
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 15.556506164452287,
+            "obstacle": "U9/library_body",
+            "clearance_for_6mm_diameter_mm": 12.556506164452287,
+            "clearance_for_7mm_diameter_mm": 12.056506164452287
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 13.341995,
+            "obstacle": "C13/pad2",
+            "clearance_for_6mm_diameter_mm": 10.341995,
+            "clearance_for_7mm_diameter_mm": 9.841995
+          }
+        }
+      },
+      {
+        "hole_xy_mm": [
+          74.000002,
+          6.000001
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 17.80455643943881,
+            "obstacle": "U12/library_body",
+            "clearance_for_6mm_diameter_mm": 14.804556439438809,
+            "clearance_for_7mm_diameter_mm": 14.304556439438809
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 20.87050587914691,
+            "obstacle": "U8/pad1",
+            "clearance_for_6mm_diameter_mm": 17.87050587914691,
+            "clearance_for_7mm_diameter_mm": 17.37050587914691
+          }
+        }
+      },
+      {
+        "hole_xy_mm": [
+          60.000002,
+          82.000001
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 7.749893,
+            "obstacle": "R33/pad2",
+            "clearance_for_6mm_diameter_mm": 4.749893,
+            "clearance_for_7mm_diameter_mm": 4.249893
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 3.6076603335242052,
+            "obstacle": "D1/pad2",
+            "clearance_for_6mm_diameter_mm": 0.6076603335242052,
+            "clearance_for_7mm_diameter_mm": 0.10766033352420523
+          }
+        }
+      },
+      {
+        "hole_xy_mm": [
+          20.000001,
+          82.000001
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 4.610333095149743,
+            "obstacle": "U25/pad4",
+            "clearance_for_6mm_diameter_mm": 1.610333095149743,
+            "clearance_for_7mm_diameter_mm": 1.110333095149743
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 3.7250569999999996,
+            "obstacle": "F1/pad1",
+            "clearance_for_6mm_diameter_mm": 0.7250569999999996,
+            "clearance_for_7mm_diameter_mm": 0.22505699999999962
+          }
+        }
+      }
+    ],
+    "tx8": [
+      {
+        "hole_xy_mm": [
+          4.0,
+          4.0
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 17.141972174414853,
+            "obstacle": "R1/pad1",
+            "clearance_for_6mm_diameter_mm": 14.141972174414853,
+            "clearance_for_7mm_diameter_mm": 13.641972174414853
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 13.940275778836874,
+            "obstacle": "C9/pad2",
+            "clearance_for_6mm_diameter_mm": 10.940275778836874,
+            "clearance_for_7mm_diameter_mm": 10.440275778836874
+          }
+        }
+      },
+      {
+        "hole_xy_mm": [
+          137.0,
+          4.0
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 23.941779806832844,
+            "obstacle": "U13/library_body",
+            "clearance_for_6mm_diameter_mm": 20.941779806832844,
+            "clearance_for_7mm_diameter_mm": 20.441779806832844
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 28.14969077272477,
+            "obstacle": "U13/pad2",
+            "clearance_for_6mm_diameter_mm": 25.14969077272477,
+            "clearance_for_7mm_diameter_mm": 24.64969077272477
+          }
+        }
+      },
+      {
+        "hole_xy_mm": [
+          4.0,
+          147.000001
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 36.0132682376929,
+            "obstacle": "H1/pad2",
+            "clearance_for_6mm_diameter_mm": 33.0132682376929,
+            "clearance_for_7mm_diameter_mm": 32.5132682376929
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 8.725806917621417,
+            "obstacle": "R34/pad1",
+            "clearance_for_6mm_diameter_mm": 5.7258069176214175,
+            "clearance_for_7mm_diameter_mm": 5.2258069176214175
+          }
+        }
+      },
+      {
+        "hole_xy_mm": [
+          137.0,
+          147.000001
+        ],
+        "nearest_per_side": {
+          "Top": {
+            "hole_center_to_obstacle_mm": 16.017819327246546,
+            "obstacle": "U28/pad3",
+            "clearance_for_6mm_diameter_mm": 13.017819327246546,
+            "clearance_for_7mm_diameter_mm": 12.517819327246546
+          },
+          "Bottom": {
+            "hole_center_to_obstacle_mm": 14.033712925692186,
+            "obstacle": "U28/library_body",
+            "clearance_for_6mm_diameter_mm": 11.033712925692186,
+            "clearance_for_7mm_diameter_mm": 10.533712925692186
+          }
+        }
+      }
+    ]
+  },
+  "limitations": [
+    "No actual solder-fillet or lead/wire protrusion extents measured.",
+    "Footprint body extents are library drawings, not certified physical envelopes.",
+    "Distances are XY only; installed component heights remain independent assumptions.",
+    "4x4 lower Bottom mount pair should use 6mm insulating contact diameter; 7mm contact leaves only 0.108/0.225mm nominal copper clearance."
+  ]
+}
