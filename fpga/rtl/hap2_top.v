@@ -21,7 +21,7 @@ module hap2_top #(
     parameter integer        CLK_HZ       = 50_000_000,
     parameter integer        BAUD         = 115200,
     parameter integer        ADDR_W       = 13,        // 行缓冲 8192 字节
-    parameter integer        MAX_LINE     = 4096,
+    parameter integer        MAX_LINE     = 8192,
     parameter integer        HW_ROWS      = 4,
     parameter integer        HW_COLS      = 4,
     parameter integer        HW_PITCH_UM  = 11000,

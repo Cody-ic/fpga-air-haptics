@@ -1,0 +1,122 @@
+// Tang MEGA 138K Pro 物理约束（引脚绑定）
+// 板卡：Sipeed Tang MEGA 138K Pro（底板 4071f / 4071f3，核心板 4071）
+// FPGA：GW5AST-LV138FPG676A，封装 FCPBG676A（676 球），Device Version B 或 C
+// 顶层模块：board_top
+//
+// 引脚号来源（都在 docs/sipeed_ref_pro/ 里，全是官方资料）：
+//   tang_mega_138k-pro_pins.cst                       Sipeed 官方「全引脚约束」(dl.sipeed.com, 2025-11)
+//   key_led__src__key_led.cst                         官方按键+LED 例程
+//   led__src__top.cst                                 官方 LED 例程
+//   pro_dock_4071f3_schematic.pdf                     底板原理图（PMOD 连线、DEBUG-UART 连线）
+//   Tang_MEGA_138K_Pro_Pinout_Track_Length_Table.xlsx 核心板↔底板 BTB 引脚表
+//
+// ⚠️ 和 60K / 138K（非 Pro）**没有任何对应关系**：那两块的芯片是 484 球 PBGA484A，
+//    这块是 676 球 FCPBG676A，球位编号完全不同，所以这一份是照这块板子的官方资料重排的。
+//
+// ⚠️ 时钟：这块板子上 **P16 才是 50 MHz 系统时钟**（官方所有例程都用 P16 当 clk）。
+//    V22 在这块板子上是另一个 70 MHz 晶振（官方 key_led 的 sdc 把 osc_clk 写成周期 14.286 ns），
+//    所以别照抄 60K 那版「V22 = 50 MHz」的结论。
+
+// ==================== 时钟 ====================
+IO_LOC  "clk" P16;
+IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
+
+// ==================== 按键（低有效，开内部上拉）====================
+// 官方全引脚表里三个用户键是 K16 / G15 / F15，都在 3.3 V 的 bank 里。
+// 官方全引脚表把 PULL_MODE 写成 NONE，官方按键例程写的是 UP；这里写 UP：
+// 不按时保证是高电平，按下去接地变低电平。第 4 个键 G16 是板上的复位键，我们不用。
+IO_LOC  "key_rst_n" K16;
+IO_PORT "key_rst_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "key0_n" F15;
+IO_PORT "key0_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "key1_n" G15;
+IO_PORT "key1_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+// ==================== 串口（走板载 DEBUG-USB，不用外接 USB-TTL）====================
+// 底板原理图里，板载调试器 BL616 的串口经过两个 0 Ω 电阻接到 FPGA：
+//     BL616_TX  →  网络 DBG_UART.RX  →  FPGA 的 N16   （所以 N16 是 FPGA 的**收**）
+//     BL616_RX  ←  网络 DBG_UART.TX  ←  FPGA 的 P15   （所以 P15 是 FPGA 的**发**）
+// 官方 pro_ddr_test 例程也把 uart_tx 放在 P15 上，两个来源一致。
+// 电脑侧不用额外接线：烧录用的那个 USB 口本身就带一路串口（设备管理器里的 COM 口），115200。
+// ⚠️ 如果联调时发命令没回应、但示波器看波形都对，先把这两行的 N16 / P15 对调再试一次。
+// **2026-10-14 上板实测记录**（别再重复踩）：
+//   曾按"两个输出脚打架"的猜测把方向对调成 N16=发 / P15=收，实测**不通**（电脑两个 COM 口
+//   都收不到我们设计发的任何东西）。回头看排查过程发现一个漏洞：板子在跑设计的那段时间里，
+//   上位机一直占着 COM6，所以 **COM6 从未在"设计正在运行"时被真正测过**；而我们反复测的
+//   COM5 会把自己发出去的内容"回环"回来（发 ZZQ7-ECHO-TEST-XY 就收回它自己），更像是
+//   JTAG 那一路而不是串口。
+//   所以方向按原理图恢复：**N16 = 收（接调试器 BL616 的 TX）、P15 = 发（接 BL616 的 RX）**。
+//   底板图 02_Schematic 里这两个网络经过 0 Ω 电阻 R95／R128 接到 BL616，可对照。
+//   ✅ **2026-10-14 最终确认：方向是对的** —— 上位机（`py -3.14 -m desktop_app`）选
+//      **COM6** + 115200，可以直接连上并完成 HELLO 握手。
+//   ⚠️ 一个坑：用 .NET `SerialPort`／裸命令行读这两个口时**什么都收不到**，但上位机
+//      （pyserial，打开时会拉 DTR/RTS）能正常通信 —— 判断"串口通不通"要以上位机为准；
+//      COM5 那一侧会把电脑发出去的内容"回环"回来，容易误判，别拿它当串口。
+IO_LOC  "uart_rx_pin" N16;
+IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "uart_tx_pin" P15;
+IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+
+// ==================== 16 路输出（4×4）====================
+// 全部放在 PMOD1 和 PMOD2 两个连接器上：每个连接器 8 个信号脚，两根 PMOD 排线接驱动板。
+//
+// 为什么不用 PMOD0：官方「全引脚约束」和两块底板的原理图在 **PMOD0 的第 2 个信号脚**
+// 上互相矛盾（官方表写 N26，原理图写 L22）✗。PMOD1 / PMOD2 的 8 个脚两边资料完全一致 ✓，
+// 所以先用这两个，把不确定的那个连接器留着以后单独核。
+//
+// 顺序 = 阵列的第 1..16 个换能器。PMOD 上的顺序按原理图网名 PMOD1_IO0..IO7 / PMOD2_IO0..IO7，
+// 括号里的数字是原理图连接器符号的针脚号（信号脚是 11/9/7/5 一排 + 12/10/8/6 另一排）。
+// ⚠️ 排线上哪个物理脚对应哪一路，上板后用示波器量 40 kHz 波形逐个确认一次再焊驱动板。
+IO_LOC  "array_pos[0]"  C24;    // PMOD1_IO0（针 11）
+IO_PORT "array_pos[0]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[1]"  E25;    // PMOD1_IO1（针 9）
+IO_PORT "array_pos[1]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[2]"  L17;    // PMOD1_IO2（针 7）
+IO_PORT "array_pos[2]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[3]"  H14;    // PMOD1_IO3（针 5）
+IO_PORT "array_pos[3]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[4]"  B24;    // PMOD1_IO4（针 12）
+IO_PORT "array_pos[4]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[5]"  D25;    // PMOD1_IO5（针 10）
+IO_PORT "array_pos[5]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[6]"  L18;    // PMOD1_IO6（针 8）
+IO_PORT "array_pos[6]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[7]"  H15;    // PMOD1_IO7（针 6）
+IO_PORT "array_pos[7]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+
+IO_LOC  "array_pos[8]"  C21;    // PMOD2_IO0（针 11）
+IO_PORT "array_pos[8]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[9]"  B20;    // PMOD2_IO1（针 9）
+IO_PORT "array_pos[9]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[10]" B19;    // PMOD2_IO2（针 7）
+IO_PORT "array_pos[10]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[11]" A17;    // PMOD2_IO3（针 5）
+IO_PORT "array_pos[11]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[12]" B21;    // PMOD2_IO4（针 12）
+IO_PORT "array_pos[12]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[13]" A20;    // PMOD2_IO5（针 10）
+IO_PORT "array_pos[13]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[14]" A19;    // PMOD2_IO6（针 8）
+IO_PORT "array_pos[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "array_pos[15]" A18;    // PMOD2_IO7（针 6）
+IO_PORT "array_pos[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+
+// 互补输出（半桥驱动才用）：board_top 现在**故意不引出** array_neg——顶层端口没约束时
+// 工具会把它们自动摆到随便哪个脚上，可能撞到 DDR/HDMI 那些不能乱动的脚。
+// 要半桥方案时：把 board_top 里那行端口改成同时引出 array_pos/array_neg，
+// 再在这里给 array_neg[0..15] 分配一组自己的脚（不能和上面的通道重脚）。
+
+// ==================== 状态灯 ====================
+// 板上有 6 颗用户灯（官方 led[0..5] = R26 J14 L20 M25 N21 N23），我们用前 3 颗：
+// 输出开 / 正在扫描 / 走步器在跑。
+// ⚠️ 官方 LED 例程里是 **低电平点亮**（assign led = ~led_reg），所以 board_top 里也取了反：
+//    逻辑 1 = 灯亮，和板上实际亮灭一致。
+IO_LOC  "led[0]" R26;
+IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "led[1]" J14;
+IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "led[2]" L20;
+IO_PORT "led[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;

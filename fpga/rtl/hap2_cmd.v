@@ -438,6 +438,15 @@ module hap2_cmd #(
         end
     end
 
+    // 合法 STOP 绕过编译忙状态；放在时序块末尾裁决，覆盖同拍提交的自动播放。
+    wire remote_stop = frame_ok && !frame_bad && header_ok && kind == 2'd0
+                       && verb == V_STOP && dec_err == C_NONE;
+    wire local_stop = !frame_ok && mode == M_LOCAL && loc_stop;
+    // 冷启动、尚未握手时，首次按播放/换图键明确选择本地模式。
+    // 握手以后仍由 MODE 命令选择控制权，按键不能抢走远程会话。
+    wire enter_local = !connected && pending == P_IDLE && !frame_ok && !frame_bad
+                       && (loc_play || loc_next);
+
     // ---------------- 时序逻辑 ----------------
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -550,7 +559,14 @@ module hap2_cmd #(
             // ---- 2. 帧结束：出结论 ----
             // 只认电脑发来的 CMD；其它帧型（理论上不会收到）一律不回话
             if ((frame_ok || frame_bad) && header_ok && kind == 2'd0) begin
-                if (pending != P_IDLE) begin
+                if (remote_stop) begin
+                    reply_valid      <= 1'b1;
+                    reply_kind       <= 2'd0;
+                    reply_verb       <= verb;
+                    reply_seq        <= seq;
+                    reply_code       <= C_NONE;
+                    reply_want_state <= 1'b1;
+                end else if (pending != P_IDLE) begin
                     // 上一份 CONFIG 还在解析／编译节拍表。电脑正常只会发探活，
                     // 探活照常回；别的命令先回「忙」，这一次编译照旧走完。
                     reply_valid      <= 1'b1;
@@ -619,7 +635,8 @@ module hap2_cmd #(
             // ---- 2.6 本地按键（LOCAL 模式下的面板操作）----
             // 只在「这一拍没有命令帧」且确实是本地模式时动手，免得和远程命令抢同一拍。
             // 本地动作和远程命令的区别只有两处：不回串口、不用握手。
-            if (!frame_ok && (mode == M_LOCAL)) begin
+            if (enter_local) mode <= M_LOCAL;
+            if (!frame_ok && ((mode == M_LOCAL) || enter_local)) begin
                 if (loc_stop) begin
                     run_state      <= R_IDLE;
                     reason         <= REASON_NONE;
@@ -717,6 +734,24 @@ module hap2_cmd #(
                 run_state <= R_IDLE;
                 reason    <= REASON_HB;
                 walk_stop <= 1'b1;
+            end
+
+            // 允许正在准备的配置完成，但撤销播放预约；完成事件绝不能覆盖停止。
+            if (remote_stop || local_stop) begin
+                run_state      <= R_IDLE;
+                reason         <= REASON_NONE;
+                local_auto_run <= 1'b0;
+                walk_start     <= 1'b0;
+                walk_stop      <= 1'b1;
+                // 同拍本地提交不应覆盖 STOP 应答。
+                if (remote_stop) begin
+                    reply_valid      <= 1'b1;
+                    reply_kind       <= 2'd0;
+                    reply_verb       <= verb;
+                    reply_seq        <= seq;
+                    reply_code       <= C_NONE;
+                    reply_want_state <= 1'b1;
+                end
             end
         end
     end

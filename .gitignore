@@ -25,5 +25,6 @@ fpga/board/*.gprj
 fpga/board/haptics60k/
 fpga/board/haptics138k/
 fpga/board/haptics138kpro/
+fpga/board/haptics138kpro_j23/
 # 临时验证工程（引脚能不能布局的小实验）
 fpga/board/_scratch/

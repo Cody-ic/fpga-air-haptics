@@ -61,47 +61,43 @@ IO_LOC  "uart_tx_pin" P15;
 IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
 // ==================== 16 路输出（4×4）====================
-// 全部放在 PMOD1 和 PMOD2 两个连接器上：每个连接器 8 个信号脚，两根 PMOD 排线接驱动板。
-//
-// 为什么不用 PMOD0：官方「全引脚约束」和两块底板的原理图在 **PMOD0 的第 2 个信号脚**
-// 上互相矛盾（官方表写 N26，原理图写 L22）✗。PMOD1 / PMOD2 的 8 个脚两边资料完全一致 ✓，
-// 所以先用这两个，把不确定的那个连接器留着以后单独核。
-//
-// 顺序 = 阵列的第 1..16 个换能器。PMOD 上的顺序按原理图网名 PMOD1_IO0..IO7 / PMOD2_IO0..IO7，
-// 括号里的数字是原理图连接器符号的针脚号（信号脚是 11/9/7/5 一排 + 12/10/8/6 另一排）。
-// ⚠️ 排线上哪个物理脚对应哪一路，上板后用示波器量 40 kHz 波形逐个确认一次再焊驱动板。
-IO_LOC  "array_pos[0]"  C24;    // PMOD1_IO0（针 11）
+// 改接到底板的 J23：SDRAM CONN（存储器连接器）。
+// 选用 J23 的 16 个数据脚；J23 的 11 脚是 +5 V，12 脚是 GND，不能当波形输出。
+// array_pos[0..15] 按 J23 针号 1..10、13..18 排列；后半的数据线名称是 D15..D8，见逐脚注释。
+// 这些 FPGA 引脚的 IO 电平为 3.3 V；J23 的 5 V 只属于电源脚，不代表信号是 5 V。
+// ⚠️ J23 不要同时插 SDRAM 扩展模块；驱动板必须与 J23 的 12 脚共地。
+IO_LOC  "array_pos[0]"  U16;    // J23-1  SDRAM_D0
 IO_PORT "array_pos[0]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[1]"  E25;    // PMOD1_IO1（针 9）
+IO_LOC  "array_pos[1]"  V16;    // J23-2  SDRAM_D1
 IO_PORT "array_pos[1]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[2]"  L17;    // PMOD1_IO2（针 7）
+IO_LOC  "array_pos[2]"  U15;    // J23-3  SDRAM_D2
 IO_PORT "array_pos[2]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[3]"  H14;    // PMOD1_IO3（针 5）
+IO_LOC  "array_pos[3]"  V17;    // J23-4  SDRAM_D3
 IO_PORT "array_pos[3]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[4]"  B24;    // PMOD1_IO4（针 12）
+IO_LOC  "array_pos[4]"  W21;    // J23-5  SDRAM_D4
 IO_PORT "array_pos[4]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[5]"  D25;    // PMOD1_IO5（针 10）
+IO_LOC  "array_pos[5]"  Y21;    // J23-6  SDRAM_D5
 IO_PORT "array_pos[5]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[6]"  L18;    // PMOD1_IO6（针 8）
+IO_LOC  "array_pos[6]"  P21;    // J23-7  SDRAM_D6
 IO_PORT "array_pos[6]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[7]"  H15;    // PMOD1_IO7（针 6）
+IO_LOC  "array_pos[7]"  U17;    // J23-8  SDRAM_D7
 IO_PORT "array_pos[7]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
-IO_LOC  "array_pos[8]"  C21;    // PMOD2_IO0（针 11）
+IO_LOC  "array_pos[8]"  P23;    // J23-9  SDRAM_D15
 IO_PORT "array_pos[8]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[9]"  B20;    // PMOD2_IO1（针 9）
+IO_LOC  "array_pos[9]"  P24;    // J23-10 SDRAM_D14
 IO_PORT "array_pos[9]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[10]" B19;    // PMOD2_IO2（针 7）
+IO_LOC  "array_pos[10]" T23;    // J23-13 SDRAM_D13
 IO_PORT "array_pos[10]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[11]" A17;    // PMOD2_IO3（针 5）
+IO_LOC  "array_pos[11]" R23;    // J23-14 SDRAM_D12
 IO_PORT "array_pos[11]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[12]" B21;    // PMOD2_IO4（针 12）
+IO_LOC  "array_pos[12]" R25;    // J23-15 SDRAM_D11
 IO_PORT "array_pos[12]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[13]" A20;    // PMOD2_IO5（针 10）
+IO_LOC  "array_pos[13]" T25;    // J23-16 SDRAM_D10
 IO_PORT "array_pos[13]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[14]" A19;    // PMOD2_IO6（针 8）
+IO_LOC  "array_pos[14]" W23;    // J23-17 SDRAM_D9
 IO_PORT "array_pos[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[15]" A18;    // PMOD2_IO7（针 6）
+IO_LOC  "array_pos[15]" P25;    // J23-18 SDRAM_D8
 IO_PORT "array_pos[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
 // 互补输出（半桥驱动才用）：board_top 现在**故意不引出** array_neg——顶层端口没约束时

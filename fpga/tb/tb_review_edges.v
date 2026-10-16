@@ -207,9 +207,11 @@ module tb_review_edges;
         release u_top.state_capture;
 
         // 本地首次播放要先编译；配置接受时不能让 STOP 吞掉自动 START。
-        force u_top.u_cmd.mode = 2'd0;
+        check(u_top.u_cmd.mode == 2'd1, "cold boot remains remote and idle until a key is pressed");
+        check(u_board.u_top.MAX_LINE == 8192, "board receive capacity includes full HAP3 frame");
         force u_top.loc_play = 1'b1;
         @(negedge clk); force u_top.loc_play = 1'b0;
+        check(u_top.u_cmd.mode == 2'd0, "first key selects local mode without a host handshake");
         guard = 0;
         while (!u_top.walk_running && guard < 100000) begin
             @(negedge clk); guard = guard+1;
@@ -230,7 +232,6 @@ module tb_review_edges;
         check(u_top.focus_x === -21'sd40000 && u_top.focus_y === -21'sd40000,
               "local resumed playback uses the newly committed square start");
         release u_top.loc_play; release u_top.loc_next; release u_top.loc_shape;
-        release u_top.u_cmd.mode;
 
         repeat (1010) @(negedge clk);
         boot_before = u_board.boot_q;

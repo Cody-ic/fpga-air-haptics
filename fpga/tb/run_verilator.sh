@@ -142,3 +142,8 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/fix_sqrt.v rtl/fix_div.v rtl/hap2_phase.v rtl/hap2_out.v \
           tb/tb_focus_propagation.v
 "$BUILD_DIR/obj_focus/focus_propagation_sim"
+
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_cmd_stop -o cmd_stop_sim -Mdir "$BUILD_DIR/obj_stop" \
+          rtl/hap2_cmd.v rtl/hap2_line_rx.v tb/tb_cmd_stop.v
+"$BUILD_DIR/obj_stop/cmd_stop_sim"

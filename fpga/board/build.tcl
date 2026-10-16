@@ -14,6 +14,27 @@
 set root [file normalize [file dirname [info script]]]
 cd $root
 
+# 默认输出到 J23；HAPTICS_PINOUT=pmod 可重新构建已经上板验证的旧接线。
+# 两套工程使用不同目录，J23 构建不会覆盖旧 PMOD 比特流。
+set pinout j23
+if {[info exists ::env(HAPTICS_PINOUT)]} {
+    set pinout $::env(HAPTICS_PINOUT)
+}
+switch -- $pinout {
+    j23 {
+        set project_name haptics138kpro_j23
+        set pin_constraints tang_mega_138k_pro.cst
+    }
+    pmod {
+        set project_name haptics138kpro
+        set pin_constraints tang_mega_138k_pro_pmod.cst
+    }
+    default {
+        error "HAPTICS_PINOUT must be j23 or pmod"
+    }
+}
+puts "Pinout: $pinout; project: $project_name; constraints: $pin_constraints"
+
 # ---- 1. 建工程 ----
 # 器件：**GW5AST-138B，封装 FCPBG676A（676 球），型号 GW5AST-LV138FPG676AC1/I0**。
 # 2026-10-14 定案：板子是 **Tang MEGA 138K Pro**，芯片 GW5AST-LV138FPG676A，
@@ -30,7 +51,7 @@ cd $root
 # 如果 Programmer 报 ID code mismatch，说明芯片是 **138C** 而不是 138B ✗
 # → 把 -device_version 改成 C 再跑一次 ✓。芯片到底 B 还是 C，看 FPGA 表面
 #   镭雕印记**第三行第 5 个字符**（官方说明：是 B 就是版本 B，是 C 就是 C）。
-create_project -name haptics138kpro -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
+create_project -name $project_name -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
     -device_version B -force
 
 # ---- 2. 设计文件（自动按扩展名认类型，.v = Verilog）----
@@ -46,7 +67,7 @@ add_file {*}$srcs
 # 注意：必须给**绝对路径**。工程文件建在 $root/haptics138kpro/ 里，布局布线阶段
 # 会拿工程目录当基准去解析相对路径，写成 tang_mega_138k_pro.cst 就会找不到
 # （报 CM2001: Cannot open file）。
-add_file [file join $root tang_mega_138k_pro.cst]
+add_file [file join $root $pin_constraints]
 add_file [file join $root tang_mega_138k_pro.sdc]
 
 # ---- 4. 顶层 + 跑 ----

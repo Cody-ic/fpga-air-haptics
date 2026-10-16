@@ -10,8 +10,8 @@
 // 数据存在一块 RAM 里（MAX_LINE 字节），下游通过 rd_addr / rd_data 读它。
 // 读是同步读：这一拍给出 rd_addr，下一拍 rd_data 才有效。
 module hap2_line_rx #(
-    parameter integer MAX_LINE = 4096,   // 一帧最多多少字节（含 CRC 与换行）
-    parameter integer ADDR_W   = 13      // 地址位宽；MAX_LINE 必须等于 2^ADDR_W（8192）
+    parameter integer MAX_LINE = 8192,   // 一帧最多多少字节（含 CRC 与换行）
+    parameter integer ADDR_W   = 13      // 地址容量 2^ADDR_W 必须不小于 MAX_LINE
 ) (
     input  wire            clk,
     input  wire            rst_n,
@@ -30,7 +30,7 @@ module hap2_line_rx #(
     output reg  [7:0]        rd_data
 );
 
-    // 一帧最长 4096 字节（含换行），所以正文最多 4095 字节
+    // 换行占一个字节，其余内容最多 MAX_LINE - 1 字节。
     localparam [ADDR_W:0] MAX_CONTENT = MAX_LINE - 1;
 
     reg [7:0]        mem [0:MAX_LINE-1];
@@ -70,7 +70,7 @@ module hap2_line_rx #(
                     wr_ptr     <= 0;
                     last_byte  <= 8'h00;
                 end else if (wr_ptr == MAX_CONTENT) begin
-                    // 正文已经满 4095 字节，再来一个字节就超长
+                    // 正文已经满 MAX_CONTENT 字节，再来一个字节就超长
                     dropping <= 1'b1;
                     wr_ptr   <= 0;
                 end else begin

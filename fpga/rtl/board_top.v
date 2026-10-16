@@ -14,7 +14,7 @@
 module board_top #(
     parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（138K Pro 的 P16 = 50 MHz）
     parameter integer BAUD          = 115200,
-    // 阵列规模：4×4 = 16 路，分在 PMOD1（8 路）+ PMOD2（8 路）两个连接器上。
+    // 阵列规模：4×4 = 16 路。默认接 J23；旧 PMOD1+PMOD2 可由构建脚本选择。
     // 改成 2 就退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
     parameter integer HW_ROWS       = 4,
     parameter integer HW_COLS       = 4,

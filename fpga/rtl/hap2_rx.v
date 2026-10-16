@@ -13,7 +13,7 @@
 module hap2_rx #(
     parameter integer CLK_HZ   = 50_000_000,
     parameter integer BAUD     = 115200,
-    parameter integer MAX_LINE = 4096,
+    parameter integer MAX_LINE = 8192,
     parameter integer ADDR_W   = 13
 ) (
     input  wire            clk,
