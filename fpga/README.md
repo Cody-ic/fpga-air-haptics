@@ -282,7 +282,7 @@ bash tb/run_verilator.sh
 |---|---|---|
 | `HELLO` | 任何时候 | — |
 | `PING` | 握手后 | `HANDSHAKE_REQUIRED` |
-| `CONFIG` | 握手后 + 电脑控制 + 待机 | `LOCAL_CONTROL` / `BUSY` / `HARDWARE_MISMATCH` |
+| `CONFIG` | 握手后 + 电脑控制 + 待机 | `LOCAL_CONTROL` / `BUSY` / `HARDWARE_MISMATCH` / `BAD_CONFIG` / `OUT_OF_WORKSPACE` |
 | `MODE` | 握手后 + 待机，且带 `value=LOCAL/REMOTE` | `BUSY` / `BAD_MODE` |
 | `START` | 握手后 + 电脑控制 + 待机或暂停 | `LOCAL_CONTROL` / `BUSY` |
 | `PAUSE` | 握手后 + 电脑控制 + 运行中 | `LOCAL_CONTROL` / `NOT_RUNNING` |
@@ -609,7 +609,8 @@ J23 新接线的实物验证与声场测量仍待完成，最新记录见板级�
 - `tb_board_shift.v`：真实串口覆盖 8×8 顶层握手、10.3 mm 声明、64 档限制、载波边界及故障回读，
   并检查拒绝配置后切本地、换图和首次播放不继承非法影子参数，以及 4×4 参数未被移位限制影响。
 
-以上检查已加入 `tb/run_verilator.sh`；仿真、综合与布局布线的最终结果另见本轮板级核验记录。
+以上检查已加入 `tb/run_verilator.sh`；19 组均通过，4×4 / 8×8 高云构建也均通过，
+资源、时序、引脚及产物校验见 [本轮板级核验记录](board/RELEASE_2026-10-18.md)。
 数字通过不代表已接入发射板、通过实际声压测量或达到触觉辨识目标。
 
 ## 2026-10-16 审查问题修复
