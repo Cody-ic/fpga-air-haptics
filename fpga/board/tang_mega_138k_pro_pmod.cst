@@ -60,6 +60,14 @@ IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 IO_LOC  "uart_tx_pin" P15;
 IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
+// External ADCS7476 uses three otherwise free PMOD0 signals.
+IO_LOC "adc_sclk" T24;
+IO_PORT "adc_sclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "adc_cs_n" R17;
+IO_PORT "adc_cs_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "adc_sdata" L24;
+IO_PORT "adc_sdata" IO_TYPE=LVCMOS33 PULL_MODE=DOWN BANK_VCCIO=3.3;
+
 // ==================== 16 路输出（4×4）====================
 // 全部放在 PMOD1 和 PMOD2 两个连接器上：每个连接器 8 个信号脚，两根 PMOD 排线接驱动板。
 //

@@ -20,7 +20,10 @@ module board_shift_top #(
     output wire rclk,
     output wire oe_n,
     output wire srclr_n,
-    output wire [3:0] led
+    output wire [3:0] led,
+    input wire adc_sdata,
+    output wire adc_sclk,
+    output wire adc_cs_n
 );
     // At least 19 clocks between samples: 8 shift pulses + latch + settling.
     // 50 MHz / (64 * 19) = 41118 Hz; normal operation is 40 kHz / 64 steps.
@@ -43,6 +46,7 @@ module board_shift_top #(
         .uart_rx_pin(uart_rx_pin), .uart_tx_pin(uart_tx_pin),
         .array_pos(parallel_data), .led(core_led),
         .output_fault(fault), .sample_tick(sample_tick), .drive_enable(drive_enable),
+        .adc_sdata(adc_sdata), .adc_sclk(adc_sclk), .adc_cs_n(adc_cs_n),
         .board_rst_n(rst_n)
     );
 

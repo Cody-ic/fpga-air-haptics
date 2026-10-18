@@ -52,6 +52,9 @@ module board_core #(
     // 本地模式、串口状态在状态帧里都看得到）
     output wire [2:0] led,
     input wire output_fault,
+    input wire adc_sdata,
+    output wire adc_sclk,
+    output wire adc_cs_n,
     output wire sample_tick,
     output wire drive_enable,
     output wire board_rst_n
@@ -131,6 +134,7 @@ module board_core #(
         .key_play    (key_play),
         .key_stop    (key_stop),
         .output_fault(output_fault),
+        .adc_sdata(adc_sdata), .adc_sclk(adc_sclk), .adc_cs_n(adc_cs_n),
         .sample_tick(sample_tick),
         .drive_enable(drive_enable),
         .mode_local  (mode_local),

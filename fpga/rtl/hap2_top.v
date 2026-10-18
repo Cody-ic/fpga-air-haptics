@@ -64,6 +64,9 @@ module hap2_top #(
     input  wire        key_play,
     input  wire        key_stop,
     input  wire        output_fault,
+    input  wire        adc_sdata,
+    output wire        adc_sclk,
+    output wire        adc_cs_n,
     // 当前是不是本地控制模式（给状态灯用）
     output wire        mode_local,
     // 调试／观测：当前焦点与扫描开关（相位计算做出来之后这里接阵列）
@@ -189,6 +192,10 @@ module hap2_top #(
     wire [5:0]  traj_stk;
     wire        traj_ready;
     wire        connected;
+    wire        adc_start, adc_busy, adc_done, adc_result_valid, adc_consume;
+    wire [7:0]  adc_rd_addr;
+    wire [11:0] adc_rd_data;
+    reg         adc_tx_running;
     wire        state_capture;      // 发送模块开始拼 STATE 的那一拍
     wire        calib_start, calib_restore, calib_store;
     wire [31:0] calib_mask_req;
@@ -245,6 +252,9 @@ module hap2_top #(
         .calib_done       (calib_done),
         .calib_valid      (calib_valid),
         .calib_trial_active(calib_trial_active),
+        .adc_start        (adc_start),
+        .adc_busy         (adc_busy | adc_result_valid),
+        .adc_done         (adc_done),
         .array_rows       ({24'h0, HW_ROWS[7:0]}),
         .array_cols       ({24'h0, HW_COLS[7:0]}),
         .array_pitch_um   (HW_PITCH_UM),
@@ -306,6 +316,18 @@ module hap2_top #(
         .cfg_shape        (cfg_shape),
         .cfg_path_closed  (cfg_path_closed),
         .cfg_blank_us     (cfg_blank_us)
+    );
+
+    always @(posedge clk) begin
+        if (!rst_n) adc_tx_running <= 1'b0;
+        else if (adc_start) adc_tx_running <= output_on;
+    end
+
+    hap3_adc_capture u_adc (
+        .clk(clk), .rst_n(rst_n), .start(adc_start), .consume(adc_consume),
+        .adc_sdata(adc_sdata), .adc_sclk(adc_sclk), .adc_cs_n(adc_cs_n),
+        .busy(adc_busy), .result_valid(adc_result_valid), .done(adc_done),
+        .rd_addr(adc_rd_addr), .rd_data(adc_rd_data)
     );
 
     hap2_calibration #(
@@ -673,6 +695,11 @@ module hap2_top #(
         .txt_data         (txt_data),
         .txt_len          (txt_len),
         .txt_valid        (txt_valid)
+        ,.capture_addr    (adc_rd_addr)
+        ,.capture_data    (adc_rd_data)
+        ,.capture_start   (adc_start)
+        ,.capture_tx_running(adc_tx_running)
+        ,.capture_consume (adc_consume)
     );
 
     // ---------------- 主机心跳 ----------------

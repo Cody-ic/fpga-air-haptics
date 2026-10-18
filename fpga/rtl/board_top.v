@@ -47,7 +47,10 @@ module board_top #(
     output wire [HW_ROWS*HW_COLS-1:0] array_pos,
     // 状态灯：输出开 / 正在扫描 / 走步器在跑（干净脚不够，只留最有用的三颗；
     // 本地模式、串口状态在状态帧里都看得到）
-    output wire [2:0] led
+    output wire [2:0] led,
+    input wire adc_sdata,
+    output wire adc_sclk,
+    output wire adc_cs_n
 );
 
     // 共用控制逻辑；只有此层的端口会分配到物理引脚。
@@ -78,6 +81,7 @@ module board_top #(
         .uart_tx_pin(uart_tx_pin),
         .array_pos(array_pos),
         .led(led),
+        .adc_sdata(adc_sdata), .adc_sclk(adc_sclk), .adc_cs_n(adc_cs_n),
         .output_fault(1'b0),
         /* verilator lint_off PINCONNECTEMPTY */
         .sample_tick(), .drive_enable(), .board_rst_n()

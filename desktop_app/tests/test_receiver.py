@@ -32,6 +32,9 @@ class CaptureTests(unittest.TestCase):
 
     def test_zero_signal_rail_and_bad_windows(self):
         cap=Capture.parse(fields())
+        fpga_cap=Capture.parse(fields(pin="ADCS7476", simulated="0"))
+        self.assertEqual(fpga_cap.pin, "ADCS7476")
+        self.assertFalse(fpga_cap.simulated)
         self.assertAlmostEqual(cap.analyze()["peak40_mv"], 0, places=10)
         self.assertTrue(replace(cap, raw=(0,)*200).analyze()["adc_rail"])
         for change in ({"n":"199"}, {"raw":"1,2"}, {"fs_hz":"8000"}, {"simulated":"2"},

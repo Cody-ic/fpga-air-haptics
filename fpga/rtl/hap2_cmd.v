@@ -119,6 +119,9 @@ module hap2_cmd #(
     input  wire            calib_done,
     input  wire            calib_valid,
     input  wire            calib_trial_active,
+    output reg             adc_start,
+    input  wire            adc_busy,
+    input  wire            adc_done,
 
     // ---- 应答 ----
     output reg             reply_valid,    // 单拍脉冲：有一条应答要发
@@ -205,7 +208,6 @@ module hap2_cmd #(
     localparam [3:0] C_HANDSHAKE_NEEDED = 4'd9;
     localparam [3:0] C_BAD_CALIBRATION   = 4'd10;
     localparam [3:0] C_STEADY_POINT      = 4'd11;
-    localparam [3:0] C_UNSUPPORTED       = 4'd12;
 
     // ---------------- 控制模式与运行状态 ----------------
     // 控制模式的编号与字段解析层里 LOCAL / REMOTE 的枚举一致
@@ -237,6 +239,7 @@ module hap2_cmd #(
     localparam [2:0] P_PLAN  = 3'd2;
     localparam [2:0] P_SHAPE = 3'd3;
     localparam [2:0] P_CALIB = 3'd4;
+    localparam [2:0] P_CAPTURE = 3'd5;
 
     reg connected;          // 是否已完成握手
     reg array_bad;          // CONFIG 帧里阵列字段与实际不符
@@ -489,12 +492,13 @@ module hap2_cmd #(
                 end
 
                 V_CAPTURE: begin
-                    dec_err = C_UNSUPPORTED; // 板级未连接 ADC 时绝不冒充采样成功
+                    if (adc_busy) dec_err = C_BUSY;
                     dec_want_state = 1'b0;
                 end
 
                 V_CALIBRATION: begin
-                    if (mode == M_LOCAL) dec_err = C_LOCAL_CONTROL;
+                    if (adc_busy) dec_err = C_BUSY;
+                    else if (mode == M_LOCAL) dec_err = C_LOCAL_CONTROL;
                     else if (run_state != R_IDLE) dec_err = C_BUSY;
                     else if (cfg_shape != 3'd0 || cfg_mod_hz != 0 || cfg_level != 100)
                         dec_err = C_STEADY_POINT;
@@ -540,6 +544,7 @@ module hap2_cmd #(
             calib_geometry_len <= 0;
             calib_offsets_off <= 0;
             calib_offsets_len <= 0;
+            adc_start        <= 1'b0;
             walk_start       <= 1'b0;
             walk_stop        <= 1'b0;
             mode           <= M_REMOTE;    // 上电默认听电脑的，但不握手不接受命令
@@ -595,6 +600,7 @@ module hap2_cmd #(
             traj_txt_none    <= 1'b0;
             calib_start      <= 1'b0;
             calib_restore    <= 1'b0;
+            adc_start        <= 1'b0;
             walk_start       <= 1'b0;
             walk_stop        <= 1'b0;
 
@@ -671,6 +677,11 @@ module hap2_cmd #(
                     reply_seq        <= seq;
                     reply_code       <= dec_err;
                     reply_want_state <= 1'b0;
+                end else if (verb == V_CAPTURE) begin
+                    pending       <= P_CAPTURE;
+                    adc_start     <= 1'b1;
+                    lat_verb      <= verb;
+                    lat_seq       <= seq;
                 end else if (verb == V_CALIBRATION) begin
                     pending       <= P_CALIB;
                     calib_start   <= 1'b1;
@@ -827,6 +838,18 @@ module hap2_cmd #(
                         reply_code       <= calib_valid ? C_NONE : C_BAD_CALIBRATION;
                         reply_want_state <= calib_valid;
                         if (calib_valid) revision <= revision + 1'b1;
+                    end
+                end
+
+                P_CAPTURE: begin
+                    if (adc_done) begin
+                        pending          <= P_IDLE;
+                        reply_valid      <= 1'b1;
+                        reply_kind       <= 2'd3; // 专用 CAPTURE ACK
+                        reply_verb       <= lat_verb;
+                        reply_seq        <= lat_seq;
+                        reply_code       <= C_NONE;
+                        reply_want_state <= 1'b0;
                     end
                 end
 

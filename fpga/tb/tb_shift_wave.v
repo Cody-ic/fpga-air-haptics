@@ -37,6 +37,7 @@ module tb_shift_wave;
         .cfg_phase_steps(32'd64),.cfg_change(cfg_change),
         .cfg_level(32'd100),.cfg_mod_hz(32'd0),.enable(enable),
         .tbl_new(tbl_new),.tbl_addr(tbl_addr),.tbl_data(tbl_data),
+        .channel_mask(64'hffffffffffffffff), .phase_offsets(512'd0),
         .out_pos(parallel_data),.sample_tick(sample_tick),.drive_enable(drive_enable)
     );
     hap2_shift595 u_shift (

@@ -60,6 +60,14 @@ IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 IO_LOC  "uart_tx_pin" P15;
 IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
+// External ADCS7476 on PMOD0: SCLK / CS_N / SDATA.
+IO_LOC "adc_sclk" T24;
+IO_PORT "adc_sclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "adc_cs_n" R17;
+IO_PORT "adc_cs_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "adc_sdata" L24;
+IO_PORT "adc_sdata" IO_TYPE=LVCMOS33 PULL_MODE=DOWN BANK_VCCIO=3.3;
+
 // 8×8 H1: 1/2 GND; 3 SRCLK; 4 OE_N; 5 RCLK; 6 SRCLR_N; 7..14 DATA0..7.
 // J23-12 -> H1-1/2 GND. J23-11 is +5 V: leave it disconnected.
 // Do not connect an SDRAM module at the same time.

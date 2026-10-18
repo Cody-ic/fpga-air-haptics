@@ -93,7 +93,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap2_top.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap3_adc_capture.v rtl/hap2_top.v \
           rtl/por_reset.v rtl/board_core.v rtl/board_top.v tb/tb_board.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_board/board_sim"
@@ -108,7 +108,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap2_top.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap3_adc_capture.v rtl/hap2_top.v \
           tb/tb_top8.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top8/top8_sim"
@@ -124,7 +124,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
           rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v \
-          rtl/hap2_top.v tb/tb_hap2_top.v
+          rtl/hap3_adc_capture.v rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"
 
@@ -174,3 +174,17 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           --top-module tb_calibration -o calibration_sim -Mdir "$BUILD_DIR/obj_calibration" \
           rtl/hap2_calibration.v tb/tb_calibration.v
 "$BUILD_DIR/obj_calibration/calibration_sim"
+
+echo
+echo "=== 外部 ADC 短窗口采样（预热、200 点、缓存保护）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_adc_capture -o adc_capture_sim -Mdir "$BUILD_DIR/obj_adc_capture" \
+          rtl/hap3_adc_capture.v tb/tb_adc_capture.v
+"$BUILD_DIR/obj_adc_capture/adc_capture_sim"
+
+echo
+echo "=== CAPTURE 端到端（串口命令 → ADC → 200 点延迟应答）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_capture_protocol -o capture_protocol_sim \
+          -Mdir "$BUILD_DIR/obj_capture_protocol" rtl/*.v tb/tb_capture_protocol.v
+"$BUILD_DIR/obj_capture_protocol/capture_protocol_sim"

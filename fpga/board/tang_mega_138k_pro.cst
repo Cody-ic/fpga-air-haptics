@@ -60,6 +60,14 @@ IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 IO_LOC  "uart_tx_pin" P15;
 IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
+// External ADCS7476 on PMOD0: SCLK / CS_N / SDATA.
+IO_LOC "adc_sclk" T24;
+IO_PORT "adc_sclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "adc_cs_n" R17;
+IO_PORT "adc_cs_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "adc_sdata" L24;
+IO_PORT "adc_sdata" IO_TYPE=LVCMOS33 PULL_MODE=DOWN BANK_VCCIO=3.3;
+
 // ==================== 16 路输出（4×4）====================
 // 改接到底板的 J23：SDRAM CONN（存储器连接器）。
 // 选用 J23 的 16 个数据脚；J23 的 11 脚是 +5 V，12 脚是 GND，不能当波形输出。
