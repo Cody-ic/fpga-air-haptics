@@ -20,7 +20,8 @@
 module hap2_tx #(
     parameter integer CLK_HZ = 50_000_000,
     parameter integer BAUD   = 115200,
-    parameter integer DIGITS = 10,           // 十进制最多几位
+    parameter integer DIGITS = 10,
+    parameter integer HAS_CALIBRATION = 1,           // 十进制最多几位
     // 设备声明的工作空间（微米）：握手应答里发给电脑，同时命令层拿同一组值
     // 去查「图形有没有越界」。放在这里当参数，是为了两边只有一个来源。
     parameter integer WS_X_MIN_UM = -100000,
@@ -101,10 +102,14 @@ module hap2_tx #(
     // 宽度写错会整体错位。这里每个模板都以换行结尾，发到换行就算一帧结束。
     localparam [8*351-1:0] T_HELLO =
         "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ adc_capture=1 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
+    localparam [8*339-1:0] T_HELLO_NO_CAL =
+        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ adc_capture=1 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
     localparam [8*31-1:0]  T_ACK   = "HAP3 ACK @ ~ applied=1 rev=@*#\n";
     localparam [8*22-1:0]  T_ERR   = "HAP3 ERR @ ~ code=^*#\n";
     localparam [8*400-1:0] T_STATE =
         "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ channel_mask=@ phase_offsets=} phases=|*#\n";
+    localparam [8*369-1:0] T_STATE_NO_CAL =
+        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
     localparam [8*117-1:0] T_CAPTURE =
         "HAP3 ACK @ CAPTURE boot=+ rev=@ uptime_ms=@ simulated=0 tx_running=@ pin=ADCS7476 fs_hz=400000 bits=12 n=200 raw={*#\n";
 
@@ -220,10 +225,14 @@ module hap2_tx #(
             // 字符串在向量里靠高位存放：第 0 个字符在最高字节，
             // 所以要从最高位往下数，用「-:」而不是「+:」。
             case (sel)
-                F_HELLO: tmpl_byte = T_HELLO[8*351-1 - 8*pos -: 8];
+                F_HELLO: tmpl_byte = (HAS_CALIBRATION != 0)
+                    ? T_HELLO[8*351-1 - 8*pos -: 8]
+                    : T_HELLO_NO_CAL[8*339-1 - 8*pos -: 8];
                 F_ACK:   tmpl_byte = T_ACK  [8*31 -1 - 8*pos -: 8];
                 F_ERR:   tmpl_byte = T_ERR  [8*22 -1 - 8*pos -: 8];
-                F_STATE: tmpl_byte = T_STATE[8*400-1 - 8*pos -: 8];
+                F_STATE: tmpl_byte = (HAS_CALIBRATION != 0)
+                    ? T_STATE[8*400-1 - 8*pos -: 8]
+                    : T_STATE_NO_CAL[8*369-1 - 8*pos -: 8];
                 default: tmpl_byte = T_CAPTURE[8*117-1 - 8*pos -: 8];
             endcase
         end

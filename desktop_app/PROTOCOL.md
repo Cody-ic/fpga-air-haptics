@@ -157,6 +157,9 @@ ADC 原码按 `code × Vref / 4095` 换算，默认 Vref=3300 mV，允许手工�
 
 STOP/本地停止/心跳停止/REMOTE 新握手撤销临时 trial、恢复已有修正并要求重新 CONFIG；CONFIG 总是恢复全通道和已保存修正。临时 trial 存在时不允许切换 LOCAL。断电清空保存值；试验中收到错误不能当作修正成功。主机完整核验 ACK、STATE、采样元数据及复测结果后才发送 store。错误码包含 `BAD_CALIBRATION`、`STEADY_POINT_REQUIRED`、`BUSY`；无效修改不部分生效。
 
+FPGA 当前仅 4×4 R5 / 11 mm 配置声明校准能力；8×8 返回 `UNSUPPORTED`，并省略可选校准状态，
+按全通道、零补偿解释。FPGA 切换相位档数时会清除不兼容的已保存补偿，不把旧档数的码直接用于新档数。
+
 STATE 可选字段 `channel_mask`（十进制）与 `phase_offsets`（逐路码）说明实际门控与修正；缺省按全通道、零修正处理。`phases` 必须是叠加修正后的实际相位，不能再次由客户端加修正。详见[校准流程及边界](ARRAY_CALIBRATION.md)。
 
 ### 4.3 F103 测试模式识别

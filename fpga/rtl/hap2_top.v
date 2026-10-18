@@ -86,6 +86,9 @@ module hap2_top #(
 );
     localparam integer CHANNELS = HW_ROWS * HW_COLS;
     localparam integer CAL_CHANNELS = (CHANNELS > 32) ? 32 : CHANNELS;
+    // The existing calibration command has a 32-bit mask and the known R5
+    // geometry identity. Do not advertise it on the 64-channel R2 profile.
+    localparam integer HAS_CALIBRATION = (HW_ROWS == 4 && HW_COLS == 4 && HW_PITCH_UM == 11000);
 
     // ---------------- 接收通路 ----------------
     /* verilator lint_off UNUSEDSIGNAL */
@@ -223,7 +226,8 @@ module hap2_top #(
         .WS_Z_MAX_UM (WS_Z_MAX_UM),
         .LOC_RADIUS_UM (LOC_RADIUS_UM),
         .MAX_CARRIER_HZ (MAX_CARRIER_HZ),
-        .MAX_PHASE_STEPS (MAX_PHASE_STEPS)
+        .MAX_PHASE_STEPS (MAX_PHASE_STEPS),
+        .HAS_CALIBRATION (HAS_CALIBRATION)
     ) u_cmd (
         .clk              (clk),
         .rst_n            (rst_n),
@@ -330,6 +334,7 @@ module hap2_top #(
         .rd_addr(adc_rd_addr), .rd_data(adc_rd_data)
     );
 
+    generate if (HAS_CALIBRATION != 0) begin : g_calibration
     hap2_calibration #(
         .CHANNELS(CAL_CHANNELS), .ADDR_W(ADDR_W), .GEOMETRY_ID(GEOMETRY_ID)
     ) u_calibration (
@@ -343,6 +348,16 @@ module hap2_top #(
         .restore(calib_restore), .trial_active(calib_trial_active),
         .channel_mask(calib_mask_low), .phase_offsets(calib_offsets_low)
     );
+    end else begin : g_no_calibration
+        assign calib_rd_addr = 0;
+        assign calib_busy = 1'b0;
+        assign calib_done = 1'b0;
+        assign calib_valid = 1'b0;
+        assign calib_changed = 1'b0;
+        assign calib_trial_active = 1'b0;
+        assign calib_mask_low = {CAL_CHANNELS{1'b1}};
+        assign calib_offsets_low = 0;
+    end endgenerate
 
     // ---------------- 本地按键（不接电脑时的面板操作）----------------
     // 消抖、边沿识别都在 hap2_local 里；这里只是把三个单拍脉冲和「当前选中的图形」
@@ -564,7 +579,10 @@ module hap2_top #(
                 sn_level   <= cfg_level;      sn_closed<= cfg_path_closed;
                 sn_blank   <= cfg_blank_us;   sn_shape <= cfg_shape;
                 sn_mode    <= cmd_mode;       sn_run   <= cmd_run;
-                sn_reason  <= cmd_reason;     sn_rev   <= cmd_rev;
+                sn_reason  <= cmd_reason;
+                // Calibration publishes one edge before CMD consumes done.
+                // Capture the corresponding revision when those edges coincide.
+                sn_rev <= cmd_rev + ((calib_done && calib_valid) ? 16'd1 : 16'd0);
                 sn_output_fault <= (HAS_OUTPUT_FAULT != 0) && output_fault;
                 sn_scan    <= scan_on;        sn_stroke<= stroke_index;
                 // 明确扩为 32 位有符号数，再换单位；和相位表同拍锁存。
@@ -583,8 +601,8 @@ module hap2_top #(
             end else if (snap_copy) begin
                 if (snap_wait) begin
                     snap_ph[snap_idx] <= snap_phase_valid
-                        ? ((ph_rd_data + calib_phase_offsets[snap_idx*8 +: 8])
-                           & (cfg_phase_steps[7:0] - 1'b1)) : 8'd0;
+                        ? ((ph_rd_data + sn_phase_offsets[snap_idx*8 +: 8])
+                           & (sn_steps[7:0] - 1'b1)) : 8'd0;
                     snap_wait <= 1'b0;
                     if ({1'b0, snap_idx} + 9'd1 >= snap_count) snap_copy <= 1'b0;
                     else                                       snap_idx  <= snap_idx + 8'd1;
@@ -635,6 +653,7 @@ module hap2_top #(
         .CLK_HZ (CLK_HZ),
         .BAUD   (BAUD),
         .DIGITS (10),
+        .HAS_CALIBRATION(HAS_CALIBRATION),
         // 工作空间：和命令层用同一组参数，保证「声明的范围」和「实际拦的范围」一致
         .WS_X_MIN_UM (WS_X_MIN_UM),
         .WS_X_MAX_UM (WS_X_MAX_UM),

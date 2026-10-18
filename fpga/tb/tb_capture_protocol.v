@@ -52,7 +52,7 @@ module tb_capture_protocol;
     end
     always @(negedge adc_sclk) if (!adc_cs_n) begin
         bitn=bitn+1;
-        if (bitn<4) adc_sdata=0; else adc_sdata=adc_word[15-bitn];
+        if (bitn<4 || bitn>=16) adc_sdata=0; else adc_sdata=adc_word[15-bitn];
     end
 
     function [15:0] crc_step(input [15:0] old_crc, input [7:0] data);

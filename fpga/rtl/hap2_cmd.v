@@ -34,7 +34,8 @@ module hap2_cmd #(
     parameter integer LOC_RADIUS_UM = 20000,
     // Physical output profile limits, checked before any configuration commit.
     parameter integer MAX_CARRIER_HZ = 80000,
-    parameter integer MAX_PHASE_STEPS = 256
+    parameter integer MAX_PHASE_STEPS = 256,
+    parameter integer HAS_CALIBRATION = 1
 ) (
     input  wire            clk,
     input  wire            rst_n,
@@ -208,6 +209,7 @@ module hap2_cmd #(
     localparam [3:0] C_HANDSHAKE_NEEDED = 4'd9;
     localparam [3:0] C_BAD_CALIBRATION   = 4'd10;
     localparam [3:0] C_STEADY_POINT      = 4'd11;
+    localparam [3:0] C_UNSUPPORTED       = 4'd12;
 
     // ---------------- 控制模式与运行状态 ----------------
     // 控制模式的编号与字段解析层里 LOCAL / REMOTE 的枚举一致
@@ -497,7 +499,8 @@ module hap2_cmd #(
                 end
 
                 V_CALIBRATION: begin
-                    if (adc_busy) dec_err = C_BUSY;
+                    if (HAS_CALIBRATION == 0) dec_err = C_UNSUPPORTED;
+                    else if (adc_busy) dec_err = C_BUSY;
                     else if (mode == M_LOCAL) dec_err = C_LOCAL_CONTROL;
                     else if (run_state != R_IDLE) dec_err = C_BUSY;
                     else if (cfg_shape != 3'd0 || cfg_mod_hz != 0 || cfg_level != 100)
@@ -716,6 +719,14 @@ module hap2_cmd #(
                     if (dec_hello) begin
                         connected <= 1'b1;
                         calib_restore <= 1'b1;
+                        // A new REMOTE session must stop before restoring the
+                        // full mask. Reconnecting cannot expand an active trial.
+                        if (mode == M_REMOTE) begin
+                            run_state <= R_IDLE;
+                            reason <= REASON_NONE;
+                            walk_stop <= 1'b1;
+                            traj_ready <= 1'b0;
+                        end
                     end
                     if (dec_mode_set) mode      <= dec_mode;
                     if (dec_run) begin

@@ -39,18 +39,20 @@ module hap2_calibration #(
     reg wait_data;
     reg [ADDR_W:0] pos;
     reg [8:0] channel;
-    reg [8:0] value;
+    reg [9:0] value;
     reg [3:0] digits;
     reg bad;
     reg store_q;
     reg [CHANNELS-1:0] mask_q;
     reg [CHANNELS*8-1:0] candidate;
     reg [CHANNELS*8-1:0] saved_offsets;
+    reg [31:0] saved_steps;
 
     wire geom_last = (pos + 1'b1 >= geometry_len);
     wire off_last  = (pos + 1'b1 >= offsets_len);
     wire is_digit = (rd_data >= "0") && (rd_data <= "9");
-    wire [8:0] next_value = value * 10 + rd_data[3:0];
+    // Range-check before truncation: 512 must not wrap to a valid zero code.
+    wire [13:0] next_value = {4'd0, value} * 14'd10 + {10'd0, rd_data[3:0]};
     wire [7:0] expected_geom = GEOMETRY_ID[8*24-1 - 8*pos -: 8];
 
     always @(posedge clk) begin
@@ -59,17 +61,28 @@ module hap2_calibration #(
             rd_addr <= 0; wait_data <= 1'b0; pos <= 0; channel <= 0;
             value <= 0; digits <= 0; bad <= 1'b0; store_q <= 1'b0;
             mask_q <= ALL_ON; candidate <= 0; saved_offsets <= 0;
+            saved_steps <= 0;
             phase_offsets <= 0; channel_mask <= ALL_ON; trial_active <= 1'b0;
         end else begin
             done <= 1'b0;
             changed <= 1'b0;
             if (restore) begin
-                phase_offsets <= saved_offsets;
+                // Codes use units of 1/phase_steps. A table from another number
+                // of steps is not a valid saved calibration for this config.
+                phase_offsets <= (saved_steps == phase_steps) ? saved_offsets : 0;
+                if (saved_steps != phase_steps) begin
+                    saved_offsets <= 0;
+                    saved_steps <= phase_steps;
+                end
                 channel_mask <= ALL_ON;
                 trial_active <= 1'b0;
                 changed <= 1'b1;
-            end
-            case (state)
+                state <= S_IDLE;
+                // A cancelled parse must release CMD's pending transaction too.
+                done <= busy;
+                busy <= 1'b0;
+                valid <= 1'b0;
+            end else case (state)
                 S_IDLE: if (start) begin
                     busy <= 1'b1; valid <= 1'b0; bad <= 1'b0;
                     store_q <= action_store;
@@ -103,8 +116,8 @@ module hap2_calibration #(
                     else begin
                         wait_data <= 1'b0;
                         if (is_digit) begin
-                            if (digits >= 3 || next_value >= phase_steps[8:0]) bad <= 1'b1;
-                            value <= next_value; digits <= digits + 1'b1;
+                            if (digits >= 3 || {18'd0, next_value} >= phase_steps) bad <= 1'b1;
+                            value <= next_value[9:0]; digits <= digits + 1'b1;
                             if (off_last) begin
                                 if (channel != CHANNELS-1) bad <= 1'b1;
                                 candidate[channel*8 +: 8] <= next_value[7:0];
@@ -128,7 +141,10 @@ module hap2_calibration #(
                         phase_offsets <= candidate;
                         channel_mask <= mask_q;
                         trial_active <= !store_q;
-                        if (store_q) saved_offsets <= candidate;
+                        if (store_q) begin
+                            saved_offsets <= candidate;
+                            saved_steps <= phase_steps;
+                        end
                         changed <= 1'b1;
                     end
                     state <= S_IDLE;

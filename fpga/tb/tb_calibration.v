@@ -35,6 +35,14 @@ module tb_calibration;
         begin checks=checks+1; if(!ok) begin $display("FAIL %0s",name); $fatal; end end
     endtask
 
+    task set_values;
+        input string text;
+        begin
+            for(i=0;i<text.len();i=i+1)mem[32+i]=text[i];
+            olen=text.len();
+        end
+    endtask
+
     initial begin
         for(i=0;i<128;i=i+1) mem[i]=0;
         for(i=0;i<24;i=i+1) mem[i]=geom[8*24-1-8*i -: 8];
@@ -60,6 +68,28 @@ module tb_calibration;
         check_ok(valid && !trial,"store accepted");
         @(negedge clk); restore=1; @(negedge clk); restore=0;
         check_ok(offsets[14*8 +: 8]==15,"stored offsets survive restore");
+
+        set_values("512,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");launch;
+        check_ok(!valid && offsets[14*8 +: 8]==15,"512 rejected before truncation");
+        set_values("575,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");launch;
+        check_ok(!valid && offsets[14*8 +: 8]==15,"575 rejected atomically");
+        set_values("63,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");launch;
+        check_ok(valid && offsets[7:0]==63,"largest 64-step code accepted");
+        @(negedge clk);steps=8;restore=1;@(negedge clk);restore=0;
+        check_ok(offsets==0 && !trial,"changing steps invalidates saved table");
+        @(negedge clk);steps=64;restore=1;@(negedge clk);restore=0;
+        check_ok(offsets==0,"old codes cannot reappear after changing back");
+        steps=256;set_values("255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");launch;
+        check_ok(valid && offsets[7:0]==255,"largest 256-step code accepted");
+        set_values("256,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");launch;
+        check_ok(!valid && offsets[7:0]==255,"256 rejected without altering saved table");
+        store=0;mask=1;set_values("1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
+        @(negedge clk);start=1;@(negedge clk);start=0;
+        repeat(5)@(negedge clk);restore=1;@(negedge clk);restore=0;
+        check_ok(done && !valid,"cancelled transaction completes with failure");
+        repeat(200)@(negedge clk);
+        check_ok(!busy && !trial && channel_mask==16'hffff && offsets[7:0]==255,
+                 "restore cancels a pending trial");
 
         $display("PASS calibration %0d checks",checks); $finish;
     end

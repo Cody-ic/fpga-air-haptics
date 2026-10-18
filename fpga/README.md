@@ -249,13 +249,19 @@ bash tb/run_verilator.sh
 
 ## HAP3 声明了哪些能力
 
-固件在 HELLO 应答里声明 `caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION`。
+固件在 HELLO 应答里声明 `CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS`；
+仅当前 4×4 R5 / 11 mm 配置额外声明 `CALIBRATION`。8×8 不声明、不接受校准命令。
 
 `SCAN_PATHS` 是这一轮才加上的：多段草图从「收到文本」到「按节拍走出焦点」整条路都通了、也端到端仿真过了，才敢声明。上位机会按能力声明决定发什么——`controller.py` 里对 `scan_paths != NONE` 的配置会先查这个能力，没声明就不发。
 
 `CALIBRATION` 用于 4×4 阵列的逐通道试验：`mask` 的每一位决定对应通道是否输出，`offsets` 给每路名义聚焦相位再加一个补偿码。整条命令全部验证通过后才一起生效，STATE 回传的是已经叠加补偿的实际相位。`store` 只保存在 FPGA 寄存器中，断电会清空，不是永久写入 Flash。
 
 当前协议的 `mask` 只有 32 位，因此 4×4 的 16 路完整支持；扩到 8×8 时必须先把协议、电脑端和 FPGA 端的掩码扩到至少 64 位。64 路相位补偿表本身也要随协议一起扩展并重新做端到端测试。
+
+8×8 状态省略可选的 `channel_mask` / `phase_offsets`，客户端按协议解释为全部 64 路和零补偿，
+不再发送截断的 32 位掩码。两种阵列均保留发射、相位回读及外置接收采样。
+远程新握手先关闭输出、撤销临时校准，并要求重新 CONFIG；本地独立播放不被握手中断。
+切换相位档数会清除不兼容的已保存补偿，切回原档数也不会自动恢复旧表。
 
 固件现在声明 `adc_capture=1`。`CAPTURE` 驱动外接 ADCS7476，在 400 kS/s 下采 200 点并通过专用 ACK 回传；仿真同时核对了 1 次预热、200 点内容、延迟应答、CRC 和缓存释放。数字实现通过不等于接收硬件已工作：未接 ADCS7476 时采样输入只有数字上拉/下拉状态，不能当作真实接收电压。PMOD0 已预留 SCLK=`T24`、CS_N=`R17`、SDATA=`L24`，仍需按 [接收采样方案](接收采样方案.md) 完成小板和上板测量。
 
