@@ -73,6 +73,7 @@ module tb_out;
         .cfg_change(cfg_change),
         .cfg_level(cfg_level), .cfg_mod_hz(cfg_mod_hz),
         .enable(enable),
+        .channel_mask(16'hffff), .phase_offsets(128'd0),
         .tbl_new(ph_done),
         .tbl_addr(ph_rd2_addr), .tbl_data(ph_rd2_data),
         .out_pos(out_pos), .out_neg(out_neg)
@@ -88,6 +89,7 @@ module tb_out;
         .cfg_change(cfg_change),
         .cfg_level(cfg_level), .cfg_mod_hz(cfg_mod_hz),
         .enable(enable),
+        .channel_mask(16'hffff), .phase_offsets(128'd0),
         .tbl_new(ph_done),
         .tbl_addr(ph_rd2_addr), .tbl_data(ph_rd2_data),
         .out_pos(dt_pos), .out_neg(dt_neg)

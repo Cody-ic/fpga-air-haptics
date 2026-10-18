@@ -14,6 +14,53 @@
 set root [file normalize [file dirname [info script]]]
 cd $root
 
+# 默认4×4直接输出；8×8使用R2移位接口和独立顶层/约束。
+set array_profile 4x4
+if {[info exists ::env(HAPTICS_ARRAY)]} {
+    set array_profile $::env(HAPTICS_ARRAY)
+}
+if {$array_profile ni {4x4 8x8}} {
+    error "HAPTICS_ARRAY must be 4x4 or 8x8"
+}
+set device_version B
+if {[info exists ::env(HAPTICS_DEVICE_VERSION)]} {
+    set device_version $::env(HAPTICS_DEVICE_VERSION)
+}
+if {$device_version ni {B C}} {
+    error "HAPTICS_DEVICE_VERSION must be B or C; verify the chip marking"
+}
+
+# 默认输出到 J23；HAPTICS_PINOUT=pmod 可重新构建已经上板验证的旧接线。
+# 两套工程使用不同目录，J23 构建不会覆盖旧 PMOD 比特流。
+set pinout j23
+if {[info exists ::env(HAPTICS_PINOUT)]} {
+    set pinout $::env(HAPTICS_PINOUT)
+}
+switch -- $pinout {
+    j23 {
+        set project_name haptics138kpro_j23
+        set pin_constraints tang_mega_138k_pro.cst
+    }
+    pmod {
+        set project_name haptics138kpro
+        set pin_constraints tang_mega_138k_pro_pmod.cst
+    }
+    default {
+        error "HAPTICS_PINOUT must be j23 or pmod"
+    }
+}
+set top_module board_top
+if {$array_profile eq "8x8"} {
+    if {$pinout ne "j23"} {
+        error "8x8 requires the J23-to-H1 shift-register wiring"
+    }
+    set project_name haptics138kpro_8x8
+    set pin_constraints tang_mega_138k_pro_8x8.cst
+    set top_module board_shift_top
+}
+puts "Array: $array_profile; pinout: $pinout; device: $device_version; top: $top_module"
+puts "Project: $project_name; constraints: $pin_constraints"
+
 # ---- 1. 建工程 ----
 # 器件：**GW5AST-138B，封装 FCPBG676A（676 球），型号 GW5AST-LV138FPG676AC1/I0**。
 # 2026-10-14 定案：板子是 **Tang MEGA 138K Pro**，芯片 GW5AST-LV138FPG676A，
@@ -27,11 +74,10 @@ cd $root
 #    商业版授权不用买：Sipeed 提供免费在线 Float Lic，填 ip 106.55.34.119 / port 10559
 #    （不通就用域名 gowinlic.sipeed.com 对应的 IP）。
 #
-# 如果 Programmer 报 ID code mismatch，说明芯片是 **138C** 而不是 138B ✗
-# → 把 -device_version 改成 C 再跑一次 ✓。芯片到底 B 还是 C，看 FPGA 表面
-#   镭雕印记**第三行第 5 个字符**（官方说明：是 B 就是版本 B，是 C 就是 C）。
-create_project -name haptics138kpro -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
-    -device_version B -force
+# B/C可能共享JTAG识别码，不能单凭下载器读数区分。核对芯片表面版本标记后，
+# 设置 HAPTICS_DEVICE_VERSION=B 或 C；此处默认B只为保留旧构建行为。
+create_project -name $project_name -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
+    -device_version $device_version -force
 
 # ---- 2. 设计文件（自动按扩展名认类型，.v = Verilog）----
 set srcs [lsort [glob -nocomplain [file join $root .. rtl *.v]]]
@@ -46,12 +92,12 @@ add_file {*}$srcs
 # 注意：必须给**绝对路径**。工程文件建在 $root/haptics138kpro/ 里，布局布线阶段
 # 会拿工程目录当基准去解析相对路径，写成 tang_mega_138k_pro.cst 就会找不到
 # （报 CM2001: Cannot open file）。
-add_file [file join $root tang_mega_138k_pro.cst]
+add_file [file join $root $pin_constraints]
 add_file [file join $root tang_mega_138k_pro.sdc]
 
 # ---- 4. 顶层 + 跑 ----
-set_option -top_module board_top
-set_option -output_base_name board_top
+set_option -top_module $top_module
+set_option -output_base_name $top_module
 
 # 把 CPU 配置复用脚（D00~D15）当普通 IO 用。这一条是必须的：
 # 板上两个 PMOD 里 P19/R19/T21/U21 就是 D06/D07/D04/D05，不放开的话布局阶段直接报
@@ -69,7 +115,7 @@ set_option -use_cpu_as_gpio 1
 # 布局直接报
 #   PR2017 : 'array_pos[0]' cannot be placed ... dedicated pin (CPU/SSPI)
 # 官方 138K 例程（pmod_led）的工程配置里 CPU 和 SSPI 两项都是 true ✓，
-# 实测补上这一条之后这 5 个脚立刻能布局（见 _scratch/ 里的一次性验证工程）。
+# 实测补上这一条之后这 5 个脚立刻能布局（138K 那版工程里验证过；该验证工程是临时的，已删）。
 set_option -use_sspi_as_gpio 1
 
 # 时序报告默认只打印最差的一小批路径（我们一直是 50 条），于是"修掉 20 条之后

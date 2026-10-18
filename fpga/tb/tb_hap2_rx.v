@@ -377,8 +377,10 @@ module tb_hap2_rx;
         .fx_um            (32'd0),
         .fy_um            (32'd0),
         .fz_um            (32'd150000),
+        .channel_mask     (32'h0000ffff),
         .phase_addr       (phase_addr),
-        .phase_data       (phase_data)
+        .phase_data       (phase_data),
+        .phase_offset_data(8'd0)
     );
 
     // 相位表：真实设计里由相位求解模块来写，这里先放一组已知值
@@ -1189,7 +1191,7 @@ module tb_hap2_rx;
             repeat (900) @(negedge clk);
             // 等应答真的发完：一条应答加一份状态帧，串口要发几百字节
             timeout = 0;
-            while (tx_busy && timeout < 4000000) begin
+            while (tx_busy && timeout < 6000000) begin
                 @(negedge clk);
                 timeout = timeout + 1;
             end
@@ -1315,7 +1317,7 @@ module tb_hap2_rx;
 
         // 让刚才排队的应答全部发完，后面的用例从一个干净的状态开始
         timeout = 0;
-        while (tx_busy && timeout < 4000000) begin
+        while (tx_busy && timeout < 6000000) begin
             @(negedge clk);
             timeout = timeout + 1;
         end
@@ -1328,7 +1330,7 @@ module tb_hap2_rx;
             sent_bytes = sent_bytes + 1;
         end
         timeout = 0;
-        while (tx_busy && timeout < 4000000) begin
+        while (tx_busy && timeout < 6000000) begin
             @(negedge clk);
             timeout = timeout + 1;
         end
@@ -1363,7 +1365,7 @@ module tb_hap2_rx;
             sent_bytes = sent_bytes + 1;
         end
         timeout = 0;
-        while (tx_busy && timeout < 4000000) begin
+        while (tx_busy && timeout < 6000000) begin
             @(negedge clk);
             timeout = timeout + 1;
         end

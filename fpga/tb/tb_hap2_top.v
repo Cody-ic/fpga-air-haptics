@@ -609,6 +609,7 @@ module tb_hap2_top;
         send_case(0);
         wait_frames(2);
         found("HAP3 ACK 1 HELLO proto=3");
+        // This generic bench uses 10 mm, not the calibrated R5 / 11 mm profile.
         found("caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS ");
         found("state=IDLE");
 

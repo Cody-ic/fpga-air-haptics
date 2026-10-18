@@ -19,9 +19,8 @@ module hap2_traj_scan #(
     parameter integer MAX_TXT  = 4096,   // 草图原文最长多少字节
     parameter integer FRAC     = 16,
     parameter integer TICK_CYC = 500,
-    // 原文缓冲：上下两半各 4 KB。解析时写「没在对外的」那一半，配置被接受了
-    // 才把对外的那一半切成它（换一个指针而已，不用搬运字节）。这样被拒绝的
-    // 配置不会污染回传里那份 scan_paths。
+    // 每份原文 4 KB；三份逻辑 bank 分别供已生效配置、正在发送的 STATE、待办配置。
+    // TXT_AW 保留旧参数含义：单份地址宽度是 TXT_AW-1（默认 12 位）。
     parameter integer TXT_AW   = 13
 ) (
     input  wire                      clk,
@@ -91,8 +90,10 @@ module hap2_traj_scan #(
     output wire                      beat_pulse,
     output wire                      walk_running,
 
-    // ---- 草图原文（给应答模块回传 scan_paths）----
-    // 地址只到「一半」：对外那份永远从这一半的开头数起，用不着知道在哪一半
+    // ---- 草图原文快照（给应答模块回传 scan_paths）----
+    // 与标量配置同拍 capture，此后直到下一份 STATE，长度和内容都不能改变。
+    input  wire                      txt_capture,
+    // 地址只在一份原文内；选哪份 bank 由本模块锁存，发送模块不需要知道。
     input  wire [TXT_AW-2:0]         txt_addr,
     output reg  [7:0]                txt_data,
     output wire [ADDR_W:0]           txt_len,
@@ -149,95 +150,79 @@ module hap2_traj_scan #(
     // ---- 顺手把原文抄一份 ----
     // 解析器读哪个字节，我们就存哪个字节：rd_data 比 rd_addr 晚一拍有效，
     // 所以地址也要跟着打一拍，两边才对得上（同一个字节会被写两次，值一样，无害）。
-    reg [TXT_AW-2:0] copy_addr_q;
-    reg [7:0]        txt_ram [0:(1 << TXT_AW)-1];
+    // 保留完整相对地址，先查界再截成 bank 内地址。解析器为了同步读会预取
+    // 尾字节之后的位置；4096 字节边界不能让这个预取地址回绕到第 0 字节。
+    reg [ADDR_W:0]   copy_addr_q;
+    // 三份 bank 只使用编号 0、1、2。按 2 的幂分配物理 RAM，保留单写口和同步读，
+    // 便于推断 BSRAM；第四份地址空间不用，绝不清空整块 RAM。
+    reg [7:0]        txt_ram [0:(1 << (TXT_AW+1))-1];
     reg [ADDR_W:0]   txt_len_r;
     reg              txt_valid_r;
-    reg              txt_sel;      // 0 = 对外的是低 4 KB，1 = 高 4 KB
-    // 「没有草图 → 回传 NONE」这五个字符要**一拍写一个字节**，分 5 拍写完。
-    // 原因（综合时报 IF0008 才发现）：块存储（BSRAM）只有一个写口，一拍里写 4 个
-    // 字节它没法用 BRAM 实现，工具只能退化成 65536 个触发器，直接超出芯片容量。
-    reg [2:0]        none_wr;      // 0 = 不在写；1..4 = 正在写第几个字节
-    reg              none_sel;     // NONE 要写进哪一半（提交那一刻定下来）
+    reg [1:0]        txt_sel;          // 已生效配置的 bank
+    reg [1:0]        txt_write_sel;    // 本次解析从开始到提交始终写同一份
+    reg [1:0]        txt_snap_sel;     // STATE 正在读的 bank
+    reg [ADDR_W:0]   txt_snap_len;
+    reg              txt_snap_valid;
 
-    // NONE 四个字符里的第 n 个（1..4）
-    function [7:0] none_byte;
-        input [2:0] n;
+    // 三份中总有一份不属于「已生效」和「正在发送」。发送很长时，连续 CONFIG
+    // 只在另外两份之间轮换，不能像双缓冲那样第二次改图就覆写旧 STATE 的文本。
+    function [1:0] free_txt_bank;
+        input [1:0] active_bank;
+        input [1:0] snapshot_bank;
         begin
-            case (n)
-                3'd1:    none_byte = "N";
-                3'd2:    none_byte = "O";
-                3'd3:    none_byte = "N";
-                default: none_byte = "E";
-            endcase
+            if (active_bank != 2'd0 && snapshot_bank != 2'd0) free_txt_bank = 2'd0;
+            else if (active_bank != 2'd1 && snapshot_bank != 2'd1) free_txt_bank = 2'd1;
+            else free_txt_bank = 2'd2;
         end
     endfunction
 
-    // 这块存储**必须只有一个写语句**：块存储（BSRAM）只有一个写口，
-    // 一拍里出现两处写（抄原文一处、写 NONE 一处）工具就没法用 BRAM 实现，
-    // 只能退化成 65536 个触发器，直接超出芯片容量（综合报 IF0008）。
-    // 所以这里先把「这一拍要不要写、写哪儿、写什么」算成一路，再写一次。
-    reg               txt_we;
-    reg [TXT_AW-1:0]  txt_wa;
-    reg [7:0]         txt_wd;
-
-    always @* begin
-        if (parse_busy) begin
-            // 解析器读哪个字节，就顺手抄一份
-            txt_we = 1'b1;
-            txt_wa = {~txt_sel, copy_addr_q};
-            txt_wd = rd_data;
-        end else if (none_wr != 3'd0) begin
-            txt_we = 1'b1;
-            txt_wa = {~none_sel, 9'd0, (none_wr - 3'd1)};
-            txt_wd = none_byte(none_wr);
-        end else begin
-            txt_we = 1'b0;
-            txt_wa = {TXT_AW{1'b0}};
-            txt_wd = 8'h00;
-        end
-    end
+    // accept_config 的标量寄存器与 txt_commit 同拍到达本模块。如果 STATE 也在
+    // 此拍取样，必须旁路看到刚提交的配置，而不是落后一份的活动指针。
+    wire [1:0] txt_active_now = (txt_commit && !txt_none) ? txt_write_sel : txt_sel;
+    wire [1:0] txt_snapshot_now = txt_capture ? txt_active_now : txt_snap_sel;
 
     always @(posedge clk) begin
         if (!rst_n) begin
-            copy_addr_q <= {(TXT_AW-1){1'b0}};
-            txt_len_r   <= {ADDR_W+1{1'b0}};
+            copy_addr_q <= {ADDR_W+1{1'b0}};
+            txt_len_r   <= 4;
             txt_valid_r <= 1'b0;
-            txt_sel     <= 1'b0;
+            txt_sel     <= 2'd0;
+            txt_write_sel <= 2'd1;
+            txt_snap_sel  <= 2'd0;
+            txt_snap_len  <= 4;
+            txt_snap_valid<= 1'b0;
             txt_data    <= 8'h00;
-            none_wr     <= 3'd0;
-            none_sel    <= 1'b0;
         end else begin
-            copy_addr_q <= (parse_rd_addr - src_off[ADDR_W-1:0]);
-            if (txt_we) txt_ram[txt_wa] <= txt_wd;      // 唯一的写口
-            txt_data <= txt_ram[{txt_sel, txt_addr}];
+            copy_addr_q <= ({1'b0, parse_rd_addr} - src_off);
+            if (parse_busy && copy_addr_q < src_len && copy_addr_q < MAX_TXT)
+                txt_ram[{txt_write_sel, copy_addr_q[TXT_AW-2:0]}] <= rd_data;
+            txt_data <= txt_ram[{txt_snap_sel, txt_addr}];
 
-            if (none_wr != 3'd0) begin
-                // 正在把 "NONE" 写进「没在对外的」那一半，一拍一个字节
-                if (none_wr == 3'd4) begin
-                    none_wr     <= 3'd0;      // 写完四个字节，现在才翻指针
-                    txt_len_r   <= 13'd4;
-                    txt_valid_r <= 1'b1;
-                    txt_sel     <= ~none_sel;
-                end else begin
-                    none_wr <= none_wr + 3'd1;
-                end
-            end else if (txt_commit) begin
+            if (parse_start)
+                txt_write_sel <= free_txt_bank(txt_active_now, txt_snapshot_now);
+
+            if (txt_commit) begin
                 if (txt_none) begin
-                    // 没有草图（预设图形、或 scan_paths=NONE）：排一个 4 拍的写字序列
-                    none_wr  <= 3'd1;
-                    none_sel <= txt_sel;
+                    // NONE 由发送模块的常量回退产生，不写 RAM、不改旧快照的字节。
+                    txt_len_r   <= 4;
+                    txt_valid_r <= 1'b0;
                 end else begin
                     txt_len_r   <= src_len;
                     txt_valid_r <= 1'b1;
-                    txt_sel     <= ~txt_sel;      // 有原文：指针直接翻（原文是解析时写的）
+                    txt_sel     <= txt_write_sel;
                 end
+            end
+
+            if (txt_capture) begin
+                txt_snap_sel   <= txt_active_now;
+                txt_snap_len   <= txt_commit ? (txt_none ? 4 : src_len) : txt_len_r;
+                txt_snap_valid <= txt_commit ? !txt_none : txt_valid_r;
             end
         end
     end
 
-    assign txt_len   = txt_len_r;
-    assign txt_valid = txt_valid_r;
+    assign txt_len   = txt_snap_len;
+    assign txt_valid = txt_snap_valid;
 
     // ---- 节拍表 + 走步器（hap2_traj 里已经接好的一对）----
     wire signed [PT_BITS-1:0] plan_x0, plan_y0;

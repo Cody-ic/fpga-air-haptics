@@ -43,7 +43,7 @@ module tb_top8;
         .BAUD        (BAUD),
         .HW_ROWS     (ROWS),
         .HW_COLS     (COLS),
-        .HW_PITCH_UM (10000),
+        .HW_PITCH_UM (10300),
         .PH_PIPE     (8),          // 64 路建议 8 条并行流水线（4 条也够，但只剩 4% 余量）
         .KEY_DEB_MS  (2),
         .STATE_MS    (0)
@@ -254,7 +254,7 @@ module tb_top8;
         send_case(0);
         wait_frames(2);
         found("HAP3 ACK 1 HELLO proto=3");
-        found("hw_rows=8 hw_cols=8 hw_pitch_um=10000");
+        found("hw_rows=8 hw_cols=8 hw_pitch_um=10300");
         found("max_channels=256");
 
         // ---- 2. 配一个 20 mm 的圆（64 路点表 + 节拍表）----

@@ -226,8 +226,8 @@ def expected_err(seq, verb, code):
 
 def expected_hello_ack(seq, boot_hex="A1B2C3D4"):
     return craft(
-        "HAP3 ACK %d HELLO proto=3 device=FPGA boot=%s simulated=0 hb_ms=3000 "
-        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS "
+        "HAP3 ACK %d HELLO proto=3 device=FPGA boot=%s simulated=0 hb_ms=3000 adc_capture=1 "
+        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION "
         "max_rows=16 max_cols=16 max_channels=256 max_nodes=64 "
         "max_scan_points=256 max_strokes=32 "
         "hw_rows=4 hw_cols=4 hw_pitch_um=10000 mapping=ROW_MAJOR_XY "
@@ -847,7 +847,7 @@ def main():
         print("  %-16s %3d 字节  %s" % (name, len(frame), note))
 
     # ---- 8×8 端到端预演（板子没到，先在仿真里把 64 路跑一遍）----
-    device8 = DemoDevice(array=ArraySpec(8, 8, 10000, "ROW_MAJOR_XY"))
+    device8 = DemoDevice(array=ArraySpec(8, 8, 10300, "ROW_MAJOR_XY"))
     tp8 = bytearray()
     t8_lines = []
     for name, frame, note in build_top8_cases(device8):

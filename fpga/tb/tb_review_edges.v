@@ -87,6 +87,7 @@ module tb_review_edges;
         .clk(clk), .rst_n(rst_n), .cfg_carrier_hz(32'd40000),
         .cfg_phase_steps(32'd64), .cfg_change(cfg_change),
         .cfg_level(level), .cfg_mod_hz(32'd0), .enable(enable),
+        .channel_mask(4'hf), .phase_offsets(32'd0),
         .tbl_new(tbl_new), .tbl_addr(addr24), .tbl_data(data24),
         .out_pos(pos24), .out_neg(neg24)
     );
@@ -94,6 +95,7 @@ module tb_review_edges;
         .clk(clk), .rst_n(rst_n), .cfg_carrier_hz(32'd40000),
         .cfg_phase_steps(32'd64), .cfg_change(cfg_change),
         .cfg_level(level), .cfg_mod_hz(32'd0), .enable(enable),
+        .channel_mask(4'hf), .phase_offsets(32'd0),
         .tbl_new(tbl_new), .tbl_addr(addr32), .tbl_data(data32),
         .out_pos(pos32), .out_neg(neg32)
     );
@@ -125,7 +127,7 @@ module tb_review_edges;
     reg [31:0] old_offsets [0:3];
     initial begin
         check(u_board.HW_PITCH_UM == 11000, "board default matches the 11 mm R5 array");
-        check(u_board.u_top.u_phase.PITCH_UM == 11000, "board pitch reaches the phase solver");
+        check(u_board.u_core.u_top.u_phase.PITCH_UM == 11000, "board pitch reaches the phase solver");
         phase_mem[0] = 0; phase_mem[1] = 3;
         phase_mem[2] = 7; phase_mem[3] = 11;
         repeat (4) begin
@@ -207,9 +209,11 @@ module tb_review_edges;
         release u_top.state_capture;
 
         // 本地首次播放要先编译；配置接受时不能让 STOP 吞掉自动 START。
-        force u_top.u_cmd.mode = 2'd0;
+        check(u_top.u_cmd.mode == 2'd1, "cold boot remains remote and idle until a key is pressed");
+        check(u_board.u_core.u_top.MAX_LINE == 8192, "board receive capacity includes full HAP3 frame");
         force u_top.loc_play = 1'b1;
         @(negedge clk); force u_top.loc_play = 1'b0;
+        check(u_top.u_cmd.mode == 2'd0, "first key selects local mode without a host handshake");
         guard = 0;
         while (!u_top.walk_running && guard < 100000) begin
             @(negedge clk); guard = guard+1;
@@ -230,19 +234,18 @@ module tb_review_edges;
         check(u_top.focus_x === -21'sd40000 && u_top.focus_y === -21'sd40000,
               "local resumed playback uses the newly committed square start");
         release u_top.loc_play; release u_top.loc_next; release u_top.loc_shape;
-        release u_top.u_cmd.mode;
 
         repeat (1010) @(negedge clk);
-        boot_before = u_board.boot_q;
+        boot_before = u_board.u_core.boot_q;
         check((^boot_before !== 1'bx) && boot_before != 0, "board boot identifier is initialized");
         board_rst_n = 1'b0;
         repeat (5) @(negedge clk);
         board_rst_n = 1'b1;
         repeat (1010) @(negedge clk);
-        check(u_board.boot_q !== boot_before, "board reset changes the boot identifier");
-        boot_before = u_board.boot_q;
+        check(u_board.u_core.boot_q !== boot_before, "board reset changes the boot identifier");
+        boot_before = u_board.u_core.boot_q;
         repeat (20) @(negedge clk);
-        check(u_board.boot_q === boot_before, "boot identifier is stable within a session");
+        check(u_board.u_core.boot_q === boot_before, "boot identifier is stable within a session");
         $display("Review edge checks passed: %0d", checks);
         $finish;
     end

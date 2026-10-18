@@ -21,7 +21,7 @@ class Capture:
         for key in ("simulated", "tx_running"):
             if fields[key] not in ("0", "1"):
                 raise ValueError("采样来源或输出标志无效")
-        if not fields["boot"] or fields["pin"] != "PA0":
+        if not fields["boot"] or fields["pin"] not in ("PA0", "ADCS7476"):
             raise ValueError("采样设备或引脚无效")
         integers = ("rev", "uptime_ms", "fs_hz", "bits", "n")
         if any(not fields[k].isascii() or not fields[k].isdecimal() for k in integers):

@@ -93,8 +93,8 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v rtl/hap2_top.v \
-          rtl/por_reset.v rtl/board_top.v tb/tb_board.v
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap3_adc_capture.v rtl/hap2_top.v \
+          rtl/por_reset.v rtl/board_core.v rtl/board_top.v tb/tb_board.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_board/board_sim"
 
@@ -108,7 +108,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v rtl/hap2_top.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap3_adc_capture.v rtl/hap2_top.v \
           tb/tb_top8.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top8/top8_sim"
@@ -123,8 +123,8 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v \
-          rtl/hap2_top.v tb/tb_hap2_top.v
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v \
+          rtl/hap3_adc_capture.v rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"
 
@@ -142,3 +142,56 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/fix_sqrt.v rtl/fix_div.v rtl/hap2_phase.v rtl/hap2_out.v \
           tb/tb_focus_propagation.v
 "$BUILD_DIR/obj_focus/focus_propagation_sim"
+
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_cmd_stop -o cmd_stop_sim -Mdir "$BUILD_DIR/obj_stop" \
+          rtl/hap2_cmd.v rtl/hap2_line_rx.v tb/tb_cmd_stop.v
+"$BUILD_DIR/obj_stop/cmd_stop_sim"
+
+# Closed-loop endpoints, immutable STATE text and physical 8×8 shift outputs.
+for bench in tb_traj_closed tb_shift595 tb_shift_wave tb_board_shift; do
+    echo "=== $bench ==="
+    verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+        --top-module "$bench" -o sim -Mdir "$BUILD_DIR/$bench" \
+        rtl/*.v "tb/$bench.v"
+    "$BUILD_DIR/$bench/sim"
+done
+for profile in 4 8; do
+    echo "=== immutable STATE ${profile}x${profile} ==="
+    args=()
+    if [ "$profile" = 8 ]; then
+        args=(-GROWS=8 -GCOLS=8 -GPITCH=10300)
+    fi
+    verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+        --top-module tb_state_snapshot "${args[@]}" -o sim \
+        -Mdir "$BUILD_DIR/tb_state_snapshot$profile" rtl/*.v tb/tb_state_snapshot.v
+    "$BUILD_DIR/tb_state_snapshot$profile/sim"
+done
+
+echo
+echo "=== 逐通道屏蔽与相位补偿（原子应用、撤销、保存）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_calibration -o calibration_sim -Mdir "$BUILD_DIR/obj_calibration" \
+          rtl/hap2_calibration.v tb/tb_calibration.v
+"$BUILD_DIR/obj_calibration/calibration_sim"
+
+echo
+echo "=== 外部 ADC 短窗口采样（预热、200 点、缓存保护）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_adc_capture -o adc_capture_sim -Mdir "$BUILD_DIR/obj_adc_capture" \
+          rtl/hap3_adc_capture.v tb/tb_adc_capture.v
+"$BUILD_DIR/obj_adc_capture/adc_capture_sim"
+
+echo
+echo "=== CAPTURE 端到端（串口命令 → ADC → 200 点延迟应答）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_capture_protocol -o capture_protocol_sim \
+          -Mdir "$BUILD_DIR/obj_capture_protocol" rtl/*.v tb/tb_capture_protocol.v
+"$BUILD_DIR/obj_capture_protocol/capture_protocol_sim"
+
+for bench in tb_state_calibration tb_calibration_protocol; do
+    echo "=== $bench ==="
+    verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+        --top-module "$bench" -o sim -Mdir "$BUILD_DIR/$bench" rtl/*.v "tb/$bench.v"
+    "$BUILD_DIR/$bench/sim"
+done

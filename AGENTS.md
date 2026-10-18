@@ -26,7 +26,7 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.
 - `python firmware/nucleo_f411re/tests/test_firmware.py`: native C/Python cross-checks using a host GCC compiler.
 - `python firmware/stm32f103c8_cube/tests/test_f103.py`: test F103 firmware modes and waveform buffers without flashing.
-- In `fpga/`: `bash tb/run_verilator.sh` runs 12 simulation benches; commercial Gowin builds use `board/build.tcl`.
+- In `fpga/`: `bash tb/run_verilator.sh` runs 24 simulation groups; commercial Gowin builds use `board/build.tcl`.
 - In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
 - `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
 

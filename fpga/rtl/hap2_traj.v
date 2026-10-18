@@ -64,6 +64,7 @@ module hap2_traj #(
     wire [8:0]         rd_mv;
     wire [23:0]        mv_beats;
     wire signed [31:0] mv_step_x, mv_step_y;
+    wire signed [PT_BITS-1:0] mv_end_x, mv_end_y;
     wire               mv_scan;
     wire [5:0]         mv_stroke;
 
@@ -96,6 +97,8 @@ module hap2_traj #(
         .mv_beats          (mv_beats),
         .mv_step_x         (mv_step_x),
         .mv_step_y         (mv_step_y),
+        .mv_end_x          (mv_end_x),
+        .mv_end_y          (mv_end_y),
         .mv_scan           (mv_scan),
         .mv_stroke         (mv_stroke)
     );
@@ -115,6 +118,8 @@ module hap2_traj #(
         .mv_beats     (mv_beats),
         .mv_step_x    (mv_step_x),
         .mv_step_y    (mv_step_y),
+        .mv_end_x     (mv_end_x),
+        .mv_end_y     (mv_end_y),
         .mv_scan      (mv_scan),
         .mv_stroke    (mv_stroke),
         .focus_x      (focus_x),

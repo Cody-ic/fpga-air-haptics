@@ -141,7 +141,7 @@ boot=boot_id rev=1 uptime_ms=1234 simulated=0 tx_running=1
 pin=PA0 fs_hz=400000 bits=12 n=200 raw=<200个0至4095的十进制整数>
 ```
 
-帧仍按第 1 节格式及 CRC 编码，ACK 原样返回请求序号。`rev/uptime_ms/tx_running` 在采样启动时记录；运行状态不是整个窗口的输出门控，也不用于改变播放状态。`boot/simulated` 必须与会话一致。客户端严格校验版本固定的引脚、位数、采样率、样本数及数值范围，拒绝坏帧，不能以历史波形填充新结果。
+帧仍按第 1 节格式及 CRC 编码，ACK 原样返回请求序号。`rev/uptime_ms/tx_running` 在采样启动时记录；运行状态不是整个窗口的输出门控，也不用于改变播放状态。`boot/simulated` 必须与会话一致。`pin=PA0` 表示 MCU 内置 ADC，`pin=ADCS7476` 表示 FPGA 外接 ADCS7476；客户端只接受这两个已定义来源，并严格校验位数、采样率、样本数及数值范围，拒绝坏帧，不能以历史波形填充新结果。
 
 采样可在待机、播放或本地模式请求，不要求 CONFIG，不改变图形，也不刷新心跳。单个窗口 200 点、400 kS/s，占 0.5 ms；F411 同时最多一个未完成请求，启动间隔至少 200 ms，电脑连续查看间隔至少 500 ms。窗口外不采样，不能当作连续示波器或整幅图形测量。
 
@@ -156,6 +156,9 @@ ADC 原码按 `code × Vref / 4095` 换算，默认 Vref=3300 mV，允许手工�
 仅 REMOTE、IDLE、无采样请求在途可更改。`trial` 还要求已配置 POINT、mod_hz=0、level=100；它设置临时相位与非零掩码，不立即输出，仍需 START。`store` 要求全部通道使能，仅写 RAM，并同时替换全部通道修正。成功后 rev 递增并回传 STATE。
 
 STOP/本地停止/心跳停止/REMOTE 新握手撤销临时 trial、恢复已有修正并要求重新 CONFIG；CONFIG 总是恢复全通道和已保存修正。临时 trial 存在时不允许切换 LOCAL。断电清空保存值；试验中收到错误不能当作修正成功。主机完整核验 ACK、STATE、采样元数据及复测结果后才发送 store。错误码包含 `BAD_CALIBRATION`、`STEADY_POINT_REQUIRED`、`BUSY`；无效修改不部分生效。
+
+FPGA 当前仅 4×4 R5 / 11 mm 配置声明校准能力；8×8 返回 `UNSUPPORTED`，并省略可选校准状态，
+按全通道、零补偿解释。FPGA 切换相位档数时会清除不兼容的已保存补偿，不把旧档数的码直接用于新档数。
 
 STATE 可选字段 `channel_mask`（十进制）与 `phase_offsets`（逐路码）说明实际门控与修正；缺省按全通道、零修正处理。`phases` 必须是叠加修正后的实际相位，不能再次由客户端加修正。详见[校准流程及边界](ARRAY_CALIBRATION.md)。
 

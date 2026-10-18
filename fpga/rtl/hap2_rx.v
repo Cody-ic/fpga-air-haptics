@@ -13,7 +13,7 @@
 module hap2_rx #(
     parameter integer CLK_HZ   = 50_000_000,
     parameter integer BAUD     = 115200,
-    parameter integer MAX_LINE = 4096,
+    parameter integer MAX_LINE = 8192,
     parameter integer ADDR_W   = 13
 ) (
     input  wire            clk,
@@ -47,7 +47,7 @@ module hap2_rx #(
     output wire [2:0]      field_enum,
     output wire [ADDR_W:0] field_off,
     output wire [ADDR_W:0] field_size,
-    output wire [18:0]     seen_mask,
+    output wire [22:0]     seen_mask,
     // 调试
     output wire [15:0]     crc_value,
     output wire [15:0]     crc_expected,
