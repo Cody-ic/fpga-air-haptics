@@ -8,8 +8,9 @@
 // 位置用定点小数累加：低 FRAC 位是小数部分，高 PT_BITS 位（含符号）是整数部分，
 // 单位 0.5 µm。每拍在累加器上加一个步进，对外只取整数部分：
 //   位置 = 起点 + 步进 × 已经走过的拍数
-// 步进是四舍五入过的，所以一整段走完的累计误差不到一个 0.5 µm 单位；
-// 而且每一行都从表里重新取步进，误差不会一行一行滚雪球。
+// 步进四舍五入后，段内累加器每轴误差上界为 拍数 / 2^(FRAC+1) 个 0.5 µm 单位；
+// 对外取整数时另有不足一个 0.5 µm 单位的截断误差。
+// 每段末拍直接到达表中的精确终点并清零小数，误差不会跨段或逐圈累积。
 //
 // 输出：
 //   focus_x / focus_y  当前焦点（0.5 µm 单位，相对阵列中心）
@@ -39,6 +40,8 @@ module hap2_traj_walk #(
     input  wire [23:0]               mv_beats,
     input  wire signed [31:0]        mv_step_x,
     input  wire signed [31:0]        mv_step_y,
+    input  wire signed [PT_BITS-1:0] mv_end_x,
+    input  wire signed [PT_BITS-1:0] mv_end_y,
     input  wire                      mv_scan,
     input  wire [5:0]                mv_stroke,
     // ---- 输出 ----
@@ -60,12 +63,14 @@ module hap2_traj_walk #(
     reg [15:0] tick;                  // 一拍之内的时钟计数
     reg [23:0] beats_left;            // 这一行还剩几拍
     reg signed [31:0] step_x, step_y; // 这一行每拍走多少
+    reg signed [PT_BITS-1:0] end_x, end_y;
     reg signed [ACC_W-1:0] acc_x, acc_y;
 
     // 预取：下一行的参数。pf 的含义
     //   0 = 没事干；1 = 地址刚发出去，等一拍；2 = 数据在位，可以收下来
     reg [23:0] n_beats;
     reg signed [31:0] n_step_x, n_step_y;
+    reg signed [PT_BITS-1:0] n_end_x, n_end_y;
     reg        n_scan;
     reg [5:0]  n_stroke;
     reg [1:0]  pf;
@@ -87,11 +92,15 @@ module hap2_traj_walk #(
             beats_left   <= 24'd0;
             step_x       <= 32'sd0;
             step_y       <= 32'sd0;
+            end_x        <= {PT_BITS{1'b0}};
+            end_y        <= {PT_BITS{1'b0}};
             acc_x        <= {(ACC_W){1'b0}};
             acc_y        <= {(ACC_W){1'b0}};
             n_beats      <= 24'd0;
             n_step_x     <= 32'sd0;
             n_step_y     <= 32'sd0;
+            n_end_x      <= {PT_BITS{1'b0}};
+            n_end_y      <= {PT_BITS{1'b0}};
             n_scan       <= 1'b0;
             n_stroke     <= 6'd0;
             pf           <= 2'd0;
@@ -138,6 +147,8 @@ module hap2_traj_walk #(
                     end else if (pf == 2'd2) begin
                         step_x       <= mv_step_x;
                         step_y       <= mv_step_y;
+                        end_x        <= mv_end_x;
+                        end_y        <= mv_end_y;
                         beats_left   <= mv_beats;
                         scan_on      <= mv_scan;
                         stroke_index <= mv_stroke;
@@ -156,6 +167,8 @@ module hap2_traj_walk #(
                     end else if (pf == 2'd2) begin
                         n_step_x <= mv_step_x;
                         n_step_y <= mv_step_y;
+                        n_end_x  <= mv_end_x;
+                        n_end_y  <= mv_end_y;
                         n_beats  <= mv_beats;
                         n_scan   <= mv_scan;
                         n_stroke <= mv_stroke;
@@ -169,13 +182,18 @@ module hap2_traj_walk #(
                             acc_x      <= acc_x_run;         // 走一步
                             acc_y      <= acc_y_run;
                             beats_left <= beats_left - 24'd1;
-                        if (beats_left == 24'd1) begin
+                            if (beats_left == 24'd1) begin
+                                // 末拍到达原始几何终点，消除本段四舍五入残差。
+                                acc_x        <= {end_x, {FRAC{1'b0}}};
+                                acc_y        <= {end_y, {FRAC{1'b0}}};
                                 // 这一行走完了：整行换掉（参数早就预取好了，不用等）
                                 step_x       <= n_step_x;
                                 step_y       <= n_step_y;
-                            beats_left   <= n_beats;
-                            scan_on      <= n_scan;
-                            stroke_index <= n_stroke;
+                                end_x        <= n_end_x;
+                                end_y        <= n_end_y;
+                                beats_left   <= n_beats;
+                                scan_on      <= n_scan;
+                                stroke_index <= n_stroke;
                                 rd_mv        <= rd_next;     // 接着预取下下行的后面一行
                                 pf           <= 2'd1;
                             end

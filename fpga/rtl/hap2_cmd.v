@@ -31,7 +31,10 @@ module hap2_cmd #(
     parameter integer WS_Z_MIN_UM =   20000,
     parameter integer WS_Z_MAX_UM =  300000,
     // 本地按键选中预设图形时用的半径（板上固定值；改这里就等于改「本地演示用多大」）
-    parameter integer LOC_RADIUS_UM = 20000
+    parameter integer LOC_RADIUS_UM = 20000,
+    // Physical output profile limits, checked before any configuration commit.
+    parameter integer MAX_CARRIER_HZ = 80000,
+    parameter integer MAX_PHASE_STEPS = 256
 ) (
     input  wire            clk,
     input  wire            rst_n,
@@ -239,6 +242,32 @@ module hap2_cmd #(
     reg [ADDR_W:0] sh_scan_size;
     reg [31:0]     sh_blank_us;
 
+    wire output_timing_bad = (sh_carrier_hz > MAX_CARRIER_HZ) ||
+                             (sh_phase_steps > MAX_PHASE_STEPS);
+
+    // Rejected remote frames may have populated the shadow registers. Local
+    // presets must inherit the accepted configuration, never that rejected data.
+    task prepare_local;
+        begin
+            sh_carrier_hz     <= cfg_carrier_hz;
+            sh_phase_steps    <= cfg_phase_steps;
+            sh_z_um           <= cfg_z_um;
+            sh_repeat_millihz <= cfg_repeat_millihz;
+            sh_mod_hz         <= cfg_mod_hz;
+            sh_level          <= cfg_level;
+            sh_blank_us       <= cfg_blank_us;
+            sh_shape          <= loc_shape;
+            sh_radius_um      <= LOC_RADIUS_UM[31:0];
+            sh_cx_um          <= 32'd0;
+            sh_cy_um          <= 32'd0;
+            sh_path_closed    <= 32'd1;
+            sh_path_off       <= {(ADDR_W+1){1'b0}};
+            sh_path_size      <= {(ADDR_W+1){1'b0}};
+            sh_scan_off       <= {(ADDR_W+1){1'b0}};
+            sh_scan_size      <= {(ADDR_W+1){1'b0}};
+        end
+    endtask
+
     // ---------------- 组合判定 ----------------
     reg [3:0] dec_err;
     reg       dec_want_state;
@@ -393,6 +422,7 @@ module hap2_cmd #(
                     if (mode == M_LOCAL)              dec_err = C_LOCAL_CONTROL;
                     else if (run_state != R_IDLE)     dec_err = C_BUSY;
                     else if (array_bad)               dec_err = C_HARDWARE_MISMATCH;
+                    else if (output_timing_bad)         dec_err = C_BAD_CONFIG;
                     else                              dec_commit = 1'b1;
                 end
 
@@ -655,10 +685,7 @@ module hap2_cmd #(
                         // 上电后什么都没配过：先按当前选中的图形配一份，配好了自动开播
                         local_cfg      <= 1'b1;
                         local_auto_run <= 1'b1;
-                        sh_shape         <= loc_shape;
-                        sh_radius_um     <= LOC_RADIUS_UM[31:0];
-                        sh_cx_um         <= 32'd0;
-                        sh_cy_um         <= 32'd0;
+                        prepare_local;
                         pending          <= P_SHAPE;
                         traj_shape_start <= 1'b1;
                         traj_preset      <= 1'b1;
@@ -674,10 +701,7 @@ module hap2_cmd #(
                         run_state <= R_IDLE;
                         walk_stop <= 1'b1;
                     end
-                    sh_shape         <= loc_shape;
-                    sh_radius_um     <= LOC_RADIUS_UM[31:0];
-                    sh_cx_um         <= 32'd0;
-                    sh_cy_um         <= 32'd0;
+                    prepare_local;
                     pending          <= P_SHAPE;
                     traj_shape_start <= 1'b1;
                     traj_preset      <= 1'b1;
@@ -696,7 +720,8 @@ module hap2_cmd #(
                         if (traj_none) begin
                             // 这份配置没有草图（scan_paths=NONE）：不需要节拍表，
                             // 检查过工作空间就直接生效，轨迹标记清掉
-                            if (ws_bad) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
+                            if (output_timing_bad) reject_config(C_BAD_CONFIG, lat_seq, lat_verb, ~local_cfg);
+                            else if (ws_bad) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
                             else        accept_config(1'b0, lat_seq, lat_verb, ~local_cfg);
                             pending <= P_IDLE;
                         end else begin
@@ -712,7 +737,8 @@ module hap2_cmd #(
                         pending <= P_IDLE;
                     end else if (traj_plan_done) begin
                         // 节拍表算好了，还要过最后一关：整张图在不在工作空间里
-                        if (ws_bad) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
+                        if (output_timing_bad) reject_config(C_BAD_CONFIG, lat_seq, lat_verb, ~local_cfg);
+                        else if (ws_bad) reject_config(C_OUT_OF_WORKSPACE, lat_seq, lat_verb, ~local_cfg);
                         else        accept_config(1'b1, lat_seq, lat_verb, ~local_cfg);
                         pending <= P_IDLE;
                     end

@@ -847,7 +847,7 @@ def main():
         print("  %-16s %3d 字节  %s" % (name, len(frame), note))
 
     # ---- 8×8 端到端预演（板子没到，先在仿真里把 64 路跑一遍）----
-    device8 = DemoDevice(array=ArraySpec(8, 8, 10000, "ROW_MAJOR_XY"))
+    device8 = DemoDevice(array=ArraySpec(8, 8, 10300, "ROW_MAJOR_XY"))
     tp8 = bytearray()
     t8_lines = []
     for name, frame, note in build_top8_cases(device8):

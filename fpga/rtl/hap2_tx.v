@@ -158,6 +158,7 @@ module hap2_tx #(
 
     localparam [8*4-1:0]  Z_NONE    = "NONE";
     localparam [8*17-1:0] Z_HB      = "HEARTBEAT_TIMEOUT";
+    localparam [8*12-1:0] Z_OUTPUT  = "OUTPUT_FAULT";
 
     // 帧编号
     localparam [1:0] F_HELLO = 2'd0;
@@ -218,7 +219,7 @@ module hap2_tx #(
     // 再看到真正的声明就报 EX3638，而且那条 1 位线网会把值截断。
     reg [15:0] seq_lat;      // 要原样抄回去的命令序号
     reg [31:0] uptime_ms;    // 上电到现在的毫秒数（状态帧用）
-    reg [15:0] sample;       // 状态快照序号（状态帧用）
+    reg [31:0] sample;       // 状态快照序号；不能在约 9 小时的 65535 边界回绕
 
     function [31:0] value_at;
         input [1:0] sel;
@@ -248,7 +249,7 @@ module hap2_tx #(
                 end
                 F_STATE: begin
                     case (idx)
-                        5'd0:  value_at = {16'h0, sample};
+                        5'd0:  value_at = sample;
                         5'd1:  value_at = uptime_ms;
                         5'd2:  value_at = {16'h0, revision_report};
                         5'd3:  value_at = output_on ? 32'd1 : 32'd0;
@@ -279,6 +280,23 @@ module hap2_tx #(
                 end
                 default: value_at = {16'h0, seq_lat};   // ERR 只要序号
             endcase
+        end
+    endfunction
+
+    // dec_ascii 以补码处理有符号数；计数器却是 uint32。用 33 位入口显式区分，
+    // 否则 sample / uptime_ms 超过 2^31 后会被打印成负数。10 位十进制可容纳
+    // 完整的 uint32（4294967295），坐标字段仍保留正确的负号。
+    function [32:0] decimal_at;
+        input [1:0] sel;
+        input [4:0] idx;
+        reg [31:0] value;
+        reg signed_value;
+        begin
+            value = value_at(sel, idx);
+            signed_value = ((sel == F_HELLO) && idx >= 5'd11 && idx <= 5'd14)
+                        || ((sel == F_STATE) && (idx == 5'd8 || idx == 5'd9
+                                             || idx == 5'd20 || idx == 5'd21));
+            decimal_at = {signed_value && value[31], value};
         end
     endfunction
 
@@ -334,6 +352,7 @@ module hap2_tx #(
                 endcase
                 default: case (id)
                     4'd1: name_char = (pos < 17) ? {1'b0, Z_HB  [8*17-1 - 8*pos -: 8]} : 9'h100;
+                    4'd7: name_char = (pos < 12) ? {1'b0, Z_OUTPUT[8*12-1 - 8*pos -: 8]} : 9'h100;
                     default: name_char = (pos <  4) ? {1'b0, Z_NONE[8*4 -1 - 8*pos -: 8]} : 9'h100;
                 endcase
             endcase
@@ -436,7 +455,7 @@ module hap2_tx #(
     wire        tx_done;
 
     reg         dec_start;
-    reg  [31:0] dec_value;
+    reg  [32:0] dec_value;
     wire        dec_done;
     wire        dec_neg;
     wire [4*DIGITS-1:0] dec_bcd;
@@ -453,7 +472,7 @@ module hap2_tx #(
         .tx_line(tx_line), .tx_done(tx_done)
     );
 
-    dec_ascii #(.BITS(32), .DIGITS(DIGITS)) u_dec (
+    dec_ascii #(.BITS(33), .DIGITS(DIGITS)) u_dec (
         .clk(clk), .rst_n(rst_n), .start(dec_start), .value(dec_value),
         .done(dec_done), .negative(dec_neg), .bcd(dec_bcd)
     );
@@ -511,11 +530,11 @@ module hap2_tx #(
             ph_idx      <= 9'd0;
             tx_idx      <= 13'd0;
             stream_txt  <= 1'b0;
-            sample      <= 16'd0;
+            sample      <= 32'd0;
             tx_start    <= 1'b0;
             tx_data     <= 8'h00;
             dec_start   <= 1'b0;
-            dec_value   <= 32'd0;
+            dec_value   <= 33'd0;
             crc_init    <= 1'b0;
             crc_valid   <= 1'b0;
             crc_data    <= 8'h00;
@@ -577,7 +596,7 @@ module hap2_tx #(
                     pos <= pos + 1'b1;
                     case (c)
                         P_DEC: begin
-                            dec_value <= value_at(frame_sel, num_idx);
+                            dec_value <= decimal_at(frame_sel, num_idx);
                             dec_start <= 1'b1;
                             num_idx   <= num_idx + 1'b1;
                             num_after <= S_NEXT;
@@ -746,7 +765,7 @@ module hap2_tx #(
                         ret_state <= S_PH_AFTER;
                         state     <= S_LIT;
                     end else begin
-                        dec_value <= {24'h0, phase_data};
+                        dec_value <= {25'h0, phase_data};
                         dec_start <= 1'b1;
                         state     <= S_PH_WAIT;
                     end

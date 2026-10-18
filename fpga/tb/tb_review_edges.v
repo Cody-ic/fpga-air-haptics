@@ -125,7 +125,7 @@ module tb_review_edges;
     reg [31:0] old_offsets [0:3];
     initial begin
         check(u_board.HW_PITCH_UM == 11000, "board default matches the 11 mm R5 array");
-        check(u_board.u_top.u_phase.PITCH_UM == 11000, "board pitch reaches the phase solver");
+        check(u_board.u_core.u_top.u_phase.PITCH_UM == 11000, "board pitch reaches the phase solver");
         phase_mem[0] = 0; phase_mem[1] = 3;
         phase_mem[2] = 7; phase_mem[3] = 11;
         repeat (4) begin
@@ -208,7 +208,7 @@ module tb_review_edges;
 
         // 本地首次播放要先编译；配置接受时不能让 STOP 吞掉自动 START。
         check(u_top.u_cmd.mode == 2'd1, "cold boot remains remote and idle until a key is pressed");
-        check(u_board.u_top.MAX_LINE == 8192, "board receive capacity includes full HAP3 frame");
+        check(u_board.u_core.u_top.MAX_LINE == 8192, "board receive capacity includes full HAP3 frame");
         force u_top.loc_play = 1'b1;
         @(negedge clk); force u_top.loc_play = 1'b0;
         check(u_top.u_cmd.mode == 2'd0, "first key selects local mode without a host handshake");
@@ -234,16 +234,16 @@ module tb_review_edges;
         release u_top.loc_play; release u_top.loc_next; release u_top.loc_shape;
 
         repeat (1010) @(negedge clk);
-        boot_before = u_board.boot_q;
+        boot_before = u_board.u_core.boot_q;
         check((^boot_before !== 1'bx) && boot_before != 0, "board boot identifier is initialized");
         board_rst_n = 1'b0;
         repeat (5) @(negedge clk);
         board_rst_n = 1'b1;
         repeat (1010) @(negedge clk);
-        check(u_board.boot_q !== boot_before, "board reset changes the boot identifier");
-        boot_before = u_board.boot_q;
+        check(u_board.u_core.boot_q !== boot_before, "board reset changes the boot identifier");
+        boot_before = u_board.u_core.boot_q;
         repeat (20) @(negedge clk);
-        check(u_board.boot_q === boot_before, "boot identifier is stable within a session");
+        check(u_board.u_core.boot_q === boot_before, "boot identifier is stable within a session");
         $display("Review edge checks passed: %0d", checks);
         $finish;
     end

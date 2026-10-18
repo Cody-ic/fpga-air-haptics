@@ -82,6 +82,7 @@ module tb_traj;
     wire [8:0] rd_mv = chk_mode ? tb_rd : walk_rd;
     wire [23:0] mv_beats;
     wire signed [31:0] mv_step_x, mv_step_y;
+    wire signed [PT_BITS-1:0] mv_end_x, mv_end_y;
     wire mv_scan;
     wire [5:0] mv_stroke;
 
@@ -98,7 +99,8 @@ module tb_traj;
         .laps_beats (laps_beats), .blank_beats (plan_blank_beats),
         .move_count (move_count), .start_x (traj_x0), .start_y (traj_y0),
         .rd_mv (rd_mv), .mv_beats (mv_beats), .mv_step_x (mv_step_x),
-        .mv_step_y (mv_step_y), .mv_scan (mv_scan), .mv_stroke (mv_stroke)
+        .mv_step_y (mv_step_y), .mv_scan (mv_scan), .mv_stroke (mv_stroke),
+        .mv_end_x (mv_end_x), .mv_end_y (mv_end_y)
     );
 
     reg  walk_start, walk_hold, walk_stop;
@@ -115,6 +117,7 @@ module tb_traj;
         .start_x (traj_x0), .start_y (traj_y0), .move_count (move_count),
         .rd_mv (walk_rd), .mv_beats (mv_beats), .mv_step_x (mv_step_x),
         .mv_step_y (mv_step_y), .mv_scan (mv_scan), .mv_stroke (mv_stroke),
+        .mv_end_x (mv_end_x), .mv_end_y (mv_end_y),
         .focus_x (focus_x), .focus_y (focus_y), .scan_on (scan_on),
         .stroke_index (stroke_index), .beat_pulse (beat_pulse), .running (walk_running)
     );

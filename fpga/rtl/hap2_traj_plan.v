@@ -8,6 +8,7 @@
 // 输出的每一行 = 一段「匀速直线移动」，按时间顺序排好：
 //   mv_beats    这一段走多少拍（一拍 10 µs）
 //   mv_step_x/y 每一拍 x / y 各走多少（定点小数，低 FRAC 位是小数部分）
+//   mv_end_x/y  本段的精确终点（0.5 µm 整数），末拍纠正步长量化误差
 //   mv_scan     这一段是扫描期还是抬笔跳转期（跳转期必须关输出）
 //   mv_stroke   这一段属于第几笔
 //
@@ -68,6 +69,8 @@ module hap2_traj_plan #(
     output reg  [23:0]               mv_beats,
     output reg  signed [31:0]        mv_step_x,
     output reg  signed [31:0]        mv_step_y,
+    output reg  signed [PT_BITS-1:0] mv_end_x,
+    output reg  signed [PT_BITS-1:0] mv_end_y,
     output reg                       mv_scan,
     output reg  [5:0]                mv_stroke
 );
@@ -137,6 +140,8 @@ module hap2_traj_plan #(
     reg [23:0]        beats_tab [0:2*MV_ROWS-1];
     reg signed [31:0] stx_tab   [0:2*MV_ROWS-1];
     reg signed [31:0] sty_tab   [0:2*MV_ROWS-1];
+    reg signed [PT_BITS-1:0] endx_tab [0:2*MV_ROWS-1];
+    reg signed [PT_BITS-1:0] endy_tab [0:2*MV_ROWS-1];
     reg               scan_tab  [0:2*MV_ROWS-1];
     reg [5:0]         stroke_tab[0:2*MV_ROWS-1];
 
@@ -162,6 +167,8 @@ module hap2_traj_plan #(
     reg [31:0] seg_len_q;
     reg [55:0] prod_q;
     reg signed [31:0] wr_sx, wr_sy;
+    // 第二遍从精确起点累计原始整数差值，不累计已量化的每拍步长。
+    reg signed [PT_BITS-1:0] exact_x, exact_y, wr_end_x, wr_end_y;
     reg        wr_scan;
     reg [1:0]  wr_next;      // 0 = 还有下一小段；1 = 接着写跳转段；2 = 换下一笔
 
@@ -197,6 +204,8 @@ module hap2_traj_plan #(
         mv_beats  <= beats_tab [{tbl_sel, rd_mv}];
         mv_step_x <= stx_tab   [{tbl_sel, rd_mv}];
         mv_step_y <= sty_tab   [{tbl_sel, rd_mv}];
+        mv_end_x  <= endx_tab  [{tbl_sel, rd_mv}];
+        mv_end_y  <= endy_tab  [{tbl_sel, rd_mv}];
         mv_scan   <= scan_tab  [{tbl_sel, rd_mv}];
         mv_stroke <= stroke_tab[{tbl_sel, rd_mv}];
     end
@@ -284,6 +293,10 @@ module hap2_traj_plan #(
             wr_beats     <= 24'd0;
             wr_sx        <= 32'sd0;
             wr_sy        <= 32'sd0;
+            exact_x      <= {PT_BITS{1'b0}};
+            exact_y      <= {PT_BITS{1'b0}};
+            wr_end_x     <= {PT_BITS{1'b0}};
+            wr_end_y     <= {PT_BITS{1'b0}};
             wr_scan      <= 1'b0;
             wr_next      <= 2'd0;
             sq_start     <= 1'b0;
@@ -391,6 +404,8 @@ module hap2_traj_plan #(
                 S_P1_STK: begin
                     if (s >= {1'b0, stroke_count}) begin
                         s     <= 6'd0;
+                        exact_x <= start_x;
+                        exact_y <= start_y;
                         state <= S_P2_STK;
                     end else begin
                         raw_len[s[4:0]] <= 32'd0;
@@ -486,6 +501,8 @@ module hap2_traj_plan #(
                                     wr_beats <= dv_quot[23:0];
                                     wr_sx    <= 32'sd0;
                                     wr_sy    <= 32'sd0;
+                                    wr_end_x <= exact_x;
+                                    wr_end_y <= exact_y;
                                     wr_scan  <= 1'b1;
                                     wr_next  <= 2'd1;
                                     state    <= S_P2_WR;
@@ -574,6 +591,8 @@ module hap2_traj_plan #(
                             wr_sy    <= seg_dy[31] ? -$signed(dv_quot[31:0])
                                                    :  $signed(dv_quot[31:0]);
                             wr_beats <= seg_beats;
+                            wr_end_x <= exact_x + seg_dx;
+                            wr_end_y <= exact_y + seg_dy;
                             wr_scan  <= 1'b1;
                             g2       <= g2 + 9'd1;
                             if (j + 9'd1 >= s_npt[s[4:0]] - 9'd1) begin
@@ -619,6 +638,8 @@ module hap2_traj_plan #(
                 S_P2_BX: begin
                     blk_dx   <= blk_dx_now;                          // 本拍 pt 已是下一笔首点
                     blk_dy   <= blk_dy_now;
+                    wr_end_x <= pt_x;
+                    wr_end_y <= pt_y;
                     dv_numer <= ({24'h0, abs_blk_dx_now} << FRAC) + {33'h0, blank_beats[23:1]};
                     dv_denom <= {8'h0, blank_beats};
                     dv_start <= 1'b1;
@@ -666,8 +687,12 @@ module hap2_traj_plan #(
                     beats_tab [{~tbl_sel, mv_wr}] <= wr_beats;
                     stx_tab   [{~tbl_sel, mv_wr}] <= wr_sx;
                     sty_tab   [{~tbl_sel, mv_wr}] <= wr_sy;
+                    endx_tab  [{~tbl_sel, mv_wr}] <= wr_end_x;
+                    endy_tab  [{~tbl_sel, mv_wr}] <= wr_end_y;
                     scan_tab  [{~tbl_sel, mv_wr}] <= wr_scan;
                     stroke_tab[{~tbl_sel, mv_wr}] <= s;
+                    exact_x <= wr_end_x;
+                    exact_y <= wr_end_y;
                     mv_wr <= mv_wr + 9'd1;
                     case (wr_next)
                         2'd0:    state <= S_P2_SEG;

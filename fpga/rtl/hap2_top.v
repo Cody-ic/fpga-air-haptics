@@ -46,7 +46,10 @@ module hap2_top #(
     parameter integer        STATE_MS     = 500,
     parameter integer        PH_PIPE      = 4,         // 相位并行几条开方流水线
     parameter integer        OUT_DEAD_CYC = 0,         // 互补输出的死区拍数（单端驱动填 0）
-    parameter integer        TICK_CYC     = 500        // 50 MHz 下 10 µs = 500 拍
+    parameter integer        TICK_CYC     = 500,       // 50 MHz 下 10 µs = 500 拍
+    parameter integer        MAX_CARRIER_HZ = 80000,
+    parameter integer        MAX_PHASE_STEPS = 256,
+    parameter integer        HAS_OUTPUT_FAULT = 0
 ) (
     input  wire clk,
     input  wire rst_n,
@@ -59,6 +62,7 @@ module hap2_top #(
     input  wire        key_next,
     input  wire        key_play,
     input  wire        key_stop,
+    input  wire        output_fault,
     // 当前是不是本地控制模式（给状态灯用）
     output wire        mode_local,
     // 调试／观测：当前焦点与扫描开关（相位计算做出来之后这里接阵列）
@@ -72,7 +76,9 @@ module hap2_top #(
     // ---- 送给驱动电路的 16 路方波 ----
     // 半桥驱动要互补输入时用 array_neg（带死区）；单端驱动只用 array_pos
     output wire [HW_ROWS*HW_COLS-1:0] array_pos,
-    output wire [HW_ROWS*HW_COLS-1:0] array_neg
+    output wire [HW_ROWS*HW_COLS-1:0] array_neg,
+    output wire sample_tick,
+    output wire drive_enable
 );
 
     // ---------------- 接收通路 ----------------
@@ -192,7 +198,9 @@ module hap2_top #(
         .WS_Y_MAX_UM (WS_Y_MAX_UM),
         .WS_Z_MIN_UM (WS_Z_MIN_UM),
         .WS_Z_MAX_UM (WS_Z_MAX_UM),
-        .LOC_RADIUS_UM (LOC_RADIUS_UM)
+        .LOC_RADIUS_UM (LOC_RADIUS_UM),
+        .MAX_CARRIER_HZ (MAX_CARRIER_HZ),
+        .MAX_PHASE_STEPS (MAX_PHASE_STEPS)
     ) u_cmd (
         .clk              (clk),
         .rst_n            (rst_n),
@@ -353,6 +361,7 @@ module hap2_top #(
         .stroke_index       (stroke_index),
         .beat_pulse         (beat_pulse),
         .walk_running       (walk_running),
+        .txt_capture        (state_capture),
         .txt_addr           (txt_addr),
         .txt_data           (txt_data),
         .txt_len            (txt_len),
@@ -427,7 +436,9 @@ module hap2_top #(
         .tbl_addr           (ph_rd2_addr),
         .tbl_data           (ph_rd2_data),
         .out_pos            (array_pos),
-        .out_neg            (array_neg)
+        .out_neg            (array_neg),
+        .sample_tick        (sample_tick),
+        .drive_enable       (drive_enable)
     );
 
     // 一帧 STATE 要发几十毫秒，期间焦点一直在动、配置也可能被换掉。协议要求这一帧里
@@ -444,6 +455,7 @@ module hap2_top #(
     reg [2:0]  sn_shape;
     reg [1:0]  sn_mode, sn_run;
     reg [2:0]  sn_reason;
+    reg        sn_output_fault;
     reg [15:0] sn_rev;
     reg        sn_scan;
     reg [5:0]  sn_stroke;
@@ -467,6 +479,7 @@ module hap2_top #(
             sn_closed <= 32'd1;     sn_blank <= 32'd2000;
             sn_shape  <= 3'd3;      sn_mode  <= 2'd1;
             sn_run    <= 2'd0;      sn_reason<= 3'd0;
+            sn_output_fault <= 1'b0;
             sn_rev    <= 16'd0;     sn_scan  <= 1'b0;
             sn_stroke <= 6'd0;
             sn_fx_um  <= 32'sd0;
@@ -483,6 +496,7 @@ module hap2_top #(
                 sn_blank   <= cfg_blank_us;   sn_shape <= cfg_shape;
                 sn_mode    <= cmd_mode;       sn_run   <= cmd_run;
                 sn_reason  <= cmd_reason;     sn_rev   <= cmd_rev;
+                sn_output_fault <= (HAS_OUTPUT_FAULT != 0) && output_fault;
                 sn_scan    <= scan_on;        sn_stroke<= stroke_index;
                 // 明确扩为 32 位有符号数，再换单位；和相位表同拍锁存。
                 sn_fx_um <= $signed({{11{ph_pub_fx[20]}}, ph_pub_fx}) >>> 1;
@@ -570,8 +584,8 @@ module hap2_top #(
         // 下面这些一律来自**快照**：一份状态帧里的数据必须来自同一瞬间
         .mode             (sn_mode),
         .run_state        (sn_run),
-        .reason           (sn_reason),
-        .output_on        (sn_run == 2'd1 && sn_level != 32'd0 && sn_scan),
+        .reason           (sn_output_fault ? 3'd7 : sn_reason),
+        .output_on        (sn_run == 2'd1 && sn_level != 32'd0 && sn_scan && !sn_output_fault),
         .hw_rows          (HW_ROWS[7:0]),
         .hw_cols          (HW_COLS[7:0]),
         .hw_pitch_um      (HW_PITCH_UM),

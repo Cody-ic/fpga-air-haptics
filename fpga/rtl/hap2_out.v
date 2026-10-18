@@ -53,7 +53,11 @@ module hap2_out #(
     input  wire [7:0]                tbl_data,
     // ---- 输出 ----
     output reg  [ROWS*COLS-1:0]      out_pos,
-    output reg  [ROWS*COLS-1:0]      out_neg
+    output reg  [ROWS*COLS-1:0]      out_neg,
+    // 64 samples per carrier cycle, tied to the same phase accumulator.
+    // A fixed 18/20-clock serializer cadence would change the carrier frequency.
+    output reg                       sample_tick,
+    output wire                      drive_enable
 );
 
     localparam integer CHANNELS = ROWS * COLS;
@@ -126,6 +130,7 @@ module hap2_out #(
     // 声明放在生成块之前（综合器对顺序严格）；`phase_valid` 保证第一份相位表
     // 读进来之前不会驱动换能器（那时表里是未初始化内容）。
     wire out_gate = enable & mod_on & phase_valid & (cfg_level != 32'd0);
+    assign drive_enable = out_gate;
 
     function [3:0] log2s;            // S 只可能是 8..256
         input [31:0] s;
@@ -149,6 +154,7 @@ module hap2_out #(
     reg [7:0] next_code [0:CHANNELS-1];
     reg [ACC_BITS-1:0] next_off [0:CHANNELS-1];
     reg [ACC_BITS-1:0] acc;
+    reg [5:0] sample_slot;
     reg [7:0]          load_i;
     reg                loading, load_wait;
     reg                phase_commit, phase_valid;
@@ -210,6 +216,18 @@ module hap2_out #(
         if (!rst_n)          acc <= {ACC_BITS{1'b0}};
         else if (in_done)    acc <= {ACC_BITS{1'b0}};   // 换了载波：从零相位重新开始
         else                 acc <= acc + inc;
+    end
+
+    // out_pos and this pulse describe the same accumulator sample. Consumers
+    // see both registered values on the following edge (constant latency).
+    always @(posedge clk) begin
+        if (!rst_n || in_done) begin
+            sample_slot <= 6'd0;
+            sample_tick <= 1'b0;
+        end else begin
+            sample_slot <= acc[ACC_BITS-1 -: 6];
+            sample_tick <= (sample_slot != acc[ACC_BITS-1 -: 6]);
+        end
     end
 
     // ---------------- 调制包络累加器 ----------------

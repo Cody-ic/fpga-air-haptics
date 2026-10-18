@@ -14,6 +14,22 @@
 set root [file normalize [file dirname [info script]]]
 cd $root
 
+# 默认4×4直接输出；8×8使用R2移位接口和独立顶层/约束。
+set array_profile 4x4
+if {[info exists ::env(HAPTICS_ARRAY)]} {
+    set array_profile $::env(HAPTICS_ARRAY)
+}
+if {$array_profile ni {4x4 8x8}} {
+    error "HAPTICS_ARRAY must be 4x4 or 8x8"
+}
+set device_version B
+if {[info exists ::env(HAPTICS_DEVICE_VERSION)]} {
+    set device_version $::env(HAPTICS_DEVICE_VERSION)
+}
+if {$device_version ni {B C}} {
+    error "HAPTICS_DEVICE_VERSION must be B or C; verify the chip marking"
+}
+
 # 默认输出到 J23；HAPTICS_PINOUT=pmod 可重新构建已经上板验证的旧接线。
 # 两套工程使用不同目录，J23 构建不会覆盖旧 PMOD 比特流。
 set pinout j23
@@ -33,7 +49,17 @@ switch -- $pinout {
         error "HAPTICS_PINOUT must be j23 or pmod"
     }
 }
-puts "Pinout: $pinout; project: $project_name; constraints: $pin_constraints"
+set top_module board_top
+if {$array_profile eq "8x8"} {
+    if {$pinout ne "j23"} {
+        error "8x8 requires the J23-to-H1 shift-register wiring"
+    }
+    set project_name haptics138kpro_8x8
+    set pin_constraints tang_mega_138k_pro_8x8.cst
+    set top_module board_shift_top
+}
+puts "Array: $array_profile; pinout: $pinout; device: $device_version; top: $top_module"
+puts "Project: $project_name; constraints: $pin_constraints"
 
 # ---- 1. 建工程 ----
 # 器件：**GW5AST-138B，封装 FCPBG676A（676 球），型号 GW5AST-LV138FPG676AC1/I0**。
@@ -48,11 +74,10 @@ puts "Pinout: $pinout; project: $project_name; constraints: $pin_constraints"
 #    商业版授权不用买：Sipeed 提供免费在线 Float Lic，填 ip 106.55.34.119 / port 10559
 #    （不通就用域名 gowinlic.sipeed.com 对应的 IP）。
 #
-# 如果 Programmer 报 ID code mismatch，说明芯片是 **138C** 而不是 138B ✗
-# → 把 -device_version 改成 C 再跑一次 ✓。芯片到底 B 还是 C，看 FPGA 表面
-#   镭雕印记**第三行第 5 个字符**（官方说明：是 B 就是版本 B，是 C 就是 C）。
+# B/C可能共享JTAG识别码，不能单凭下载器读数区分。核对芯片表面版本标记后，
+# 设置 HAPTICS_DEVICE_VERSION=B 或 C；此处默认B只为保留旧构建行为。
 create_project -name $project_name -dir $root -pn GW5AST-LV138FPG676AC1/I0 \
-    -device_version B -force
+    -device_version $device_version -force
 
 # ---- 2. 设计文件（自动按扩展名认类型，.v = Verilog）----
 set srcs [lsort [glob -nocomplain [file join $root .. rtl *.v]]]
@@ -71,8 +96,8 @@ add_file [file join $root $pin_constraints]
 add_file [file join $root tang_mega_138k_pro.sdc]
 
 # ---- 4. 顶层 + 跑 ----
-set_option -top_module board_top
-set_option -output_base_name board_top
+set_option -top_module $top_module
+set_option -output_base_name $top_module
 
 # 把 CPU 配置复用脚（D00~D15）当普通 IO 用。这一条是必须的：
 # 板上两个 PMOD 里 P19/R19/T21/U21 就是 D06/D07/D04/D05，不放开的话布局阶段直接报
