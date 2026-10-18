@@ -53,7 +53,7 @@ module hap2_cmd #(
     input  wire [2:0]      field_enum,
     input  wire [ADDR_W:0] field_off,
     input  wire [ADDR_W:0] field_size,
-    input  wire [18:0]     seen_mask,
+    input  wire [22:0]     seen_mask,
 
     // ---- 板子实际阵列（握手时声明，用于核对 CONFIG）----
     input  wire [31:0]     array_rows,
@@ -107,6 +107,19 @@ module hap2_cmd #(
     output reg             walk_stop,           // 单拍：停下并回到起点
     output reg             traj_ready,          // 当前配置有一份可用的节拍表
 
+    // ---- 逐通道校准解析器 ----
+    output reg             calib_start,
+    output reg             calib_restore,
+    output reg             calib_store,
+    output reg [31:0]      calib_mask,
+    output reg [ADDR_W:0]  calib_geometry_off,
+    output reg [ADDR_W:0]  calib_geometry_len,
+    output reg [ADDR_W:0]  calib_offsets_off,
+    output reg [ADDR_W:0]  calib_offsets_len,
+    input  wire            calib_done,
+    input  wire            calib_valid,
+    input  wire            calib_trial_active,
+
     // ---- 应答 ----
     output reg             reply_valid,    // 单拍脉冲：有一条应答要发
     output reg  [1:0]      reply_kind,     // 0=ACK 1=ERR
@@ -151,6 +164,8 @@ module hap2_cmd #(
     localparam [3:0] V_PAUSE  = 4'd5;
     localparam [3:0] V_STOP   = 4'd6;
     localparam [3:0] V_SNAP   = 4'd7;
+    localparam [3:0] V_CAPTURE = 4'd8;
+    localparam [3:0] V_CALIBRATION = 4'd9;
 
     // ---------------- 字段编号 ----------------
     localparam [4:0] F_CARRIER_HZ  = 5'd0;
@@ -172,6 +187,10 @@ module hap2_cmd #(
     localparam [4:0] F_VALUE       = 5'd16;
     localparam [4:0] F_SCAN_PATHS  = 5'd17;
     localparam [4:0] F_BLANK_US    = 5'd18;
+    localparam [4:0] F_ACTION      = 5'd19;
+    localparam [4:0] F_GEOMETRY_ID = 5'd20;
+    localparam [4:0] F_MASK        = 5'd21;
+    localparam [4:0] F_OFFSETS     = 5'd22;
 
     // ---------------- 错误码（协议第 4 节）----------------
     localparam [3:0] C_NONE             = 4'd0;
@@ -184,6 +203,9 @@ module hap2_cmd #(
     localparam [3:0] C_BAD_MODE         = 4'd7;
     localparam [3:0] C_UNKNOWN_COMMAND  = 4'd8;
     localparam [3:0] C_HANDSHAKE_NEEDED = 4'd9;
+    localparam [3:0] C_BAD_CALIBRATION   = 4'd10;
+    localparam [3:0] C_STEADY_POINT      = 4'd11;
+    localparam [3:0] C_UNSUPPORTED       = 4'd12;
 
     // ---------------- 控制模式与运行状态 ----------------
     // 控制模式的编号与字段解析层里 LOCAL / REMOTE 的枚举一致
@@ -210,15 +232,16 @@ module hap2_cmd #(
     // 待办配置的三步：解析原文 → 编译节拍表 → 才回 ACK、才把配置换上去。
     // 之所以要「等」，是因为协议里 ACK applied=1 的意思就是「这份配置已经生效」，
     // 而能不能生效要等节拍表算出来才知道（算不出来必须回 BAD_CONFIG）。
-    localparam [1:0] P_IDLE  = 2'd0;
-    localparam [1:0] P_PARSE = 2'd1;
-    localparam [1:0] P_PLAN  = 2'd2;
-    localparam [1:0] P_SHAPE = 2'd3;
+    localparam [2:0] P_IDLE  = 3'd0;
+    localparam [2:0] P_PARSE = 3'd1;
+    localparam [2:0] P_PLAN  = 3'd2;
+    localparam [2:0] P_SHAPE = 3'd3;
+    localparam [2:0] P_CALIB = 3'd4;
 
     reg connected;          // 是否已完成握手
     reg array_bad;          // CONFIG 帧里阵列字段与实际不符
     reg [1:0] mode_value;   // MODE 命令的 value 解出来的模式
-    reg [1:0] pending;      // 见 P_*
+    reg [2:0] pending;      // 见 P_*
     reg [3:0] lat_verb;     // 待办配置的应答要用的命令名与序号
     reg [15:0] lat_seq;
     reg       local_cfg;        // 这次待办配置是本地按键发起的（不回串口）
@@ -322,6 +345,7 @@ module hap2_cmd #(
             traj_ready         <= ready;
             traj_txt_commit    <= 1'b1;    // 原文可以对外公布了（STATE 要回传）
             traj_txt_none      <= (sh_shape != SH_CUSTOM) || traj_none;
+            calib_restore      <= 1'b1; // CONFIG 恢复全通道与已保存补偿
             // 本地自动播放时直接 START；同时给 STOP 会被走步器的停止优先级吞掉。
             walk_stop          <= !(local_cfg && local_auto_run);
             if (do_reply) begin
@@ -429,6 +453,7 @@ module hap2_cmd #(
                 V_MODE: begin
                     if (run_state != R_IDLE)          dec_err = C_BUSY;
                     else if (!seen_mask[F_VALUE])     dec_err = C_BAD_MODE;
+                    else if (calib_trial_active && mode_value == M_LOCAL) dec_err = C_BUSY;
                     else begin
                         dec_mode_set = 1'b1;
                         dec_mode     = mode_value;
@@ -463,6 +488,18 @@ module hap2_cmd #(
                     // 只要一份状态，什么都不改
                 end
 
+                V_CAPTURE: begin
+                    dec_err = C_UNSUPPORTED; // 板级未连接 ADC 时绝不冒充采样成功
+                    dec_want_state = 1'b0;
+                end
+
+                V_CALIBRATION: begin
+                    if (mode == M_LOCAL) dec_err = C_LOCAL_CONTROL;
+                    else if (run_state != R_IDLE) dec_err = C_BUSY;
+                    else if (cfg_shape != 3'd0 || cfg_mod_hz != 0 || cfg_level != 100)
+                        dec_err = C_STEADY_POINT;
+                end
+
                 default: dec_err = C_UNKNOWN_COMMAND;
             endcase
         end
@@ -495,6 +532,14 @@ module hap2_cmd #(
             traj_preset      <= 1'b0;
             traj_txt_commit  <= 1'b0;
             traj_txt_none    <= 1'b0;
+            calib_start      <= 1'b0;
+            calib_restore    <= 1'b0;
+            calib_store      <= 1'b0;
+            calib_mask       <= 32'h0000ffff;
+            calib_geometry_off <= 0;
+            calib_geometry_len <= 0;
+            calib_offsets_off <= 0;
+            calib_offsets_len <= 0;
             walk_start       <= 1'b0;
             walk_stop        <= 1'b0;
             mode           <= M_REMOTE;    // 上电默认听电脑的，但不握手不接受命令
@@ -548,6 +593,8 @@ module hap2_cmd #(
             traj_shape_start <= 1'b0;
             traj_txt_commit  <= 1'b0;
             traj_txt_none    <= 1'b0;
+            calib_start      <= 1'b0;
+            calib_restore    <= 1'b0;
             walk_start       <= 1'b0;
             walk_stop        <= 1'b0;
 
@@ -558,6 +605,16 @@ module hap2_cmd #(
                 if (field_id == F_HW_PITCH && field_value != array_pitch_um) array_bad <= 1'b1;
                 if (field_id == F_MAPPING  && field_enum  != 3'd0)           array_bad <= 1'b1;
                 if (field_id == F_VALUE)                                     mode_value <= field_enum[1:0];
+
+                if (verb == V_CALIBRATION) begin
+                    case (field_id)
+                        F_ACTION: begin calib_store <= field_enum[0]; end
+                        F_GEOMETRY_ID: begin calib_geometry_off <= field_off; calib_geometry_len <= field_size; end
+                        F_MASK: calib_mask <= field_value;
+                        F_OFFSETS: begin calib_offsets_off <= field_off; calib_offsets_len <= field_size; end
+                        default: ;
+                    endcase
+                end
 
                 if (verb == V_CONFIG) begin          // CONFIG 的字段先写进影子
                     case (field_id)
@@ -614,6 +671,11 @@ module hap2_cmd #(
                     reply_seq        <= seq;
                     reply_code       <= dec_err;
                     reply_want_state <= 1'b0;
+                end else if (verb == V_CALIBRATION) begin
+                    pending       <= P_CALIB;
+                    calib_start   <= 1'b1;
+                    lat_verb      <= verb;
+                    lat_seq       <= seq;
                 end else if (dec_commit && sh_shape == SH_CUSTOM) begin
                     // 这份配置带多段草图：先解析原文，再编译节拍表，
                     // 两步都过了才回 ACK（见 P_PARSE / P_PLAN）
@@ -640,7 +702,10 @@ module hap2_cmd #(
                     reply_code       <= C_NONE;
                     reply_want_state <= dec_want_state;
 
-                    if (dec_hello)    connected <= 1'b1;
+                    if (dec_hello) begin
+                        connected <= 1'b1;
+                        calib_restore <= 1'b1;
+                    end
                     if (dec_mode_set) mode      <= dec_mode;
                     if (dec_run) begin
                         run_state <= dec_run_state;
@@ -752,6 +817,19 @@ module hap2_cmd #(
                     end
                 end
 
+                P_CALIB: begin
+                    if (calib_done) begin
+                        pending          <= P_IDLE;
+                        reply_valid      <= 1'b1;
+                        reply_kind       <= calib_valid ? 2'd0 : 2'd1;
+                        reply_verb       <= lat_verb;
+                        reply_seq        <= lat_seq;
+                        reply_code       <= calib_valid ? C_NONE : C_BAD_CALIBRATION;
+                        reply_want_state <= calib_valid;
+                        if (calib_valid) revision <= revision + 1'b1;
+                    end
+                end
+
                 default: ;
             endcase
 
@@ -760,6 +838,7 @@ module hap2_cmd #(
                 run_state <= R_IDLE;
                 reason    <= REASON_HB;
                 walk_stop <= 1'b1;
+                calib_restore <= 1'b1;
             end
 
             // 允许正在准备的配置完成，但撤销播放预约；完成事件绝不能覆盖停止。
@@ -769,6 +848,7 @@ module hap2_cmd #(
                 local_auto_run <= 1'b0;
                 walk_start     <= 1'b0;
                 walk_stop      <= 1'b1;
+                calib_restore  <= 1'b1;
                 // 同拍本地提交不应覆盖 STOP 应答。
                 if (remote_stop) begin
                     reply_valid      <= 1'b1;

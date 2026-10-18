@@ -87,6 +87,7 @@ module tb_review_edges;
         .clk(clk), .rst_n(rst_n), .cfg_carrier_hz(32'd40000),
         .cfg_phase_steps(32'd64), .cfg_change(cfg_change),
         .cfg_level(level), .cfg_mod_hz(32'd0), .enable(enable),
+        .channel_mask(4'hf), .phase_offsets(32'd0),
         .tbl_new(tbl_new), .tbl_addr(addr24), .tbl_data(data24),
         .out_pos(pos24), .out_neg(neg24)
     );
@@ -94,6 +95,7 @@ module tb_review_edges;
         .clk(clk), .rst_n(rst_n), .cfg_carrier_hz(32'd40000),
         .cfg_phase_steps(32'd64), .cfg_change(cfg_change),
         .cfg_level(level), .cfg_mod_hz(32'd0), .enable(enable),
+        .channel_mask(4'hf), .phase_offsets(32'd0),
         .tbl_new(tbl_new), .tbl_addr(addr32), .tbl_data(data32),
         .out_pos(pos32), .out_neg(neg32)
     );

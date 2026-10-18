@@ -25,6 +25,7 @@ module hap2_top #(
     parameter integer        HW_ROWS      = 4,
     parameter integer        HW_COLS      = 4,
     parameter integer        HW_PITCH_UM  = 11000,
+    parameter [8*24-1:0]     GEOMETRY_ID  = "d3e4d118b6b2ca2469907382",
     // ---- 设备声明的工作空间（微米）----
     // 握手时发给电脑，命令层也拿同一组值去查「图形有没有越界」。
     // 上板时按真实阵列的有效口径改小一点更安全。
@@ -80,6 +81,8 @@ module hap2_top #(
     output wire sample_tick,
     output wire drive_enable
 );
+    localparam integer CHANNELS = HW_ROWS * HW_COLS;
+    localparam integer CAL_CHANNELS = (CHANNELS > 32) ? 32 : CHANNELS;
 
     // ---------------- 接收通路 ----------------
     /* verilator lint_off UNUSEDSIGNAL */
@@ -99,15 +102,19 @@ module hap2_top #(
     wire [31:0]       field_value;
     wire [2:0]        field_type, field_enum;
     wire [ADDR_W:0]   field_off, field_size;
-    wire [18:0]       seen_mask;
+    wire [22:0]       seen_mask;
     wire [15:0]       crc_value, crc_expected;
     wire              rx_valid, rx_error;
     /* verilator lint_on UNUSEDSIGNAL */
 
     // 行缓冲读口：草图解析要借一下
     wire [ADDR_W-1:0] scan_rd_addr;
+    wire [ADDR_W-1:0] calib_rd_addr;
     wire [7:0]        buf_data;
     wire              scan_parse_busy;
+    wire              calib_busy;
+    wire [ADDR_W-1:0] ext_rd_addr = calib_busy ? calib_rd_addr : scan_rd_addr;
+    wire              ext_rd_busy = calib_busy | scan_parse_busy;
 
     hap2_rx #(
         .CLK_HZ   (CLK_HZ),
@@ -118,8 +125,8 @@ module hap2_top #(
         .clk          (clk),
         .rst_n        (rst_n),
         .uart_rx_pin  (uart_rx_pin),
-        .ext_rd_addr  (scan_rd_addr),
-        .ext_rd_busy  (scan_parse_busy),
+        .ext_rd_addr  (ext_rd_addr),
+        .ext_rd_busy  (ext_rd_busy),
         .buf_data_out (buf_data),
         .line_ready   (line_ready),
         .line_len     (line_len),
@@ -183,6 +190,15 @@ module hap2_top #(
     wire        traj_ready;
     wire        connected;
     wire        state_capture;      // 发送模块开始拼 STATE 的那一拍
+    wire        calib_start, calib_restore, calib_store;
+    wire [31:0] calib_mask_req;
+    wire [ADDR_W:0] calib_geometry_off, calib_geometry_len;
+    wire [ADDR_W:0] calib_offsets_off, calib_offsets_len;
+    wire        calib_done, calib_valid, calib_trial_active, calib_changed;
+    wire [CAL_CHANNELS-1:0] calib_mask_low;
+    wire [CAL_CHANNELS*8-1:0] calib_offsets_low;
+    wire [CHANNELS-1:0] calib_channel_mask = {{(CHANNELS-CAL_CHANNELS){1'b1}}, calib_mask_low};
+    wire [CHANNELS*8-1:0] calib_phase_offsets = {{(CHANNELS-CAL_CHANNELS)*8{1'b0}}, calib_offsets_low};
     // 图形包围盒（0.5 µm）与本地按键
     wire        bb_vld;
     wire signed [20:0] bb_xmin, bb_xmax, bb_ymin, bb_ymax;
@@ -218,6 +234,17 @@ module hap2_top #(
         .field_off        (field_off),
         .field_size       (field_size),
         .seen_mask        (seen_mask),
+        .calib_start      (calib_start),
+        .calib_restore    (calib_restore),
+        .calib_store      (calib_store),
+        .calib_mask       (calib_mask_req),
+        .calib_geometry_off(calib_geometry_off),
+        .calib_geometry_len(calib_geometry_len),
+        .calib_offsets_off(calib_offsets_off),
+        .calib_offsets_len(calib_offsets_len),
+        .calib_done       (calib_done),
+        .calib_valid      (calib_valid),
+        .calib_trial_active(calib_trial_active),
         .array_rows       ({24'h0, HW_ROWS[7:0]}),
         .array_cols       ({24'h0, HW_COLS[7:0]}),
         .array_pitch_um   (HW_PITCH_UM),
@@ -279,6 +306,20 @@ module hap2_top #(
         .cfg_shape        (cfg_shape),
         .cfg_path_closed  (cfg_path_closed),
         .cfg_blank_us     (cfg_blank_us)
+    );
+
+    hap2_calibration #(
+        .CHANNELS(CAL_CHANNELS), .ADDR_W(ADDR_W), .GEOMETRY_ID(GEOMETRY_ID)
+    ) u_calibration (
+        .clk(clk), .rst_n(rst_n), .start(calib_start),
+        .action_store(calib_store), .requested_mask(calib_mask_req),
+        .phase_steps(cfg_phase_steps),
+        .geometry_off(calib_geometry_off), .geometry_len(calib_geometry_len),
+        .offsets_off(calib_offsets_off), .offsets_len(calib_offsets_len),
+        .rd_addr(calib_rd_addr), .rd_data(buf_data), .busy(calib_busy),
+        .done(calib_done), .valid(calib_valid), .changed(calib_changed),
+        .restore(calib_restore), .trial_active(calib_trial_active),
+        .channel_mask(calib_mask_low), .phase_offsets(calib_offsets_low)
     );
 
     // ---------------- 本地按键（不接电脑时的面板操作）----------------
@@ -432,7 +473,9 @@ module hap2_top #(
         .cfg_level          (cfg_level),
         .cfg_mod_hz         (cfg_mod_hz),
         .enable             (output_on),
-        .tbl_new            (ph_done),
+        .channel_mask       (calib_channel_mask),
+        .phase_offsets      (calib_phase_offsets),
+        .tbl_new            (ph_done | calib_changed),
         .tbl_addr           (ph_rd2_addr),
         .tbl_data           (ph_rd2_data),
         .out_pos            (array_pos),
@@ -461,6 +504,8 @@ module hap2_top #(
     reg [5:0]  sn_stroke;
     reg signed [31:0] sn_fx_um, sn_fy_um;
     reg [31:0] sn_fz_um;
+    reg [31:0] sn_channel_mask;
+    reg [HW_ROWS*HW_COLS*8-1:0] sn_phase_offsets;
 
     assign ph_rd_addr = snap_idx;
 
@@ -485,6 +530,8 @@ module hap2_top #(
             sn_fx_um  <= 32'sd0;
             sn_fy_um  <= 32'sd0;
             sn_fz_um  <= 32'd150000;
+            sn_channel_mask <= 32'h0000ffff;
+            sn_phase_offsets <= 0;
         end else begin
             if (state_capture) begin
                 // 锁存这一瞬间：配置、状态、扫描开关
@@ -502,6 +549,8 @@ module hap2_top #(
                 sn_fx_um <= $signed({{11{ph_pub_fx[20]}}, ph_pub_fx}) >>> 1;
                 sn_fy_um <= $signed({{11{ph_pub_fy[20]}}, ph_pub_fy}) >>> 1;
                 sn_fz_um <= ph_pub_fz_um;
+                sn_channel_mask <= {{(32-CAL_CHANNELS){1'b0}}, calib_mask_low};
+                sn_phase_offsets <= calib_phase_offsets;
                 // 相位表：钉住现在对外的哪一半，从头复制一遍
                 snap_sel   <= ph_pub_sel;
                 snap_phase_valid <= ph_pub_valid;
@@ -511,7 +560,9 @@ module hap2_top #(
                 snap_count <= HW_ROWS * HW_COLS;
             end else if (snap_copy) begin
                 if (snap_wait) begin
-                    snap_ph[snap_idx] <= snap_phase_valid ? ph_rd_data : 8'd0;
+                    snap_ph[snap_idx] <= snap_phase_valid
+                        ? ((ph_rd_data + calib_phase_offsets[snap_idx*8 +: 8])
+                           & (cfg_phase_steps[7:0] - 1'b1)) : 8'd0;
                     snap_wait <= 1'b0;
                     if ({1'b0, snap_idx} + 9'd1 >= snap_count) snap_copy <= 1'b0;
                     else                                       snap_idx  <= snap_idx + 8'd1;
@@ -529,7 +580,11 @@ module hap2_top #(
     wire       tx_busy;
     /* verilator lint_on UNUSEDSIGNAL */
     reg [7:0] snap_rd_data;
-    always @(posedge clk) snap_rd_data <= snap_ph[phase_addr];
+    reg [7:0] snap_offset_data;
+    always @(posedge clk) begin
+        snap_rd_data <= snap_ph[phase_addr];
+        snap_offset_data <= sn_phase_offsets[phase_addr*8 +: 8];
+    end
 
     // ---------------- 应答组装与发送 ----------------
     reg        state_push;      // 单拍：主动插一份状态快照
@@ -610,8 +665,10 @@ module hap2_top #(
         .fz_um            (sn_fz_um),
         .scan_on          (sn_scan),
         .stroke_index     (sn_stroke),
+        .channel_mask     (sn_channel_mask),
         .phase_addr       (phase_addr),
         .phase_data       (snap_rd_data),
+        .phase_offset_data(snap_offset_data),
         .txt_addr         (txt_addr),
         .txt_data         (txt_data),
         .txt_len          (txt_len),

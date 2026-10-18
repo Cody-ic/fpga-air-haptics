@@ -77,10 +77,12 @@ module hap2_tx #(
     input  wire [31:0] fz_um,
     input  wire        scan_on,        // 这一刻是否在扫描（协议要求原样回传）
     input  wire [5:0]  stroke_index,   // 当前第几笔
+    input  wire [31:0] channel_mask,
 
     // ---- 相位表读口（同步读，一拍出数据）----
     output reg  [7:0]  phase_addr,
     input  wire [7:0]  phase_data,
+    input  wire [7:0]  phase_offset_data,
 
     // ---- 草图原文读口（同步读）：STATE 里的 scan_paths 要原样回传 ----
     output reg  [11:0] txt_addr,
@@ -92,12 +94,12 @@ module hap2_tx #(
     // ---------------- 报文明细 ----------------
     // 字符串宽度必须和字符数完全相等：Verilog 里字符串是右对齐的，
     // 宽度写错会整体错位。这里每个模板都以换行结尾，发到换行就算一帧结束。
-    localparam [8*325-1:0] T_HELLO =
-        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
+    localparam [8*337-1:0] T_HELLO =
+        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
     localparam [8*31-1:0]  T_ACK   = "HAP3 ACK @ ~ applied=1 rev=@*#\n";
     localparam [8*22-1:0]  T_ERR   = "HAP3 ERR @ ~ code=^*#\n";
-    localparam [8*369-1:0] T_STATE =
-        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
+    localparam [8*400-1:0] T_STATE =
+        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ channel_mask=@ phase_offsets=} phases=|*#\n";
 
     // 设备声明的固定能力（这些目前是定值，将来由板级配置决定）
     localparam [31:0] HB_MS         = 32'd3000;
@@ -124,6 +126,8 @@ module hap2_tx #(
     localparam [8*5-1:0]  N_PAUSE   = "PAUSE";
     localparam [8*4-1:0]  N_STOP    = "STOP";
     localparam [8*4-1:0]  N_SNAP    = "SNAP";
+    localparam [8*7-1:0]  N_CAPTURE = "CAPTURE";
+    localparam [8*11-1:0] N_CALIB   = "CALIBRATION";
 
     localparam [8*4-1:0]  C_NONE    = "NONE";
     localparam [8*4-1:0]  C_BUSY    = "BUSY";
@@ -138,6 +142,9 @@ module hap2_tx #(
     localparam [8*11-1:0] C_NOTRUN  = "NOT_RUNNING";
     localparam [8*8-1:0]  C_BADMODE = "BAD_MODE";
     localparam [8*15-1:0] C_UNKNOWN = "UNKNOWN_COMMAND";
+    localparam [8*15-1:0] C_BADCAL  = "BAD_CALIBRATION";
+    localparam [8*21-1:0] C_STEADY  = "STEADY_POINT_REQUIRED";
+    localparam [8*11-1:0] C_UNSUP   = "UNSUPPORTED";
 
     localparam [8*5-1:0]  M_LOCAL   = "LOCAL";
     localparam [8*6-1:0]  M_REMOTE  = "REMOTE";
@@ -197,6 +204,7 @@ module hap2_tx #(
     localparam [7:0] P_REASON= "!";
     localparam [7:0] P_PHASE = "|";
     localparam [7:0] P_TXT   = "?";        // 草图原文（scan_paths）整串插入
+    localparam [7:0] P_OFFSET= "}";        // 逐通道补偿表
 
     // ---------------- 模板与取值表 ----------------
     function [7:0] tmpl_byte;
@@ -206,10 +214,10 @@ module hap2_tx #(
             // 字符串在向量里靠高位存放：第 0 个字符在最高字节，
             // 所以要从最高位往下数，用「-:」而不是「+:」。
             case (sel)
-                F_HELLO: tmpl_byte = T_HELLO[8*325-1 - 8*pos -: 8];
+                F_HELLO: tmpl_byte = T_HELLO[8*337-1 - 8*pos -: 8];
                 F_ACK:   tmpl_byte = T_ACK  [8*31 -1 - 8*pos -: 8];
                 F_ERR:   tmpl_byte = T_ERR  [8*22 -1 - 8*pos -: 8];
-                default: tmpl_byte = T_STATE[8*369-1 - 8*pos -: 8];
+                default: tmpl_byte = T_STATE[8*400-1 - 8*pos -: 8];
             endcase
         end
     endfunction
@@ -271,7 +279,8 @@ module hap2_tx #(
                         5'd19: value_at = hw_pitch_um;
                         5'd20: value_at = fx_um;
                         5'd21: value_at = fy_um;
-                        default: value_at = fz_um;
+                        5'd22: value_at = fz_um;
+                        default: value_at = channel_mask;
                     endcase
                 end
                 F_ACK: begin
@@ -316,7 +325,9 @@ module hap2_tx #(
                     4'd4: name_char = (pos <  5) ? {1'b0, N_START [8*5 -1 - 8*pos -: 8]} : 9'h100;
                     4'd5: name_char = (pos <  5) ? {1'b0, N_PAUSE [8*5 -1 - 8*pos -: 8]} : 9'h100;
                     4'd6: name_char = (pos <  4) ? {1'b0, N_STOP  [8*4 -1 - 8*pos -: 8]} : 9'h100;
-                    default: name_char = (pos < 4) ? {1'b0, N_SNAP [8*4 -1 - 8*pos -: 8]} : 9'h100;
+                    4'd7: name_char = (pos < 4) ? {1'b0, N_SNAP [8*4 -1 - 8*pos -: 8]} : 9'h100;
+                    4'd8: name_char = (pos < 7) ? {1'b0, N_CAPTURE[8*7-1 - 8*pos -: 8]} : 9'h100;
+                    default: name_char = (pos < 11) ? {1'b0, N_CALIB[8*11-1 - 8*pos -: 8]} : 9'h100;
                 endcase
                 3'd1: case (id)
                     4'd0: name_char = (pos <  4) ? {1'b0, C_NONE   [8*4 -1 - 8*pos -: 8]} : 9'h100;
@@ -328,7 +339,10 @@ module hap2_tx #(
                     4'd6: name_char = (pos < 11) ? {1'b0, C_NOTRUN [8*11-1 - 8*pos -: 8]} : 9'h100;
                     4'd7: name_char = (pos <  8) ? {1'b0, C_BADMODE[8*8 -1 - 8*pos -: 8]} : 9'h100;
                     4'd8: name_char = (pos < 15) ? {1'b0, C_UNKNOWN[8*15-1 - 8*pos -: 8]} : 9'h100;
-                    default: name_char = (pos < 18) ? {1'b0, C_HANDSH[8*18-1 - 8*pos -: 8]} : 9'h100;
+                    4'd9: name_char = (pos < 18) ? {1'b0, C_HANDSH[8*18-1 - 8*pos -: 8]} : 9'h100;
+                    4'd10: name_char = (pos < 15) ? {1'b0, C_BADCAL[8*15-1 - 8*pos -: 8]} : 9'h100;
+                    4'd11: name_char = (pos < 21) ? {1'b0, C_STEADY[8*21-1 - 8*pos -: 8]} : 9'h100;
+                    default: name_char = (pos < 11) ? {1'b0, C_UNSUP[8*11-1 - 8*pos -: 8]} : 9'h100;
                 endcase
                 3'd2: case (id)
                     4'd1: name_char = (pos < 6) ? {1'b0, M_REMOTE[8*6 -1 - 8*pos -: 8]} : 9'h100;
@@ -426,7 +440,7 @@ module hap2_tx #(
 
     reg [8:0]  ph_idx;         // 相位表当前发到第几个通道
     reg [12:0] tx_idx;         // 草图原文当前发到第几个字节
-    reg        stream_txt;     // 1 = 这一轮「流水插入」的是草图原文，不是相位表
+    reg [1:0]  stream_kind;    // 0=实际相位，1=草图原文，2=校准补偿
 
     // 还没收到过配置时，STATE 里的 scan_paths 按 NONE 回
     function [7:0] none_char;
@@ -529,7 +543,7 @@ module hap2_tx #(
             num_neg     <= 1'b0;
             ph_idx      <= 9'd0;
             tx_idx      <= 13'd0;
-            stream_txt  <= 1'b0;
+            stream_kind <= 2'd0;
             sample      <= 32'd0;
             tx_start    <= 1'b0;
             tx_data     <= 8'h00;
@@ -642,12 +656,17 @@ module hap2_tx #(
                         end
                         P_PHASE: begin
                             ph_idx <= 9'd0;
-                            stream_txt <= 1'b0;
+                            stream_kind <= 2'd0;
                             state  <= S_PH_LOAD;
                         end
                         P_TXT: begin
                             tx_idx <= 13'd0;
-                            stream_txt <= 1'b1;
+                            stream_kind <= 2'd1;
+                            state  <= S_PH_LOAD;
+                        end
+                        P_OFFSET: begin
+                            ph_idx <= 9'd0;
+                            stream_kind <= 2'd2;
                             state  <= S_PH_LOAD;
                         end
                         default: begin
@@ -748,7 +767,7 @@ module hap2_tx #(
                 // -------- 相位表 --------
                 S_PH_LOAD: begin
                     // 同一套「流水插入」的机器，既发相位表也发草图原文
-                    if (stream_txt) txt_addr   <= tx_idx[11:0];
+                    if (stream_kind == 2'd1) txt_addr <= tx_idx[11:0];
                     else            phase_addr <= ph_idx[7:0];
                     state      <= S_PH_READ;
                 end
@@ -759,13 +778,13 @@ module hap2_tx #(
                 end
 
                 S_PH_CONV: begin
-                    if (stream_txt) begin
+                    if (stream_kind == 2'd1) begin
                         // 草图原文是原样的 ASCII，直接发；没收到过配置就回 NONE
                         lit       <= txt_valid ? txt_data : none_char(tx_idx[3:0]);
                         ret_state <= S_PH_AFTER;
                         state     <= S_LIT;
                     end else begin
-                        dec_value <= {25'h0, phase_data};
+                        dec_value <= {24'h0, (stream_kind == 2'd2) ? phase_offset_data : phase_data};
                         dec_start <= 1'b1;
                         state     <= S_PH_WAIT;
                     end
@@ -783,9 +802,9 @@ module hap2_tx #(
                 end
 
                 S_PH_AFTER: begin
-                    if (stream_txt) begin
+                    if (stream_kind == 2'd1) begin
                         if (tx_idx + 1'b1 >= txt_total) begin
-                            stream_txt <= 1'b0;
+                            stream_kind <= 2'd0;
                             state      <= S_NEXT;   // 原文发完，继续模板
                         end else begin
                             tx_idx <= tx_idx + 1'b1;

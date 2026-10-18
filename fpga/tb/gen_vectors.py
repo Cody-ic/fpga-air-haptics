@@ -227,7 +227,7 @@ def expected_err(seq, verb, code):
 def expected_hello_ack(seq, boot_hex="A1B2C3D4"):
     return craft(
         "HAP3 ACK %d HELLO proto=3 device=FPGA boot=%s simulated=0 hb_ms=3000 "
-        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS "
+        "caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION "
         "max_rows=16 max_cols=16 max_channels=256 max_nodes=64 "
         "max_scan_points=256 max_strokes=32 "
         "hw_rows=4 hw_cols=4 hw_pitch_um=10000 mapping=ROW_MAJOR_XY "

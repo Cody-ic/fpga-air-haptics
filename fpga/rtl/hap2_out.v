@@ -47,6 +47,8 @@ module hap2_out #(
     input  wire [31:0]               cfg_mod_hz,
     // ---- 门控 ----
     input  wire                      enable,       // 运行中 && 等级>0 && 正在扫描
+    input  wire [ROWS*COLS-1:0]     channel_mask,
+    input  wire [ROWS*COLS*8-1:0]   phase_offsets,
     // ---- 相位表读口（新表好了就读一遍，锁进本地寄存器）----
     input  wire                      tbl_new,      // 单拍：相位表刚更新
     output reg  [7:0]                tbl_addr,
@@ -194,8 +196,10 @@ module hap2_out #(
             end else if (loading) begin
                 if (load_wait) begin
                     // 数据这一拍有效：锁进本地，偏移也跟着算好
-                    next_code[load_i] <= tbl_data;
-                    next_off [load_i] <= tbl_data << off_shift;
+                    next_code[load_i] <= (tbl_data + phase_offsets[load_i*8 +: 8])
+                                         & (cfg_phase_steps[7:0] - 1'b1);
+                    next_off [load_i] <= ((tbl_data + phase_offsets[load_i*8 +: 8])
+                                         & (cfg_phase_steps[7:0] - 1'b1)) << off_shift;
                     load_wait    <= 1'b0;
                     if ({1'b0, load_i} + 9'd1 >= CHANNELS) begin
                         loading <= 1'b0;
@@ -263,9 +267,9 @@ module hap2_out #(
                 end else begin
                     dly         <= (dly << 1) | sq;   // 移位插入，位宽无关
                     // out_gate = 三个门控条件 × 调制包络：任何一个不满足，两个输出一起拉低
-                    out_pos[gi] <= out_gate & sq_pos;
+                    out_pos[gi] <= out_gate & channel_mask[gi] & sq_pos;
                     // enable=0 时两个输出一起拉低（半桥上下管都关，最安全）
-                    out_neg[gi] <= out_gate & sq_neg;
+                    out_neg[gi] <= out_gate & channel_mask[gi] & sq_neg;
                 end
             end
         end

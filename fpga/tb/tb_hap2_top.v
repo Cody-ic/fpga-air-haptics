@@ -609,7 +609,7 @@ module tb_hap2_top;
         send_case(0);
         wait_frames(2);
         found("HAP3 ACK 1 HELLO proto=3");
-        found("caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS ");
+        found("caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION ");
         found("state=IDLE");
 
         // ---- 2. 发一份带两笔草图的配置 ----

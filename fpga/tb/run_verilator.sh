@@ -93,7 +93,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v rtl/hap2_top.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap2_top.v \
           rtl/por_reset.v rtl/board_core.v rtl/board_top.v tb/tb_board.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_board/board_sim"
@@ -108,7 +108,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v rtl/hap2_top.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v rtl/hap2_top.v \
           tb/tb_top8.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top8/top8_sim"
@@ -123,7 +123,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           rtl/hap2_scan_parse.v rtl/fix_sqrt.v rtl/fix_div.v \
           rtl/hap2_traj_plan.v rtl/hap2_traj_walk.v rtl/hap2_traj.v \
           rtl/hap2_traj_scan.v rtl/hap2_shape.v rtl/hap2_pt_table.v \
-          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_local.v \
+          rtl/hap2_phase.v rtl/hap2_out.v rtl/hap2_calibration.v rtl/hap2_local.v \
           rtl/hap2_top.v tb/tb_hap2_top.v
 echo "-----------------------------------------"
 "$BUILD_DIR/obj_top/hap2_top_sim"
@@ -167,3 +167,10 @@ for profile in 4 8; do
         -Mdir "$BUILD_DIR/tb_state_snapshot$profile" rtl/*.v tb/tb_state_snapshot.v
     "$BUILD_DIR/tb_state_snapshot$profile/sim"
 done
+
+echo
+echo "=== 逐通道屏蔽与相位补偿（原子应用、撤销、保存）==="
+verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
+          --top-module tb_calibration -o calibration_sim -Mdir "$BUILD_DIR/obj_calibration" \
+          rtl/hap2_calibration.v tb/tb_calibration.v
+"$BUILD_DIR/obj_calibration/calibration_sim"

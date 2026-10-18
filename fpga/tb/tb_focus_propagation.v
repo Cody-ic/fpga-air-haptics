@@ -30,6 +30,7 @@ module tb_focus_propagation;
         .clk(clk), .rst_n(rst_n), .cfg_carrier_hz(32'd40000),
         .cfg_phase_steps(32'd64), .cfg_change(cfg_change),
         .cfg_level(32'd100), .cfg_mod_hz(32'd0), .enable(1'b1),
+        .channel_mask(16'hffff), .phase_offsets(128'd0),
         .tbl_new(done), .tbl_addr(table_addr), .tbl_data(table_data),
         .out_pos(output_pins)
     );

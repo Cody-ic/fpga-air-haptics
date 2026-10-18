@@ -37,7 +37,7 @@ module hap2_field_parse #(
     output reg  [2:0]        field_enum,  // 图形名/映射名/控制模式的编号
     output reg  [ADDR_W:0]   field_off,   // 字符串类字段在行缓冲里的起点
     output reg  [ADDR_W:0]   field_size,  // 字符串类字段的长度
-    output reg  [18:0]       seen_mask    // 已经出现过的字段，按编号置位（共 19 个）
+    output reg  [22:0]       seen_mask    // 已经出现过的字段，按编号置位（共 23 个）
 );
 
     // ---------------- 错误分类 ----------------
@@ -72,6 +72,10 @@ module hap2_field_parse #(
     localparam [4:0] F_VALUE       = 5'd16;   // MODE 命令的参数 value=LOCAL/REMOTE
     localparam [4:0] F_SCAN_PATHS  = 5'd17;   // HAP3：多段草图，竖线分隔
     localparam [4:0] F_BLANK_US    = 5'd18;   // HAP3：段间关输出的跳转时长
+    localparam [4:0] F_ACTION      = 5'd19;
+    localparam [4:0] F_GEOMETRY_ID = 5'd20;
+    localparam [4:0] F_MASK        = 5'd21;
+    localparam [4:0] F_OFFSETS     = 5'd22;
 
     // CONFIG 必须带齐的 18 个字段；第 16 位是 MODE 的 value，不属于 CONFIG
     localparam [18:0] CONFIG_MASK = {3'b110, 16'hFFFF};
@@ -86,6 +90,8 @@ module hap2_field_parse #(
     localparam [3:0] V_PAUSE  = 4'd5;
     localparam [3:0] V_STOP   = 4'd6;
     localparam [3:0] V_SNAP   = 4'd7;
+    localparam [3:0] V_CAPTURE = 4'd8;
+    localparam [3:0] V_CALIBRATION = 4'd9;
 
     // ---------------- 帧类型 ----------------
     localparam [1:0] K_CMD = 2'd0;
@@ -99,6 +105,7 @@ module hap2_field_parse #(
     localparam [2:0] T_MAPPING = 3'd2;
     localparam [2:0] T_PATH    = 3'd3;
     localparam [2:0] T_MODE    = 3'd4;   // LOCAL / REMOTE
+    localparam [2:0] T_ACTION  = 3'd5;   // trial / store
 
     // ---------------- 常用字符 ----------------
     localparam [7:0] CH_SPACE = 8'h20;   // 空格
@@ -136,16 +143,22 @@ module hap2_field_parse #(
     // 补零位数 = (16 - 字符数) 字节："scan_paths" 10 字符补 6 字节，"blank_us" 8 字符补 8 字节
     localparam [127:0] K_SCAN_PATHS  = {48'h0, "scan_paths"}; // HAP3 多段草图
     localparam [127:0] K_BLANK_US    = {64'h0, "blank_us"};   // HAP3 段间跳转时长
+    localparam [127:0] K_ACTION      = {80'h0, "action"};
+    localparam [127:0] K_GEOMETRY_ID = {40'h0, "geometry_id"};
+    localparam [127:0] K_MASK        = {96'h0, "mask"};
+    localparam [127:0] K_OFFSETS     = {72'h0, "offsets"};
 
-    // ---------------- 命令动词表（64 位）----------------
-    localparam [63:0] W_HELLO  = {24'h0, "HELLO"};
-    localparam [63:0] W_PING   = {32'h0, "PING"};
-    localparam [63:0] W_CONFIG = {16'h0, "CONFIG"};
-    localparam [63:0] W_MODE   = {32'h0, "MODE"};
-    localparam [63:0] W_START  = {24'h0, "START"};
-    localparam [63:0] W_PAUSE  = {24'h0, "PAUSE"};
-    localparam [63:0] W_STOP   = {32'h0, "STOP"};
-    localparam [63:0] W_SNAP   = {32'h0, "SNAP"};
+    // 最长命令 CALIBRATION 有 11 个字符，所以动词缓冲取 96 位。
+    localparam [95:0] W_HELLO  = {56'h0, "HELLO"};
+    localparam [95:0] W_PING   = {64'h0, "PING"};
+    localparam [95:0] W_CONFIG = {48'h0, "CONFIG"};
+    localparam [95:0] W_MODE   = {64'h0, "MODE"};
+    localparam [95:0] W_START  = {56'h0, "START"};
+    localparam [95:0] W_PAUSE  = {56'h0, "PAUSE"};
+    localparam [95:0] W_STOP   = {64'h0, "STOP"};
+    localparam [95:0] W_SNAP   = {64'h0, "SNAP"};
+    localparam [95:0] W_CAPTURE = {40'h0, "CAPTURE"};
+    localparam [95:0] W_CALIBRATION = {8'h0, "CALIBRATION"};
 
     // ---------------- 帧类型与图形名表 ----------------
     localparam [23:0] KIND_CMD = "CMD";   // 3 个字符正好 24 位
@@ -164,6 +177,8 @@ module hap2_field_parse #(
     localparam [127:0] M_ROW_MAJOR = {32'h0, "ROW_MAJOR_XY"};
     localparam [127:0] D_LOCAL     = {88'h0, "LOCAL"};
     localparam [127:0] D_REMOTE    = {80'h0, "REMOTE"};
+    localparam [127:0] D_TRIAL     = {88'h0, "trial"};
+    localparam [127:0] D_STORE     = {88'h0, "store"};
 
     // ---------------- 字符判断 ----------------
     function is_digit;
@@ -212,7 +227,9 @@ module hap2_field_parse #(
                 F_MAPPING: type_of = T_MAPPING;
                 F_PATH_XY: type_of = T_PATH;
                 F_SCAN_PATHS: type_of = T_PATH;   // 多段草图也是字符串，同样只记位置和长度
+                F_GEOMETRY_ID, F_OFFSETS: type_of = T_PATH;
                 F_VALUE:   type_of = T_MODE;
+                F_ACTION:  type_of = T_ACTION;
                 default:   type_of = T_NUMBER;
             endcase
         end
@@ -240,6 +257,7 @@ module hap2_field_parse #(
                 F_HW_COLS:     in_range = !neg && (mag >= 32'd1) && (mag <= 32'd16);
                 F_HW_PITCH:    in_range = !neg && (mag >= 32'd1000) && (mag <= 32'd30000);
                 F_BLANK_US:    in_range = !neg && (mag >= 32'd100) && (mag <= 32'd100000);
+                F_MASK:        in_range = !neg && (mag != 0);
                 default:       in_range = 1'b1;
             endcase
         end
@@ -267,7 +285,7 @@ module hap2_field_parse #(
     reg [1:0]      kind_cnt;
     reg [23:0]     seq_acc;
     reg [2:0]      seq_digits;
-    reg [63:0]     verb_buf;
+    reg [95:0]     verb_buf;
     reg [3:0]      verb_len;
 
     reg [127:0]    key_buf;
@@ -281,7 +299,7 @@ module hap2_field_parse #(
     reg [3:0]      acc_digits;
     reg [ADDR_W:0] val_start;
 
-    wire [18:0] key_hit;
+    wire [22:0] key_hit;
     wire        hit_any;
     wire [4:0]  hit_id;
 
@@ -312,6 +330,10 @@ module hap2_field_parse #(
 
     // 键名查表
     assign key_hit = {
+        (key_buf == K_OFFSETS),
+        (key_buf == K_MASK),
+        (key_buf == K_GEOMETRY_ID),
+        (key_buf == K_ACTION),
         (key_buf == K_BLANK_US),
         (key_buf == K_SCAN_PATHS),
         (key_buf == K_VALUE),
@@ -352,6 +374,10 @@ module hap2_field_parse #(
                    : key_hit[16] ? F_VALUE
                    : key_hit[17] ? F_SCAN_PATHS
                    : key_hit[18] ? F_BLANK_US
+                   : key_hit[19] ? F_ACTION
+                   : key_hit[20] ? F_GEOMETRY_ID
+                   : key_hit[21] ? F_MASK
+                   : key_hit[22] ? F_OFFSETS
                    : 5'h1F;
 
     // 键名比较是 19 个 128 位比较器并联，再串 19 级优先选择链（hit_id）。
@@ -395,14 +421,14 @@ module hap2_field_parse #(
             field_enum    <= 3'd0;
             field_off     <= 0;
             field_size    <= 0;
-            seen_mask     <= 19'h00000;
+            seen_mask     <= 23'h000000;
             fail_flag     <= 1'b0;
             magic_cnt     <= 2'd0;
             kind_buf      <= 24'h0;
             kind_cnt      <= 2'd0;
             seq_acc       <= 24'd0;
             seq_digits    <= 3'd0;
-            verb_buf      <= 64'h0;
+            verb_buf      <= 96'h0;
             verb_len      <= 4'd0;
             key_buf       <= 128'h0;
             key_len       <= 4'd0;
@@ -430,13 +456,13 @@ module hap2_field_parse #(
                         err_code     <= E_NONE;
                         bad_field    <= 5'h1F;
                         header_ok    <= 1'b0;
-                        seen_mask    <= 19'h00000;
+                        seen_mask    <= 23'h000000;
                         magic_cnt    <= 2'd0;
                         kind_buf     <= 24'h0;
                         kind_cnt     <= 2'd0;
                         seq_acc      <= 24'd0;
                         seq_digits   <= 3'd0;
-                        verb_buf     <= 64'h0;
+                        verb_buf     <= 96'h0;
                         verb_len     <= 4'd0;
                         verb_unknown <= 1'b0;
                         state        <= S_PRIME;
@@ -527,6 +553,8 @@ module hap2_field_parse #(
                                 W_PAUSE:  verb <= V_PAUSE;
                                 W_STOP:   verb <= V_STOP;
                                 W_SNAP:   verb <= V_SNAP;
+                                W_CAPTURE: verb <= V_CAPTURE;
+                                W_CALIBRATION: verb <= V_CALIBRATION;
                                 default: begin
                                     verb         <= V_NONE;
                                     verb_unknown <= 1'b1;   // 不认识的命令不算结构错误
@@ -543,8 +571,8 @@ module hap2_field_parse #(
                                 step;
                             end
                         end
-                    end else if (verb_len < 4'd8 && is_upper(rd_data)) begin
-                        verb_buf <= {verb_buf[55:0], rd_data};
+                    end else if (verb_len < 4'd12 && is_upper(rd_data)) begin
+                        verb_buf <= {verb_buf[87:0], rd_data};
                         verb_len <= verb_len + 4'd1;
                         step;
                     end else begin
@@ -672,6 +700,18 @@ module hap2_field_parse #(
                                     end
                                 end
 
+                                T_ACTION: begin
+                                    field_type <= T_ACTION;
+                                    field_id   <= cur_key;
+                                    if (enum_buf == D_TRIAL) begin
+                                        field_enum <= 3'd0; field_valid <= 1'b1;
+                                    end else if (enum_buf == D_STORE) begin
+                                        field_enum <= 3'd1; field_valid <= 1'b1;
+                                    end else begin
+                                        fail(E_ENUM, cur_key);
+                                    end
+                                end
+
                                 default: begin           // T_PATH
                                     field_valid <= 1'b1;
                                     field_type  <= T_PATH;
@@ -701,7 +741,7 @@ module hap2_field_parse #(
                                 end
                             end
 
-                            T_SHAPE, T_MAPPING, T_MODE: begin
+                            T_SHAPE, T_MAPPING, T_MODE, T_ACTION: begin
                                 enum_buf <= {enum_buf[119:0], rd_data};
                                 step;
                             end
@@ -720,6 +760,11 @@ module hap2_field_parse #(
                     end else if (verb == V_CONFIG
                                  && (seen_mask & CONFIG_MASK) != CONFIG_MASK) begin
                         err_code  <= E_MISSING;      // CONFIG 必须带齐 18 个字段
+                        bad_field <= 5'h1F;
+                        parse_bad <= 1'b1;
+                    end else if (verb == V_CALIBRATION
+                                 && seen_mask[22:19] != 4'b1111) begin
+                        err_code  <= E_MISSING;
                         bad_field <= 5'h1F;
                         parse_bad <= 1'b1;
                     end else begin
