@@ -189,7 +189,7 @@ verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
           -Mdir "$BUILD_DIR/obj_capture_protocol" rtl/*.v tb/tb_capture_protocol.v
 "$BUILD_DIR/obj_capture_protocol/capture_protocol_sim"
 
-for bench in tb_state_calibration tb_calibration_protocol; do
+for bench in tb_state_calibration tb_calibration_protocol tb_mg24_link; do
     echo "=== $bench ==="
     verilator --binary --timing -j 4 -Wall -Wno-fatal -Wno-WIDTH -Wno-PINMISSING \
         --top-module "$bench" -o sim -Mdir "$BUILD_DIR/$bench" rtl/*.v "tb/$bench.v"

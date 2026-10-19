@@ -5,6 +5,7 @@
 module board_shift_top #(
     parameter integer CLK_HZ = 50_000_000,
     parameter integer BAUD = 115200,
+    parameter integer CAPTURE_BACKEND = 0, // 0=ADCS7476, 1=MG24 trigger + metadata
     parameter integer POR_MS = 10,
     parameter integer KEY_DEB_MS = 20,
     parameter integer STATE_MS = 500
@@ -36,7 +37,7 @@ module board_shift_top #(
     wire rst_n;
 
     board_core #(
-        .CLK_HZ(CLK_HZ), .BAUD(BAUD), .HW_ROWS(8), .HW_COLS(8),
+        .CLK_HZ(CLK_HZ), .BAUD(BAUD), .CAPTURE_BACKEND(CAPTURE_BACKEND), .HW_ROWS(8), .HW_COLS(8),
         .HW_PITCH_UM(10300), .PH_PIPE(8), .POR_MS(POR_MS),
         .KEY_DEB_MS(KEY_DEB_MS), .STATE_MS(STATE_MS),
         .MAX_CARRIER_HZ(MAX_SERIAL_CARRIER), .MAX_PHASE_STEPS(64),

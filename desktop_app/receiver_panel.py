@@ -23,11 +23,11 @@ class ReceiverPanel(ttk.Frame):
         self.next_capture = 0.0
         self.last_notice = None
         self.record_directory = None
-        self.record_line = tk.StringVar(value="采样后自动保存原始数据与分析 CSV。记录默认使用 3300 mV、3.4 倍，可离线重新计算。")
+        self.record_line = tk.StringVar(value="采样后自动保存原始数据与分析 CSV。记录使用采样器报告的满量程、3.4 倍分压，可离线重新计算。")
         self.continuous = tk.BooleanVar(value=False)
         self.vref = tk.StringVar(value="3300")
         self.divider = tk.StringVar(value="3.4")
-        self.notice = tk.StringVar(value="连接支持采样的设备后，将接收板 ADCV_P 接到 MCU 的 PA0，并共地。接收板独立供 5 V。")
+        self.notice = tk.StringVar(value="连接支持采样的设备后，按接线说明连接接收板模拟输出和地线。")
         self.stats = tk.StringVar(value="尚无接收波形。")
         controls = ttk.Frame(self, padding=8)
         controls.pack(fill="x")
@@ -41,7 +41,7 @@ class ReceiverPanel(ttk.Frame):
         self.record_button.pack(side="right", padx=8)
         settings = ttk.Frame(self, padding=(8, 0))
         settings.pack(fill="x")
-        ttk.Label(settings, text="ADC 参考电压 / mV").pack(side="left")
+        ttk.Label(settings, text="采样满量程 / mV").pack(side="left")
         ttk.Entry(settings, textvariable=self.vref, width=7).pack(side="left", padx=5)
         ttk.Label(settings, text="分压还原倍数").pack(side="left", padx=(8, 0))
         ttk.Entry(settings, textvariable=self.divider, width=5).pack(side="left", padx=5)
@@ -53,7 +53,7 @@ class ReceiverPanel(ttk.Frame):
         self.axis = self.figure.add_subplot(111)
         self.figure.subplots_adjust(left=.12, right=.96, bottom=.18, top=.85)
         self.canvas = FigureCanvasTkAgg(self.figure, self)
-        ttk.Label(self, text="每帧仅 0.5 ms，帧间未采样；不代表整个图形。默认 3300 mV 未校准。\n"
+        ttk.Label(self, text="每帧约 0.5 ms，帧间未采样；不代表整个图形。电压量程尚未实测校准。\n"
                   "×3.4 仅还原末级分压前的等效交流幅值，不换算声压；未报警也不能排除前级削顶。",
                   padding=8, wraplength=780).pack(side="bottom", fill="x")
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -66,7 +66,7 @@ class ReceiverPanel(ttk.Frame):
         self.last_notice = None
         self.record_directory = None
         self.record_button.configure(state="disabled")
-        self.record_line.set("采样后自动保存原始数据与分析 CSV。记录默认使用 3300 mV、3.4 倍，可离线重新计算。")
+        self.record_line.set("采样后自动保存原始数据与分析 CSV。记录使用采样器报告的满量程、3.4 倍分压，可离线重新计算。")
         self.continuous.set(False)
         self.stats.set("尚无接收波形。")
         self.render()
@@ -96,6 +96,8 @@ class ReceiverPanel(ttk.Frame):
             self.capture_button.configure(state="disabled")
 
     def accept(self, capture, when):
+        if self.capture is None or self.capture.pin != capture.pin:
+            self.vref.set(str(capture.full_scale_mv))
         self.capture, self.received = capture, when
         self.pending = False
         self.next_capture = time.monotonic()+.5
@@ -126,9 +128,9 @@ class ReceiverPanel(ttk.Frame):
                 notice = "当前固件不支持接收采样，请使用带 ADC 采集功能的固件。"
             elif self.capture:
                 source = "Demo 合成数据 · 非测量" if self.capture.simulated else "板端 ADC 采样 · 未做声压校准"
-                notice = f"{source} · 距上次采样 {now-self.received:.1f} s · 400 kS/s，200 点"
+                notice = f"{source} · {self.capture.pin} · 距上次采样 {now-self.received:.1f} s · {self.capture.fs_hz/1000:.2f} kS/s，200 点"
             else:
-                notice = "点击采集一次。真实连接需将接收板 ADCV_P 接到 MCU 的 PA0，并共地，接收板独立供 5 V；悬空输入无测量意义。"
+                notice = "点击采集一次。接收板 ADCV_P 接到当前采样器的模拟输入并共地；按该采样器接线说明供电，悬空输入无测量意义。"
             if notice != self.last_notice:
                 self.notice.set(notice)
                 self.last_notice = notice
@@ -153,12 +155,12 @@ class ReceiverPanel(ttk.Frame):
         else:
             x = [i*1e6/self.capture.fs_hz for i in range(len(self.capture.raw))]
             self.axis.plot(x, result["mv"], color="#2463c5", lw=1, label="ADC 原始波形")
-            self.axis.plot(x, [v+result["mean_mv"] for v in result["filtered_mv"]],
+            self.axis.plot(x, [v+result["fit_dc_mv"] for v in result["filtered_mv"]],
                            color="#c26119", lw=1.2, alpha=.85, label="40 kHz 分量 + 均值")
             self.axis.legend(loc="upper right", fontsize=8)
             self.axis.set_title("Demo 合成波形 · 非实测" if self.capture.simulated else "接收电压采样 · 非声场图")
             self.axis.set_ylim(min(0, min(result["mv"])-50), max(1100, max(result["mv"])+50))
-            clip = " · ADC 接近电源轨，检查削顶" if result["adc_rail"] else ""
+            clip = " · 采样接近满量程边界，检查削顶" if result["adc_rail"] else ""
             self.stats.set(f"直流 {result['mean_mv']:.1f} mV · 峰峰值 {result['pp_mv']:.1f} mV · "
                            f"交流 RMS {result['rms_mv']:.1f} mV\n"
                            f"40 kHz 峰值 {result['peak40_mv']:.1f} mV · 分压前等效峰值 "

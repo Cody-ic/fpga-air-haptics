@@ -119,7 +119,7 @@ module tb_capture_protocol;
                   hex_value(rx_mem[raw_end+3]),hex_value(rx_mem[raw_end+4])};
         check(crc_calc==crc_wire,"CAPTURE reply CRC matches its full body");
         repeat(3) @(posedge clk);
-        check(dut.u_adc.result_valid==0,"sample buffer is released only after reply completes");
+        check(dut.g_adc.u_adc.result_valid==0,"sample buffer is released only after reply completes");
 
         $display("CAPTURE protocol checks=%0d failures=%0d bytes=%0d",checks,errors,rx_len);
         if(errors) $fatal(1); $finish;

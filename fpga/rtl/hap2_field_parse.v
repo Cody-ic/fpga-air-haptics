@@ -32,7 +32,7 @@ module hap2_field_parse #(
     output reg               verb_unknown,
     output reg               field_valid, // 单拍脉冲：一个字段解析完成
     output reg  [4:0]        field_id,
-    output reg  [31:0]       field_value, // 数值类字段的值（二进制补码）
+    output reg  [63:0]       field_value, // 数值类字段的值（二进制补码）
     output reg  [2:0]        field_type,  // 0 数值 1 图形名 2 映射名 3 路径串 4 控制模式
     output reg  [2:0]        field_enum,  // 图形名/映射名/控制模式的编号
     output reg  [ADDR_W:0]   field_off,   // 字符串类字段在行缓冲里的起点
@@ -237,7 +237,7 @@ module hap2_field_parse #(
 
     function in_range;         // 字段编号 -> 数值范围检查（协议第 3 节）
         input [4:0]  id;
-        input [31:0] mag;      // 绝对值
+        input [63:0] mag;      // 绝对值
         input        neg;      // 是否带负号
         begin
             case (id)
@@ -294,9 +294,10 @@ module hap2_field_parse #(
     reg [4:0]      cur_key;
     reg            cur_known;
     reg [127:0]    enum_buf;
-    reg [31:0]     acc;
+    reg [63:0]     acc;
     reg            acc_neg;
-    reg [3:0]      acc_digits;
+    reg [4:0]      acc_digits;
+    wire [67:0] next_acc = {4'd0, acc} * 68'd10 + {64'd0, rd_data[3:0]};
     reg [ADDR_W:0] val_start;
 
     wire [22:0] key_hit;
@@ -657,7 +658,7 @@ module hap2_field_parse #(
                                         field_valid <= 1'b1;
                                         field_type  <= T_NUMBER;
                                         field_id    <= cur_key;
-                                        field_value <= acc_neg ? (32'd0 - acc) : acc;
+                                        field_value <= acc_neg ? (64'd0 - acc) : acc;
                                     end
                                 end
 
@@ -732,10 +733,13 @@ module hap2_field_parse #(
                                         && acc_digits == 0 && val_start == idx) begin
                                     acc_neg <= (rd_data == CH_MINUS);
                                     step;
-                                end else if (is_digit(rd_data) && acc_digits < 4'd9) begin
-                                    acc        <= acc * 32'd10 + {28'h0, rd_data[3:0]};
-                                    acc_digits <= acc_digits + 4'd1;
-                                    step;
+                                end else if (is_digit(rd_data) && acc_digits < ((cur_key == F_MASK) ? 5'd20 : 5'd9)) begin
+                                    if (|next_acc[67:64]) fail(E_RANGE, cur_key);
+                                    else begin
+                                        acc <= next_acc[63:0];
+                                        acc_digits <= acc_digits + 1'b1;
+                                        step;
+                                    end
                                 end else begin
                                     fail(E_NUMBER, cur_key);
                                 end

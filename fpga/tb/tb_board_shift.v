@@ -235,11 +235,11 @@ module tb_board_shift;
         check(field_value(ack8,"hw_rows=")=="8" && field_value(ack8,"hw_cols=")=="8"
             && field_value(ack8,"hw_pitch_um=")=="10300","shift board declares actual 8x8 10.3 mm geometry");
         boot_before=field_value(ack8,"boot=");
-        check(field_value(ack8,"caps=")=="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS",
-            "8x8 does not advertise unsupported 32-bit calibration");
-        check(field_value(state8,"channel_mask=")=="" && field_value(state8,"phase_offsets=")==""
+        check(field_value(ack8,"caps=")=="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION",
+            "8x8 advertises complete 64-channel calibration");
+        check(field_value(state8,"channel_mask=")=="18446744073709551615" && field_value(state8,"phase_offsets=")!=""
             && dut.u_core.u_top.calib_channel_mask==64'hffffffffffffffff,
-            "8x8 uses implicit full 64-channel state, never a truncated mask");
+            "8x8 reports the full unsigned 64-channel mask");
         frames_before=frames8;send_command(8,"HAP3 CMD 2 MODE value=REMOTE");wait_frames(8,frames_before+2);
         check(field_value(state8,"mode=")=="REMOTE" && field_value(state8,"output=")=="0",
             "MODE REMOTE remains idle");
@@ -250,8 +250,8 @@ module tb_board_shift;
         frames_before=frames8;
         send_command(8,"HAP3 CMD 21 CALIBRATION action=trial geometry_id=f0e8e8e16397381dfcf31ea6 mask=1 offsets=0");
         wait_frames(8,frames_before+1);
-        check(field_value(last8,"code=")=="UNSUPPORTED" && dut.u_core.u_top.cmd_rev==1,
-            "8x8 rejects calibration without changing outputs");
+        check(field_value(last8,"code=")=="BAD_CALIBRATION" && dut.u_core.u_top.cmd_rev==1,
+            "8x8 rejects an incomplete 64-channel correction table atomically");
         bad_serial_config(5,40000,256);
         bad_serial_config(6,80000,64);
         frames_before=frames8;send_command(8,"HAP3 CMD 7 SNAP");wait_frames(8,frames_before+2);

@@ -1,6 +1,8 @@
 """Opt-in real Tk / Demo capture smoke, no hardware access."""
 import csv
+from dataclasses import replace
 import json
+import os
 from pathlib import Path
 import time
 import tkinter as tk
@@ -55,10 +57,31 @@ def main():
         assert len(rows)==200 and {r['source'] for r in rows}=={'DEMO_SYNTHETIC'}
         assert rows[0]['adc_code']==str(panel.capture.raw[0])
         root.update();root.lift();root.attributes('-topmost',True);root.update()
-        from PIL import ImageGrab
-        x,y=root.winfo_rootx(),root.winfo_rooty()
-        ImageGrab.grab(bbox=(x,y,x+root.winfo_width(),y+root.winfo_height())).save(runtime/'receiver-demo.png')
+        if os.environ.get('HAPTICS_GUI_SCREENSHOT') == '1':
+            from PIL import ImageGrab
+            x,y=root.winfo_rootx(),root.winfo_rooty()
+            ImageGrab.grab(bbox=(x,y,x+root.winfo_width(),y+root.winfo_height())).save(runtime/'receiver-demo.png')
         root.attributes('-topmost',False)
+        # A synthetic fixture exercises the MG24 scale and non-integral clock;
+        # keep simulated=True so it cannot be mistaken for a board measurement.
+        mg24 = replace(panel.capture, pin='MG24_D0', fs_hz=397959,
+                       full_scale_mv=1210)
+        panel.accept(mg24, time.monotonic())
+        assert panel.vref.get() == '1210'
+        assert 'Demo' in panel.axis.get_title()
+        assert max(panel.analysis()['mv']) <= 1210
+        filename = runtime/'mg24-synthetic-capture.csv'
+        panel.save_csv(filename)
+        with filename.open(encoding='utf-8-sig', newline='') as stream:
+            rows = list(csv.DictReader(stream))
+        assert len(rows) == 200 and rows[0]['fs_hz'] == '397959'
+        assert float(rows[0]['vref_mv']) == 1210
+        assert {row['source'] for row in rows} == {'DEMO_SYNTHETIC'}
+        if os.environ.get('HAPTICS_GUI_REVIEW') == '1':
+            deadline = time.monotonic()+30
+            while time.monotonic() < deadline:
+                root.update()
+                time.sleep(.025)
         app.capabilities.discard('ADC_CAPTURE');app.update_controls()
         assert str(panel.capture_button['state'])=='disabled'
         assert '不支持' in panel.notice.get()

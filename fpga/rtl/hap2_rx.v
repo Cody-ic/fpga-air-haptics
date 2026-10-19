@@ -42,7 +42,7 @@ module hap2_rx #(
     // 字段流
     output wire            field_valid,
     output wire [4:0]      field_id,
-    output wire [31:0]     field_value,
+    output wire [63:0]     field_value,
     output wire [2:0]      field_type,
     output wire [2:0]      field_enum,
     output wire [ADDR_W:0] field_off,

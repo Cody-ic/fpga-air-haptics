@@ -5,3 +5,4 @@
 # 后面多出一个 \r 之后就完全跑不起来（报 "pipefail: invalid option name"）。
 # Verilog 的 $readmemh 读向量文件也更适应 LF。
 fpga/** text eol=lf
+firmware/xiao_mg24/** text eol=lf

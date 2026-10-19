@@ -50,7 +50,7 @@ module hap2_cmd #(
     input  wire            verb_unknown,
     input  wire            field_valid,   // 单拍脉冲：一个字段解析完成
     input  wire [4:0]      field_id,
-    input  wire [31:0]     field_value,
+    input  wire [63:0]     field_value,
     input  wire [2:0]      field_enum,
     input  wire [ADDR_W:0] field_off,
     input  wire [ADDR_W:0] field_size,
@@ -112,7 +112,7 @@ module hap2_cmd #(
     output reg             calib_start,
     output reg             calib_restore,
     output reg             calib_store,
-    output reg [31:0]      calib_mask,
+    output reg [63:0]      calib_mask,
     output reg [ADDR_W:0]  calib_geometry_off,
     output reg [ADDR_W:0]  calib_geometry_len,
     output reg [ADDR_W:0]  calib_offsets_off,

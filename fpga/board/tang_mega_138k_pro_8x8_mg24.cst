@@ -1,0 +1,102 @@
+// MG24 build: PMOD0 L24=RX, T24=TX, R17=active-high trigger.
+// Tang MEGA 138K Pro 物理约束（引脚绑定）
+// 板卡：Sipeed Tang MEGA 138K Pro（底板 4071f / 4071f3，核心板 4071）
+// FPGA：GW5AST-LV138FPG676A，封装 FCPBG676A（676 球），Device Version B 或 C
+// 顶层模块：board_shift_top（8×8 R2，10.3 mm）
+//
+// 引脚号来源（都在 docs/sipeed_ref_pro/ 里，全是官方资料）：
+//   tang_mega_138k-pro_pins.cst                       Sipeed 官方「全引脚约束」(dl.sipeed.com, 2025-11)
+//   key_led__src__key_led.cst                         官方按键+LED 例程
+//   led__src__top.cst                                 官方 LED 例程
+//   pro_dock_4071f3_schematic.pdf                     底板原理图（PMOD 连线、DEBUG-UART 连线）
+//   Tang_MEGA_138K_Pro_Pinout_Track_Length_Table.xlsx 核心板↔底板 BTB 引脚表
+//
+// ⚠️ 和 60K / 138K（非 Pro）**没有任何对应关系**：那两块的芯片是 484 球 PBGA484A，
+//    这块是 676 球 FCPBG676A，球位编号完全不同，所以这一份是照这块板子的官方资料重排的。
+//
+// ⚠️ 时钟：这块板子上 **P16 才是 50 MHz 系统时钟**（官方所有例程都用 P16 当 clk）。
+//    V22 在这块板子上是另一个 70 MHz 晶振（官方 key_led 的 sdc 把 osc_clk 写成周期 14.286 ns），
+//    所以别照抄 60K 那版「V22 = 50 MHz」的结论。
+
+// ==================== 时钟 ====================
+IO_LOC  "clk" P16;
+IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE BANK_VCCIO=3.3;
+
+// ==================== 按键（低有效，开内部上拉）====================
+// 官方全引脚表里三个用户键是 K16 / G15 / F15，都在 3.3 V 的 bank 里。
+// 官方全引脚表把 PULL_MODE 写成 NONE，官方按键例程写的是 UP；这里写 UP：
+// 不按时保证是高电平，按下去接地变低电平。第 4 个键 G16 是板上的复位键，我们不用。
+IO_LOC  "key_rst_n" K16;
+IO_PORT "key_rst_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "key0_n" F15;
+IO_PORT "key0_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "key1_n" G15;
+IO_PORT "key1_n" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+// ==================== 串口（走板载 DEBUG-USB，不用外接 USB-TTL）====================
+// 底板原理图里，板载调试器 BL616 的串口经过两个 0 Ω 电阻接到 FPGA：
+//     BL616_TX  →  网络 DBG_UART.RX  →  FPGA 的 N16   （所以 N16 是 FPGA 的**收**）
+//     BL616_RX  ←  网络 DBG_UART.TX  ←  FPGA 的 P15   （所以 P15 是 FPGA 的**发**）
+// 官方 pro_ddr_test 例程也把 uart_tx 放在 P15 上，两个来源一致。
+// 电脑侧不用额外接线：烧录用的那个 USB 口本身就带一路串口（设备管理器里的 COM 口），115200。
+// ⚠️ 如果联调时发命令没回应、但示波器看波形都对，先把这两行的 N16 / P15 对调再试一次。
+// **2026-10-14 上板实测记录**（别再重复踩）：
+//   曾按"两个输出脚打架"的猜测把方向对调成 N16=发 / P15=收，实测**不通**（电脑两个 COM 口
+//   都收不到我们设计发的任何东西）。回头看排查过程发现一个漏洞：板子在跑设计的那段时间里，
+//   上位机一直占着 COM6，所以 **COM6 从未在"设计正在运行"时被真正测过**；而我们反复测的
+//   COM5 会把自己发出去的内容"回环"回来（发 ZZQ7-ECHO-TEST-XY 就收回它自己），更像是
+//   JTAG 那一路而不是串口。
+//   所以方向按原理图恢复：**N16 = 收（接调试器 BL616 的 TX）、P15 = 发（接 BL616 的 RX）**。
+//   底板图 02_Schematic 里这两个网络经过 0 Ω 电阻 R95／R128 接到 BL616，可对照。
+//   ✅ **2026-10-14 最终确认：方向是对的** —— 上位机（`py -3.14 -m desktop_app`）选
+//      **COM6** + 115200，可以直接连上并完成 HELLO 握手。
+//   ⚠️ 一个坑：用 .NET `SerialPort`／裸命令行读这两个口时**什么都收不到**，但上位机
+//      （pyserial，打开时会拉 DTR/RTS）能正常通信 —— 判断"串口通不通"要以上位机为准；
+//      COM5 那一侧会把电脑发出去的内容"回环"回来，容易误判，别拿它当串口。
+IO_LOC  "mg24_rx" L24;
+IO_PORT "mg24_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
+
+IO_LOC  "mg24_tx" T24;
+IO_PORT "mg24_tx" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+
+// External ADCS7476 on PMOD0: SCLK / CS_N / SDATA.
+
+// 8×8 H1: 1/2 GND; 3 SRCLK; 4 OE_N; 5 RCLK; 6 SRCLR_N; 7..14 DATA0..7.
+// J23-12 -> H1-1/2 GND. J23-11 is +5 V: leave it disconnected.
+// Do not connect an SDRAM module at the same time.
+IO_LOC "srclk" U16; // J23-1 -> H1-3
+IO_PORT "srclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "oe_n" V16; // J23-2 -> H1-4
+IO_PORT "oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "rclk" U15; // J23-3 -> H1-5
+IO_PORT "rclk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "srclr_n" V17; // J23-4 -> H1-6
+IO_PORT "srclr_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[0]" W21; // J23-5 -> H1-7
+IO_PORT "data[0]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[1]" Y21; // J23-6 -> H1-8
+IO_PORT "data[1]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[2]" P21; // J23-7 -> H1-9
+IO_PORT "data[2]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[3]" U17; // J23-8 -> H1-10
+IO_PORT "data[3]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[4]" P23; // J23-9 -> H1-11
+IO_PORT "data[4]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[5]" P24; // J23-10 -> H1-12
+IO_PORT "data[5]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[6]" T23; // J23-13 -> H1-13
+IO_PORT "data[6]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "data[7]" R23; // J23-14 -> H1-14
+IO_PORT "data[7]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "led[0]" R26;
+IO_PORT "led[0]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "led[1]" J14;
+IO_PORT "led[1]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "led[2]" L20;
+IO_PORT "led[2]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "led[3]" M25;
+IO_PORT "led[3]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC "mg24_trigger" R17;
+IO_PORT "mg24_trigger" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;

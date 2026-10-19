@@ -17,6 +17,28 @@ def fields(**changes):
 
 
 class CaptureTests(unittest.TestCase):
+    def test_mg24_reports_its_own_clock_and_analog_full_scale(self):
+        cap = Capture.parse(fields(pin='MG24_D0', simulated='0', fs_hz='397959',
+                                   full_scale_mv='1210', raw=','.join(['2048']*200)))
+        self.assertEqual(cap.fs_hz, 397959)
+        self.assertAlmostEqual(cap.analyze()['mean_mv'], 2048*1210/4095)
+        self.assertFalse(cap.simulated)
+        for override in ({'full_scale_mv': '3300'}, {'full_scale_mv': '0'},
+                         {'full_scale_mv': '1.21'}, {'fs_hz': '80000'}, {'fs_hz': '2000000'}):
+            values = fields(pin='MG24_D0', simulated='0', fs_hz='397959', full_scale_mv='1210')
+            values.update(override)
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                Capture.parse(values)
+        with self.assertRaises(ValueError):
+            cap.analyze(3300)
+
+    def test_mg24_amplitude_fit_handles_non_integer_cycles(self):
+        for phase in (0, .7, 2.4):
+            raw = [round(1600+200*math.cos(2*math.pi*40000*i/397959+phase)) for i in range(200)]
+            cap = Capture.parse(fields(pin='MG24_D0', fs_hz='397959', full_scale_mv='1210',
+                                       raw=','.join(map(str, raw))))
+            self.assertAlmostEqual(cap.analyze()['peak40_mv'], 200*1210/4095, delta=.05)
+
     def test_voltage_dc_and_coherent_noise_rejection(self):
         raw = tuple(round(602+200*math.cos(2*math.pi*i/10)+40*math.sin(2*math.pi*i/20))
                     for i in range(200))

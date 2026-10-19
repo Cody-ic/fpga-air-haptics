@@ -20,12 +20,14 @@
 module hap2_top #(
     parameter integer        CLK_HZ       = 50_000_000,
     parameter integer        BAUD         = 115200,
+    parameter integer CAPTURE_BACKEND = 0, // 0=ADCS7476, 1=MG24 trigger + metadata
     parameter integer        ADDR_W       = 13,        // 行缓冲 8192 字节
     parameter integer        MAX_LINE     = 8192,
     parameter integer        HW_ROWS      = 4,
     parameter integer        HW_COLS      = 4,
     parameter integer        HW_PITCH_UM  = 11000,
-    parameter [8*24-1:0]     GEOMETRY_ID  = "d3e4d118b6b2ca2469907382",
+    parameter [8*24-1:0]     GEOMETRY_ID  = (HW_ROWS == 8 && HW_COLS == 8 && HW_PITCH_UM == 10300)
+        ? "f0e8e8e16397381dfcf31ea6" : "d3e4d118b6b2ca2469907382",
     // ---- 设备声明的工作空间（微米）----
     // 握手时发给电脑，命令层也拿同一组值去查「图形有没有越界」。
     // 上板时按真实阵列的有效口径改小一点更安全。
@@ -85,10 +87,10 @@ module hap2_top #(
     output wire drive_enable
 );
     localparam integer CHANNELS = HW_ROWS * HW_COLS;
-    localparam integer CAL_CHANNELS = (CHANNELS > 32) ? 32 : CHANNELS;
-    // The existing calibration command has a 32-bit mask and the known R5
-    // geometry identity. Do not advertise it on the 64-channel R2 profile.
-    localparam integer HAS_CALIBRATION = (HW_ROWS == 4 && HW_COLS == 4 && HW_PITCH_UM == 11000);
+    localparam integer CAL_CHANNELS = (CHANNELS > 64) ? 64 : CHANNELS;
+    // Calibrated profiles have explicit, host-verified geometry identities.
+    localparam integer HAS_CALIBRATION = ((HW_ROWS == 4 && HW_COLS == 4 && HW_PITCH_UM == 11000)
+        || (HW_ROWS == 8 && HW_COLS == 8 && HW_PITCH_UM == 10300));
 
     // ---------------- 接收通路 ----------------
     /* verilator lint_off UNUSEDSIGNAL */
@@ -105,7 +107,7 @@ module hap2_top #(
     wire              verb_unknown;
     wire              field_valid;
     wire [4:0]        field_id;
-    wire [31:0]       field_value;
+    wire [63:0]       field_value;
     wire [2:0]        field_type, field_enum;
     wire [ADDR_W:0]   field_off, field_size;
     wire [22:0]       seen_mask;
@@ -201,7 +203,7 @@ module hap2_top #(
     reg         adc_tx_running;
     wire        state_capture;      // 发送模块开始拼 STATE 的那一拍
     wire        calib_start, calib_restore, calib_store;
-    wire [31:0] calib_mask_req;
+    wire [63:0] calib_mask_req;
     wire [ADDR_W:0] calib_geometry_off, calib_geometry_len;
     wire [ADDR_W:0] calib_offsets_off, calib_offsets_len;
     wire        calib_done, calib_valid, calib_trial_active, calib_changed;
@@ -327,12 +329,23 @@ module hap2_top #(
         else if (adc_start) adc_tx_running <= output_on;
     end
 
+    generate if (CAPTURE_BACKEND == 0) begin : g_adc
     hap3_adc_capture u_adc (
         .clk(clk), .rst_n(rst_n), .start(adc_start), .consume(adc_consume),
         .adc_sdata(adc_sdata), .adc_sclk(adc_sclk), .adc_cs_n(adc_cs_n),
         .busy(adc_busy), .result_valid(adc_result_valid), .done(adc_done),
         .rd_addr(adc_rd_addr), .rd_data(adc_rd_data)
     );
+    end else begin : g_mg24
+        hap3_capture_trigger #(.CLK_HZ(CLK_HZ)) u_trigger (
+            .clk(clk), .rst_n(rst_n), .start(adc_start), .consume(adc_consume),
+            .trigger(adc_cs_n), .busy(adc_busy), .done(adc_done),
+            .result_valid(adc_result_valid)
+        );
+        assign adc_sclk = 1'b0;
+        assign adc_rd_data = 12'd0; // never transmitted as samples in this backend
+    end endgenerate
+
 
     generate if (HAS_CALIBRATION != 0) begin : g_calibration
     hap2_calibration #(
@@ -541,7 +554,7 @@ module hap2_top #(
     reg [5:0]  sn_stroke;
     reg signed [31:0] sn_fx_um, sn_fy_um;
     reg [31:0] sn_fz_um;
-    reg [31:0] sn_channel_mask;
+    reg [63:0] sn_channel_mask;
     reg [HW_ROWS*HW_COLS*8-1:0] sn_phase_offsets;
 
     assign ph_rd_addr = snap_idx;
@@ -589,7 +602,7 @@ module hap2_top #(
                 sn_fx_um <= $signed({{11{ph_pub_fx[20]}}, ph_pub_fx}) >>> 1;
                 sn_fy_um <= $signed({{11{ph_pub_fy[20]}}, ph_pub_fy}) >>> 1;
                 sn_fz_um <= ph_pub_fz_um;
-                sn_channel_mask <= {{(32-CAL_CHANNELS){1'b0}}, calib_mask_low};
+                sn_channel_mask <= {{(64-CAL_CHANNELS){1'b0}}, calib_mask_low};
                 sn_phase_offsets <= calib_phase_offsets;
                 // 相位表：钉住现在对外的哪一半，从头复制一遍
                 snap_sel   <= ph_pub_sel;
@@ -652,8 +665,8 @@ module hap2_top #(
     hap2_tx #(
         .CLK_HZ (CLK_HZ),
         .BAUD   (BAUD),
-        .DIGITS (10),
-        .HAS_CALIBRATION(HAS_CALIBRATION),
+        .DIGITS (20),
+        .HAS_CALIBRATION(HAS_CALIBRATION), .CAPTURE_BACKEND(CAPTURE_BACKEND),
         // 工作空间：和命令层用同一组参数，保证「声明的范围」和「实际拦的范围」一致
         .WS_X_MIN_UM (WS_X_MIN_UM),
         .WS_X_MAX_UM (WS_X_MAX_UM),

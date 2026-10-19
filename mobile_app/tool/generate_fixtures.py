@@ -33,6 +33,10 @@ def main():
     data = dict(array=array.wire(), frames=[raw.decode('ascii') for raw in hello+applied],
                 receiver_capture=capture[0].decode('ascii'),
                 vectors=vectors, document=dict(schema='haptics-config-3', config=config.wire()))
+    # Synthetic contract fixture only; not an acoustic or hardware measurement.
+    data['mg24_capture'] = encode('ACK', 7, 'CAPTURE', boot='mg24fixture', rev=12,
+        uptime_ms=500, simulated=0, tx_running=0, pin='MG24_D0', fs_hz=397959,
+        bits=12, n=200, full_scale_mv=1210, raw=','.join(str(1000+i) for i in range(200))).decode('ascii')
     sphere = DemoDevice(clock=lambda: 12.0, array=ArraySpec.from_geometry(grid_geometry(radius_mm=80)))
     sphere.boot = 'sphere01'
     data['geometry_hello'] = sphere.handle(encode('CMD', 4, 'HELLO'))[0].decode('ascii')

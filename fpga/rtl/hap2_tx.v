@@ -20,7 +20,8 @@
 module hap2_tx #(
     parameter integer CLK_HZ = 50_000_000,
     parameter integer BAUD   = 115200,
-    parameter integer DIGITS = 10,
+    parameter integer DIGITS = 20,
+    parameter integer CAPTURE_BACKEND = 0,
     parameter integer HAS_CALIBRATION = 1,           // 十进制最多几位
     // 设备声明的工作空间（微米）：握手应答里发给电脑，同时命令层拿同一组值
     // 去查「图形有没有越界」。放在这里当参数，是为了两边只有一个来源。
@@ -78,7 +79,7 @@ module hap2_tx #(
     input  wire [31:0] fz_um,
     input  wire        scan_on,        // 这一刻是否在扫描（协议要求原样回传）
     input  wire [5:0]  stroke_index,   // 当前第几笔
-    input  wire [31:0] channel_mask,
+    input  wire [63:0] channel_mask,
 
     // ---- 相位表读口（同步读，一拍出数据）----
     output reg  [7:0]  phase_addr,
@@ -112,6 +113,9 @@ module hap2_tx #(
         "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
     localparam [8*117-1:0] T_CAPTURE =
         "HAP3 ACK @ CAPTURE boot=+ rev=@ uptime_ms=@ simulated=0 tx_running=@ pin=ADCS7476 fs_hz=400000 bits=12 n=200 raw={*#\n";
+
+    localparam [8*365-1:0] T_HELLO_MG24 = "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ adc_capture=1 receiver=MG24 caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,CALIBRATION max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
+    localparam [8*76-1:0] T_CAPTURE_META = "HAP3 ACK @ CAPTURE_META boot=+ rev=@ uptime_ms=@ simulated=0 tx_running=@*#\n";
 
     // 设备声明的固定能力（这些目前是定值，将来由板级配置决定）
     localparam [31:0] HB_MS         = 32'd3000;
@@ -225,7 +229,9 @@ module hap2_tx #(
             // 字符串在向量里靠高位存放：第 0 个字符在最高字节，
             // 所以要从最高位往下数，用「-:」而不是「+:」。
             case (sel)
-                F_HELLO: tmpl_byte = (HAS_CALIBRATION != 0)
+                F_HELLO: tmpl_byte = (CAPTURE_BACKEND != 0)
+                    ? T_HELLO_MG24[8*365-1 - 8*pos -: 8]
+                    : (HAS_CALIBRATION != 0)
                     ? T_HELLO[8*351-1 - 8*pos -: 8]
                     : T_HELLO_NO_CAL[8*339-1 - 8*pos -: 8];
                 F_ACK:   tmpl_byte = T_ACK  [8*31 -1 - 8*pos -: 8];
@@ -233,7 +239,9 @@ module hap2_tx #(
                 F_STATE: tmpl_byte = (HAS_CALIBRATION != 0)
                     ? T_STATE[8*400-1 - 8*pos -: 8]
                     : T_STATE_NO_CAL[8*369-1 - 8*pos -: 8];
-                default: tmpl_byte = T_CAPTURE[8*117-1 - 8*pos -: 8];
+                default: tmpl_byte = (CAPTURE_BACKEND != 0)
+                    ? T_CAPTURE_META[8*76-1 - 8*pos -: 8]
+                    : T_CAPTURE[8*117-1 - 8*pos -: 8];
             endcase
         end
     endfunction
@@ -315,7 +323,7 @@ module hap2_tx #(
     // dec_ascii 以补码处理有符号数；计数器却是 uint32。用 33 位入口显式区分，
     // 否则 sample / uptime_ms 超过 2^31 后会被打印成负数。10 位十进制可容纳
     // 完整的 uint32（4294967295），坐标字段仍保留正确的负号。
-    function [32:0] decimal_at;
+    function [64:0] decimal_at;
         input [2:0] sel;
         input [4:0] idx;
         reg [31:0] value;
@@ -325,7 +333,8 @@ module hap2_tx #(
             signed_value = ((sel == F_HELLO) && idx >= 5'd11 && idx <= 5'd14)
                         || ((sel == F_STATE) && (idx == 5'd8 || idx == 5'd9
                                              || idx == 5'd20 || idx == 5'd21));
-            decimal_at = {signed_value && value[31], value};
+            if (sel == F_STATE && idx == 5'd23) decimal_at = {1'b0, channel_mask};
+            else decimal_at = {{33{signed_value && value[31]}}, value};
         end
     endfunction
 
@@ -491,7 +500,7 @@ module hap2_tx #(
     wire        tx_done;
 
     reg         dec_start;
-    reg  [32:0] dec_value;
+    reg  [64:0] dec_value;
     wire        dec_done;
     wire        dec_neg;
     wire [4*DIGITS-1:0] dec_bcd;
@@ -508,7 +517,7 @@ module hap2_tx #(
         .tx_line(tx_line), .tx_done(tx_done)
     );
 
-    dec_ascii #(.BITS(33), .DIGITS(DIGITS)) u_dec (
+    dec_ascii #(.BITS(65), .DIGITS(DIGITS)) u_dec (
         .clk(clk), .rst_n(rst_n), .start(dec_start), .value(dec_value),
         .done(dec_done), .negative(dec_neg), .bcd(dec_bcd)
     );

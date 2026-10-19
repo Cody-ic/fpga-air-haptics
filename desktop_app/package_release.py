@@ -27,10 +27,12 @@ def main():
         '没有硬件：选择 Demo 模拟设备，连接后先发送图形，再播放。\n'
         '真实设备：选择真实串口、COM 端口和匹配的波特率，再连接。\n'
         'BLE：选择 BLE 蓝牙，扫描并选择模块，再连接；其他模块可修改连接设置。\n'
-        '蓝牙模块尚未选型；设备指令暂用 HAP3 草案，需与 FPGA 固件共同确定并对接。\n'
+        'XIAO MG24 使用默认蓝牙服务；需配套构建接收后端为 mg24 的 FPGA 程序。\n'
         '图形需主动保存为 JSON。\n\n'
         '接收板调试：打开调试模式→实测数据→接收波形，采集一次或连续查看。\n'
-        'Demo 波形是合成数据。真实采样支持 F411/F103 固件，ADCV_P 接 PA0 并共地。\n'
+        'Demo 波形是合成数据。MG24 方案将 ADCV_P 接 D0 并共地；旧 STM32 原型仍接 PA0。\n'
+        'MG24 的电脑控制入口是它自身的 USB 串口或蓝牙，非 FPGA 的调试 USB 串口。\n'
+        '量程与采样率采用设备报告值；MG24 标称量程为 1210 mV，未做声压标定。\n'
         '本地播放时点击电脑控制，会先停止并确认，再切换模式；不会自动播放。\n'
         '每次采样自动保存原码 JSONL 与分析 CSV，可在接收波形页打开测量记录。\n'
         '记录目录：%LOCALAPPDATA%\\TouchSee\\measurements，每次连接独立保存。\n'
@@ -52,6 +54,7 @@ def main():
         for path in (app_dir.parent/'hardware/arrays').glob('*.json'):
             bundle.write(path, 'array-profiles/'+path.name)
         bundle.write(app_dir/'ARRAY_CALIBRATION.md', '阵列与校准说明.md')
+        bundle.write(app_dir.parent/'firmware/xiao_mg24/README.md', 'MG24接线与使用说明.md')
         for distribution in metadata.distributions():
             name = distribution.metadata['Name']
             # Preserve full package metadata and shipped notices, including
