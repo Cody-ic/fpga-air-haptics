@@ -1,6 +1,8 @@
 # BLE 适配与待定接口
 
-更新日期：2026-09-25。电脑端已实现 BLE 扫描、连接、分包发送和通知接收；测试使用假的 GATT 设备，尚无蓝牙模块、FPGA 板或驱动 PCB 的联调结果。**HAP3 仅为现有上位机和 Demo 的协议草案，未与板端共同定稿。**
+更新日期：2026-10-19。电脑端已有扫描、连接、分包发送和通知接收；新增
+[XIAO MG24 固件](../firmware/xiao_mg24/README.md)，提供默认服务及接收采样桥接，业务/采样测试共用源码和宏。
+固件已交叉编译，实体无线链路仍未验证；HAP3 已有对应 FPGA 实现及数字仿真，不能把 Demo 当实测。
 
 ## 1. 分层与分工
 
@@ -11,7 +13,7 @@ Session + HAP3 草案（协议语义、校验、确认与回读）
         ↕ 原始字节流
 串口 transport.py 或 BLE ble_transport.py
         ↕
-待选蓝牙模块／FPGA 固件
+XIAO MG24 采样/桥接 → FPGA 固件
 ```
 
 BLE 是新增的传输方式，不负责生成扫描轨迹或相位。电脑提交完整图形，FPGA 自主扫描；串口与 BLE 同时只连接一种。[Android 原型](../mobile_app/README.md)已复用同一协议草案，支持触屏绘图、Demo、BLE 与状态回传，尚未完成实体手机和模块联调。
@@ -30,7 +32,10 @@ BLE 不显示波特率；若模块通过 UART 接 FPGA，**模块与 FPGA 之间
 
 ## 3. 可替换的模块配置
 
-默认采用 Nordic UART Service（NUS）的 UUID，仅作便于开发的起点，不代表硬件已选型。[2]
+默认采用 Nordic UART Service（NUS）的 UUID；MG24 固件已按同一服务实现，设备名 `Haptics-MG24`。[2]
+USB 串口和蓝牙只有一个控制者，另一端收到 BUSY；MG24 不伪造状态或心跳。
+FPGA 必须构建 `HAPTICS_RECEIVER=mg24`，使用 J22 三根信号线和共地；原调试串口不同时控制。
+采样测试模式广播 `MG24-ADC-TEST`，不提供业务控制。
 
 | 配置 | 默认值 | 方向 |
 |---|---|---|
@@ -58,7 +63,7 @@ BLE 不显示波特率；若模块通过 UART 接 FPGA，**模块与 FPGA 之间
 
 REMOTE 断开时尽力发送 STOP，失联后不能确认输出已停；LOCAL 允许 FPGA 独立运行。首版不支持多个电脑或手机同时控制。连接上电默认关闭输出的要求不变。
 
-## 6. 模块选定后需确认
+## 6. MG24 实物到位后需确认
 
 - 是否使用 NUS，实际 UUID 与读写属性，是否要求配对或专用初始化。
 - 模块与 FPGA 的电气接口、UART 参数、缓冲容量和接收流控。
@@ -80,3 +85,4 @@ python -m desktop_app.tests.gui_ble_smoke
 
 1. [Bleak 2.1.1 客户端与扫描接口](https://github.com/hbldh/bleak/blob/v2.1.1/bleak/__init__.py)：BLE GATT 扫描、读写、通知及写入长度约束。Windows 构建使用 Bleak 的 WinRT 后端。
 2. [Nordic NUS 服务定义](https://github.com/nrfconnect/sdk-nrf/blob/main/include/bluetooth/services/nus.h)：默认服务 UUID、RX 写入和 TX 通知方向。后续选型应固定模块固件版本并再次核对。
+3. [Silicon Labs Arduino Core 4.0.0](https://github.com/SiliconLabs/arduino/releases/tag/4.0.0)：MG24 本次交叉编译使用的蓝牙栈与驱动；实体吞吐与通知背压需复测。

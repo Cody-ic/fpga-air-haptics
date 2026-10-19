@@ -8,7 +8,7 @@ This repository prepares the 2026 FPGA haptic graphics project. `README.md` is t
 
 `fpga/rtl/` implements HAP3 control, trajectories, phases and outputs; `fpga/tb/` contains simulation checks, and `fpga/board/` holds the Tang MEGA 138K Pro build and pin constraints. The 4×4 / 11 mm configuration has passed temporary download and serial readback; acoustic performance remains unverified.
 
-`firmware/nucleo_f411re/` and `firmware/stm32f103c8_cube/` hold MCU prototypes. `hardware/` holds PCB releases and `hardware/mechanical/` contains printable fixtures. Hardware validation limits belong in their README files.
+`firmware/xiao_mg24/` implements the formal receiver sampler and USB/BLE bridge; business and ADC test modes share sources and a macro. `firmware/nucleo_f411re/` and `firmware/stm32f103c8_cube/` hold MCU prototypes. `hardware/` holds PCB releases and `hardware/mechanical/` contains printable fixtures. Hardware validation limits belong in their README files.
 
 ## Build, Test, and Development Commands
 
@@ -26,7 +26,9 @@ Run from the repository root with Python 3.10+ and Tk:
 - `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.
 - `python firmware/nucleo_f411re/tests/test_firmware.py`: native C/Python cross-checks using a host GCC compiler.
 - `python firmware/stm32f103c8_cube/tests/test_f103.py`: test F103 firmware modes and waveform buffers without flashing.
-- In `fpga/`: `bash tb/run_verilator.sh` runs 24 simulation groups; commercial Gowin builds use `board/build.tcl`.
+- In `fpga/`: `bash tb/run_verilator.sh` runs 25 simulation groups; commercial Gowin builds use `board/build.tcl`.
+- `python firmware/xiao_mg24/build.py --mode business --config <arduino-cli.yaml>`: cross-compile MG24 without uploading; use `--mode adc-test` for the same sources in test mode.
+- `bash firmware/xiao_mg24/tests/run_host.sh`: check bridge framing, capture lifecycle and transport ownership using host GCC.
 - In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
 - `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
 

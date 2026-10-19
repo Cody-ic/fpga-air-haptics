@@ -58,6 +58,16 @@ if {$array_profile eq "8x8"} {
     set pin_constraints tang_mega_138k_pro_8x8.cst
     set top_module board_shift_top
 }
+set receiver adcs7476
+if {[info exists ::env(HAPTICS_RECEIVER)]} { set receiver $::env(HAPTICS_RECEIVER) }
+if {$receiver ni {adcs7476 mg24}} { error "HAPTICS_RECEIVER must be adcs7476 or mg24" }
+if {$receiver eq "mg24"} {
+    if {$pinout ne "j23"} { error "MG24 build requires J23 array wiring" }
+    append project_name _mg24
+    set pin_constraints [string map {.cst _mg24.cst} $pin_constraints]
+    set top_module [expr {$array_profile eq "8x8" ? "board_shift_mg24_top" : "board_mg24_top"}]
+}
+puts "Receiver: $receiver"
 puts "Array: $array_profile; pinout: $pinout; device: $device_version; top: $top_module"
 puts "Project: $project_name; constraints: $pin_constraints"
 

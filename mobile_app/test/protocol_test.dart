@@ -67,6 +67,16 @@ void main() {
     expect(frame.fields['raw']!.split(',').length, 200);
     expect(ascii.decode(frame.encode()), raw);
   });
+  test('MG24 capture preserves its source, sample clock and voltage scale', () {
+    final raw = reference['mg24_capture'] as String;
+    final frame = Frame.decode(ascii.encode(raw));
+    expect(frame.fields['pin'], 'MG24_D0');
+    expect(frame.fields['simulated'], '0');
+    expect(frame.fields['fs_hz'], '397959');
+    expect(frame.fields['full_scale_mv'], '1210');
+    expect(frame.fields['raw']!.split(',').length, 200);
+    expect(ascii.decode(frame.encode()), raw);
+  });
   test('corrupt and oversized lines are rejected then recover at newline', () {
     final raw = const Frame('CMD', 2, 'STOP').encode();
     final corrupted = List<int>.from(raw)..[8] = 88;

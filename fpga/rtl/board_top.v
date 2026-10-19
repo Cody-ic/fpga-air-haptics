@@ -14,6 +14,7 @@
 module board_top #(
     parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（138K Pro 的 P16 = 50 MHz）
     parameter integer BAUD          = 115200,
+    parameter integer CAPTURE_BACKEND = 0, // 0=ADCS7476, 1=MG24 trigger + metadata
     // 阵列规模：4×4 = 16 路。默认接 J23；旧 PMOD1+PMOD2 可由构建脚本选择。
     // 改成 2 就退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
     parameter integer HW_ROWS       = 4,
@@ -56,7 +57,7 @@ module board_top #(
     // 共用控制逻辑；只有此层的端口会分配到物理引脚。
     board_core #(
         .CLK_HZ(CLK_HZ),
-        .BAUD(BAUD),
+        .BAUD(BAUD), .CAPTURE_BACKEND(CAPTURE_BACKEND),
         .HW_ROWS(HW_ROWS),
         .HW_COLS(HW_COLS),
         .HW_PITCH_UM(HW_PITCH_UM),

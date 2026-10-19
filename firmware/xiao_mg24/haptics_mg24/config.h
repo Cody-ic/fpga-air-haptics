@@ -1,0 +1,24 @@
+#pragma once
+#define HAPTICS_MODE_BUSINESS 0
+#define HAPTICS_MODE_ADC_TEST 1
+// ========== Only change this macro to switch business / standalone ADC test ==========
+#ifndef HAPTICS_MG24_MODE
+#define HAPTICS_MG24_MODE HAPTICS_MODE_BUSINESS
+#endif
+#define HAPTICS_FPGA_BAUD 115200
+#define HAPTICS_HOST_BAUD 115200
+#define HAPTICS_CAPTURE_TARGET_HZ 400000u
+#define HAPTICS_CAPTURE_SAMPLES 200u
+// D0 = PC00. Analog full scale uses the internal nominal 1.21 V reference.
+#define HAPTICS_ADC_PIN D0
+#define HAPTICS_TRIGGER_PIN D2
+#define HAPTICS_ADC_FULL_SCALE_MV 1210u
+#define HAPTICS_CAPTURE_TIMEOUT_MS 1500u
+#if HAPTICS_MG24_MODE == HAPTICS_MODE_ADC_TEST
+#define HAPTICS_DEVICE_NAME "MG24-ADC-TEST"
+#else
+#define HAPTICS_DEVICE_NAME "Haptics-MG24"
+#endif
+#if HAPTICS_MG24_MODE != HAPTICS_MODE_BUSINESS && HAPTICS_MG24_MODE != HAPTICS_MODE_ADC_TEST
+#error "Unsupported HAPTICS_MG24_MODE"
+#endif

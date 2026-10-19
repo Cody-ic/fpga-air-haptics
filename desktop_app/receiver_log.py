@@ -32,11 +32,13 @@ def capture_from_record(record):
         uptime_ms=str(data["uptime_ms"]), simulated=str(int(data["simulated"])),
         tx_running=str(int(data["tx_running"])), pin=data["pin"],
         fs_hz=str(data["fs_hz"]), bits=str(data["bits"]), n=str(len(data["raw"])),
+        full_scale_mv=str(data.get('full_scale_mv', 3300)),
         raw=",".join(map(str, data["raw"]))))
 
 
-def summarize(record, vref_mv=3300.0, divider=3.4):
+def summarize(record, vref_mv=None, divider=3.4):
     capture = capture_from_record(record)
+    vref_mv = capture.full_scale_mv if vref_mv is None else vref_mv
     analysis = capture.analyze(vref_mv, divider)
     context = record.get("last_state_context") or {}
     same_revision = (context.get("boot") == capture.boot
@@ -124,7 +126,7 @@ class CaptureRecorder(threading.Thread):
 def main():
     parser = argparse.ArgumentParser(description="读取接收采样记录，用指定参考电压重新生成分析 CSV")
     parser.add_argument("path", type=Path, help="记录目录或 captures.jsonl")
-    parser.add_argument("--vref-mv", type=float, default=3300)
+    parser.add_argument("--vref-mv", type=float, help="覆盖采样器报告的满量程，单位 mV")
     parser.add_argument("--divider", type=float, default=3.4)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -135,7 +137,8 @@ def main():
     count = 0
     sources = set()
     # Validate parameters before opening an output, including an empty input.
-    Capture("validation", 0, 0, False, False, "PA0", 400000, 12, (0,) * 200).analyze(args.vref_mv, args.divider)
+    pin = 'MG24_D0' if args.vref_mv is not None and args.vref_mv <= 1250 else 'PA0'
+    Capture("validation", 0, 0, False, False, pin, 400000, 12, (0,) * 200).analyze(args.vref_mv, args.divider)
     with source.open(encoding="utf-8") as incoming, destination.open("w", encoding="utf-8-sig", newline="") as outgoing:
         writer = csv.DictWriter(outgoing, fieldnames=SUMMARY_FIELDS)
         writer.writeheader()

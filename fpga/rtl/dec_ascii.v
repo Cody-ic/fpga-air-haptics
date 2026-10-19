@@ -27,7 +27,7 @@ module dec_ascii #(
 
     reg [BITS-1:0]       shift;      // 还没移进来的二进制位
     reg [4*DIGITS-1:0]   acc;
-    reg [5:0]            count;
+    reg [$clog2(BITS+1)-1:0] count;
 
     integer              i;
     reg [4*DIGITS-1:0]   adjusted;

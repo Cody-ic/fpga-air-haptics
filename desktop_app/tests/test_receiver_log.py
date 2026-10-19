@@ -16,6 +16,19 @@ from desktop_app.receiver_log import CaptureRecorder, capture_from_record, main,
 
 
 class ReceiverLogTests(unittest.TestCase):
+    def test_mg24_record_keeps_scale_and_clock_for_offline_analysis(self):
+        capture = Capture('mg24', 4, 500, False, False, 'MG24_D0', 397959, 12,
+                          (2048,)*200, 1210)
+        record = dict(schema='haptics-adc-record-1', index=1, received_utc='2026-10-19',
+                      capture=capture.__dict__)
+        self.assertEqual(capture_from_record(record), capture)
+        row = summarize(record)
+        self.assertEqual(row['vref_mv'], 1210)
+        self.assertEqual(row['fs_hz'], 397959)
+        self.assertAlmostEqual(row['mean_mv'], 2048*1210/4095)
+        with self.assertRaises(ValueError):
+            summarize(record, vref_mv=3300)
+
     def capture(self, simulated=True):
         return Capture("test-boot", 2, 1000, simulated, True, "PA0", 400000, 12,
                        tuple(600 + i % 10 for i in range(200)))

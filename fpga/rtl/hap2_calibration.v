@@ -12,7 +12,7 @@ module hap2_calibration #(
     input  wire rst_n,
     input  wire start,
     input  wire action_store,
-    input  wire [31:0] requested_mask,
+    input  wire [63:0] requested_mask,
     input  wire [31:0] phase_steps,
     input  wire [ADDR_W:0] geometry_off,
     input  wire [ADDR_W:0] geometry_len,
@@ -32,8 +32,8 @@ module hap2_calibration #(
     localparam [2:0] S_IDLE=0, S_GPRIME=1, S_GEOM=2, S_OPRIME=3,
                      S_OFF=4, S_COMMIT=5;
     localparam [CHANNELS-1:0] ALL_ON = {CHANNELS{1'b1}};
-    localparam [31:0] MASK_LIMIT = (CHANNELS == 32) ? 32'hffffffff
-                                                    : ((32'h1 << CHANNELS) - 1'b1);
+    localparam [63:0] MASK_LIMIT = (CHANNELS >= 64) ? 64'hffffffffffffffff
+                                                    : ((64'h1 << CHANNELS) - 1'b1);
 
     reg [2:0] state;
     reg wait_data;
