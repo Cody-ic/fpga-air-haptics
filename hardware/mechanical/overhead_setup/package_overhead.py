@@ -77,7 +77,7 @@ def main():
                 z.write(layout.ROOT.parents[1]/'desktop_app/array_geometry.py','source/desktop_app/array_geometry.py')
                 for source in (out/'preview').glob('*.png'):
                     if not source.name.startswith('_'):z.write(source,'preview/'+source.name)
-            for filename in ('README.md','装配清单.md'):
+            for filename in ('README.md','装配清单.md','学校打印需求.md'):
                 z.writestr(filename,packaged_markdown(filename,full))
             for filename in ('manifest.json','validation.json','native_validation.json','file_manifest.json'):
                 z.write(out/filename,'checks/'+filename)
