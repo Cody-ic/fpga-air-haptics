@@ -10,10 +10,11 @@
 
 ## 2. 打印件与文件
 
-**学校数量说明（2026-10-20）：**本次两块发射板分别保留承载框、共用侧架，最终 18 件，含试片。
-上次 7 种模型各打印 1 件，现需补侧架 1、绝缘套筒 7、压片 3，共 11 件。
-使用[学校打印需求单](学校打印需求.md)和[逐件补打包](../P5_school_20261020/TouchSee_P5_School_TOPUP_11pcs_20261020.zip)，
-包内 11 个模型文件，每文件打印 1 件。不要去重相同形状，也不要同时打印全量包。
+**学校数量说明（2026-10-20，订单 P5-SCHOOL-R2）：**两块发射板分别保留承载框、共用侧架，
+整套装配／试配用量 18 件，另备套筒 4 个、压片 2 个，总计 24 件。
+已备 7 种模型各 1 件时，本批补侧架 1、绝缘套筒 11、压片 5，共 17 件，已含备件。
+使用[学校打印交付单](学校打印需求.md)和[逐件补充打印包](../P5_school_spares_20261020/TouchSee_P5_School_TOPUP_17pcs_spares_20261020.zip)，
+包内 17 个模型文件，每文件打印 1 件。保留同形副本，不同时执行全量包。
 原始学校包保留用于追溯几何；下表是一种发射配置的数量，并非本次两块板预装订单。
 
 按所用 PCB 选择一个承载框，另一款不必同时打印。所有尺寸单位为 mm，打印比例为 100%；学校使用最终发布包中的 STL。零件准确包络、数量、网格与草图核验结果以最终 manifest 和核验报告为准，当前生成状态见第 7 节。
@@ -117,7 +118,7 @@
 & D:/python/python.exe hardware/mechanical/overhead_setup/validate_overhead.py
 & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python hardware/mechanical/overhead_setup/render_overhead.py
 & D:/python/python.exe hardware/mechanical/overhead_setup/package_overhead.py
-# 学校逐件数量包：先验证已发布 P5 原始包，再展开为全量 18 件和补打 11 件。
+# 学校逐件数量包：校验原始模型，展开为含备件的全量 24 件与补充 17 件。
 & D:/python/python.exe hardware/mechanical/overhead_setup/package_school.py
 ```
 
