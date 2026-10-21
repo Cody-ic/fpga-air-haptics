@@ -20,6 +20,7 @@
 // 配置用「影子寄存器 + 一次性替换」：字段流先写进影子，全部检查通过才整体
 // 拷进生效寄存器。这样不会出现「换了一半」的中间状态。
 module hap2_cmd #(
+    parameter integer CAL_LIMIT = 0,
     parameter integer ADDR_W = 13,     // 行缓冲 8192 字节，地址 13 位
     // ---- 设备声明的工作空间（握手应答里发给电脑的那组范围，单位微米）----
     // 单独一项字段合法不代表整个图形合法：比如 cx=90000 µm、radius=20000 µm
@@ -393,6 +394,7 @@ module hap2_cmd #(
                     if (mode == M_LOCAL)              dec_err = C_LOCAL_CONTROL;
                     else if (run_state != R_IDLE)     dec_err = C_BUSY;
                     else if (array_bad)               dec_err = C_HARDWARE_MISMATCH;
+                    else if (CAL_LIMIT && (sh_carrier_hz!=40000 || sh_phase_steps!=64)) dec_err = 4'd10;
                     else                              dec_commit = 1'b1;
                 end
 

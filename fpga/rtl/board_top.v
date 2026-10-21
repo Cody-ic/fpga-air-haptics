@@ -1,5 +1,13 @@
 `timescale 1ns/1ps
 
+// FPGA has one switch. MG24 -> PC transport is configured only in MG24 firmware.
+`ifndef FPGA_CALIBRATION_ENABLE
+`define FPGA_CALIBRATION_ENABLE 0
+`endif
+`ifndef FPGA_CALIBRATION_SOURCE
+`define FPGA_CALIBRATION_SOURCE 0
+`endif
+
 // 板级顶层：把「芯片里该有的逻辑」接到「板子上真实的引脚和器件」上。
 // 逻辑功能都在 hap2_top 里；这一层只做几件**必须**在真板子上做的事：
 //
@@ -12,6 +20,8 @@
 // 目标板：Sipeed Tang MEGA 138K Pro（GW5AST-LV138FPG676A，676 球 FCPBG676A 封装）。
 // 板上 50 MHz 在 P16，和固件默认参数一致，所以**不需要锁相环**。
 module board_top #(
+    parameter integer CAL_Z_UM     = 100000,       // fixed receiver: (0,0,100) mm
+    parameter integer CAL_LEVEL    = 30,
     parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（138K Pro 的 P16 = 50 MHz）
     parameter integer BAUD          = 115200,
     // 阵列规模：4×4 = 16 路，分在 PMOD1（8 路）+ PMOD2（8 路）两个连接器上。
@@ -49,6 +59,13 @@ module board_top #(
     // 本地模式、串口状态在状态帧里都看得到）
     output wire [2:0] led
 );
+
+    generate
+        if ((`FPGA_CALIBRATION_ENABLE != 0 && `FPGA_CALIBRATION_ENABLE != 1) ||
+            (`FPGA_CALIBRATION_SOURCE != 0 && `FPGA_CALIBRATION_SOURCE != 1)) begin : invalid_macros
+            ERROR_MACROS_MUST_BE_ZERO_OR_ONE invalid_configuration();
+        end
+    endgenerate
 
     // ---------------- 1. 上电复位 ----------------
     wire rst_n;
@@ -94,6 +111,10 @@ module board_top #(
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_top #(
+        .CAL_ENABLE    (`FPGA_CALIBRATION_ENABLE),
+        .CAL_SOURCE    (`FPGA_CALIBRATION_SOURCE),
+        .CAL_Z_UM      (CAL_Z_UM),
+        .CAL_LEVEL     (CAL_LEVEL),
         .CLK_HZ        (CLK_HZ),
         .BAUD          (BAUD),
         .HW_ROWS       (HW_ROWS),
