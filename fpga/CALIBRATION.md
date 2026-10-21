@@ -25,6 +25,10 @@ MG24 自己仍用 `MG24_USE_BLUETOOTH`：0 自带 USB，1 低功耗蓝牙。已�
 
 ## 2. 启动、构建及产物
 
+直接双击 [start_calibration.cmd](../firmware/xiao_mg24/start_calibration.cmd) 打开中文窗口。打开后，在上方“连接与测点”区域第一行的“FPGA 串口”下拉框选择 **COM7**；没有显示时点旁边的“刷新串口”，也可以直接输入端口号。COM7 是本次实板使用的端口，换 USB 插口或电脑后需要重新核对。测量方式选择“示波器人工读数”，不需要填写 MG24 串口。确认摆放和接线后才点开始；打开窗口本身不会发射。
+
+启动失败时控制台保留错误，不会立即消失；日志在 `.runtime/calibration/launcher/`。旧 `.ps1` 的中文编码与 Windows PowerShell 5.1 不兼容问题已修复。也可在已经打开的 PowerShell 中运行下面命令，查看完整报错。
+
 在仓库根目录运行：
 
 ```powershell
@@ -32,7 +36,7 @@ MG24 自己仍用 `MG24_USE_BLUETOOTH`：0 自带 USB，1 低功耗蓝牙。已�
 python -m pip install -r firmware/xiao_mg24/requirements.txt
 
 # 独立中文窗口；不会自行连接、开始发射或烧录
-powershell -ExecutionPolicy Bypass -File firmware/xiao_mg24/start_calibration.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File firmware/xiao_mg24/start_calibration.ps1
 
 # 分别构建三种配置，不改变源码里的宏
 python fpga/board/build_calibration.py --mode all

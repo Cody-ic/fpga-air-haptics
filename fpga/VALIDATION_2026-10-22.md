@@ -41,6 +41,12 @@ python fpga/tb/run_tests.py --iverilog <iverilog.exe路径> --bench tb_hap2_top 
 
 本轮未修改 MG24 固件公共采样或通信代码，复用其已有 USB／蓝牙构建验证。
 
+### Windows 启动入口补充验证
+
+用户报告从 PowerShell 打开后闪退。使用系统 Windows PowerShell 5.1 执行原 `start_calibration.ps1`，稳定复现第 4 行中文字符串被错误解码、缺少结束引号的解析失败，Python 尚未执行。新增启动回归测试先在旧脚本失败，修复后两个测试通过：系统实际文件解析成功；找不到 Python 时返回失败、保留错误日志且自动化调用不挂起。
+
+启动脚本改为纯 ASCII 文本，增加 `-Python` 指定解释器、失败时等待确认、`-NoPause` 自动化选项，以及独立的启动／标准输出／标准错误日志。新增 `start_calibration.cmd` 作为可双击入口。真实启动脚本使用本机 `D:\anaconda\python.exe` 成功打开“TouchSee · 逐通道实测校准”，窗口响应正常、错误日志为空；没有连接串口、发射或开始测量。验证命令：`python -m unittest discover -s firmware/xiao_mg24/tests -p test_launcher.py -v`。
+
 ## USB 接入检查
 
 用户授权识别成功后下载示波器配置。首次检查 Windows 发现一个 `USB\\VID_0000&PID_0002` 设备，硬件标识 `USB\\DEVICE_DESCRIPTOR_FAILURE`，问题码 43，位于 `Port_#0004.Hub_#0002`。当时仅有的 COM3、COM4 均为蓝牙串口，Gowin 下载器扫描未返回可用下载器。
