@@ -4,6 +4,8 @@
 
 已打印的 P5 主体保留，使用[增高与膜架说明](overhead_addons/README.md)及[补充打印交付单](overhead_addons/学校打印需求.md)。只补打 8 件，含压桥备用 1 件与试片 1 件；将名义声面间距从 70 mm 提至 100 mm。4×5 英寸、10 μm 膜片由独立上下框夹持，膜面与原接收器声面同高。原接收板及托盘继续用于调试，与膜架互换使用，不能叠放。
 
+直接交给打印方使用[简版打印压缩包](P5_addons_20261022/TouchSee_P5_Print_ONLY_8pcs_20261022.zip)：根目录只有 8 个打印文件和 1 份简短文本说明，每个模型打印 1 件，已含备用件。生成命令为 `python hardware/mechanical/overhead_addons/package_direct.py`，不改变已核验的模型几何。
+
 ## 当前学校打印单：P5 上发射、下接收
 
 2026-10-20：使用[学校打印交付单](overhead_setup/学校打印需求.md)，订单版本 P5-SCHOOL-R2。
