@@ -1,6 +1,7 @@
 #include "config.h"
 #include "sampler.h"
 #include "ble_transport.h"
+#include "usb_transport.h"
 #include "psa/crypto.h"
 
 static mg24::HardwareSampler sampler;
@@ -60,9 +61,7 @@ void loop() {
 #if MG24_USE_BLUETOOTH
         if (!mg24::ble_send(data, size, sent)) { mg24::ble_close(); receiver->reset(); ready = false; }
 #else
-        const int available = Serial.availableForWrite();
-        if (available > 0) sent = Serial.write(reinterpret_cast<const uint8_t *>(data),
-                                              size < unsigned(available) ? size : unsigned(available));
+        sent = mg24::usb_send(Serial, data, size);
 #endif
         receiver->consume(sent);
         if (sent) progress_us = now;

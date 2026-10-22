@@ -1,4 +1,5 @@
 #include "receiver_core.h"
+#include "usb_transport.h"
 #include <iostream>
 #include <string>
 #include <cstdlib>
@@ -17,6 +18,25 @@ struct FakeSampler : mg24::Sampler {
 };
 
 int main(int argc, char **argv) {
+    if (argc > 1 && std::string(argv[1]) == "usb-send") {
+        struct UnbufferedSerial {
+            std::string received;
+            unsigned calls = 0, maximum = 0;
+            int availableForWrite() { return 0; } // Silicon Labs inherits Print's default.
+            unsigned write(const uint8_t *data, unsigned size) {
+                ++calls;
+                if (size > maximum) maximum = size;
+                received.append(reinterpret_cast<const char *>(data), size);
+                return size;
+            }
+        } port;
+        const std::string reply(200, 'x');
+        unsigned sent = 0;
+        for (unsigned i = 0; i < 200 && sent < reply.size(); ++i)
+            sent += mg24::usb_send(port, reply.data() + sent, reply.size() - sent);
+        std::cout << (port.received == reply) << ' ' << port.maximum << ' ' << port.calls << '\n';
+        return 0;
+    }
     if (argc > 1 && std::string(argv[1]) == "analyze") {
         uint16_t samples[mg24::SAMPLE_COUNT];
         double fs;

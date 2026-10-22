@@ -28,12 +28,15 @@ public:
         cfg.osrHighSpeed = iadcCfgOsrHighSpeed2x;
         cfg.adcClkPrescale = IADC_calcAdcClkPrescale(IADC0, 10000000, 0,
                                                    iadcCfgModeNormal, init.srcClkPrescale);
-        const uint32_t adc_clock = CMU_ClockFreqGet(cmuClock_IADCCLK)
-            / (init.srcClkPrescale + 1) / (cfg.adcClkPrescale + 1);
-        const uint32_t timer_cycles = (adc_clock + TARGET_SAMPLE_HZ / 2) / TARGET_SAMPLE_HZ;
+        // IADC_TIMER counts CLK_SRC_ADC, before the separate conversion-clock
+        // prescaler (EFR32xG24 reference manual, IADC_TIMER). Dividing by
+        // adcClkPrescale here would double the real trigger rate on this board.
+        const uint32_t timer_clock = CMU_ClockFreqGet(cmuClock_IADCCLK)
+            / (init.srcClkPrescale + 1);
+        const uint32_t timer_cycles = (timer_clock + TARGET_SAMPLE_HZ / 2) / TARGET_SAMPLE_HZ;
         if (timer_cycles < 12 || timer_cycles > 65535) return false;
         init.timerCycles = timer_cycles;
-        sample_hz_ = static_cast<double>(adc_clock) / timer_cycles;
+        sample_hz_ = static_cast<double>(timer_clock) / timer_cycles;
         IADC_init(IADC0, &init, &configs);
         IADC_InitSingle_t single = IADC_INITSINGLE_DEFAULT;
         single.triggerSelect = iadcTriggerSelTimer;

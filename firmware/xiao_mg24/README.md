@@ -1,6 +1,6 @@
 # XIAO MG24 接收采样固件
 
-日期：2026-10-21。用于现有接收板的固定测点采样，属于独立接收设备；不实现发射控制。后续双模式校准代码见 [FPGA 校准说明](../../fpga/CALIBRATION.md)，人工模式不需要 MG24，自动模式由电脑转发测量值。实际声学、采样时序及蓝牙链路须上板验证。
+日期：2026-10-22。用于现有接收板的固定测点采样，属于独立接收设备；不实现发射控制。USB 版已烧录到实板，并在 COM9 完成信息查询与三次 200 点回传，见 [首次实板验证](VALIDATION_2026-10-22.md)。双模式校准代码见 [FPGA 校准说明](../../fpga/CALIBRATION.md)，人工模式不需要 MG24，自动模式由电脑转发测量值。已知输入幅值、外部采样时序精度、声学效果及蓝牙链路仍待验证。
 
 ## 1. 通信模式
 
@@ -54,7 +54,7 @@ MG24 USB-C                         ─── 电脑（有线模式）或供电
 
 - A0 / PC00，12 位单端输入，名义参考 3300 mV，1 倍模拟增益。
 - 目标采样率 400000 点/秒，每次 200 点，名义窗口 0.5 ms。
-- 独立 FSRCO（Fast Startup RC Oscillator，快速启动阻容振荡器）时钟经源时钟和 ADC 时钟分频；`sample_hz` 从配置的时钟频率、分频和本地定时周期计算。它是配置推导值，不是示波器实测校准值。
+- 独立 FSRCO（Fast Startup RC Oscillator，快速启动阻容振荡器）时钟经源时钟分频后驱动本地定时器；转换时钟另有分频，不能重复用于本地定时周期。`sample_hz` 从源时钟频率、源分频和定时周期计算。它是配置推导值，不是示波器实测校准值。
 - DMA 结束回调关闭采样触发；主循环完成分析和发送，避免在中断内执行 JSON 格式化或蓝牙发送。
 - 40 kHz 分量使用“常数项＋正弦＋余弦”的最小二乘拟合，按实际配置采样率计算，避免非整周期窗口中的直流偏置干扰结果。
 - `mean_adc` 是原码均值；`rms_adc` 是去直流后的 RMS（Root Mean Square，均方根）；`peak40_adc` 是 40 kHz 分量峰值。后两项再按名义参考电压换算为 mV，不表示绝对声压。
@@ -112,7 +112,7 @@ python -m unittest discover -s firmware/xiao_mg24/tests -v
 
 ## 7. 验证边界
 
-本次版本、目标编译结果和测试范围见[2026-10-21 离线验证记录](VALIDATION_2026-10-21.md)。
+环境与最初离线范围见 [2026-10-21 离线验证记录](VALIDATION_2026-10-21.md)，后续烧录、串口兼容性与定时修复、USB 实板结果见 [2026-10-22 验证记录](VALIDATION_2026-10-22.md)。
 
 原生 C++ 检查运行固件同一份协议与分析代码；合成信号测试不是实板采样。两种模式须分别通过目标编译。上板后仍需完成：已知 40 kHz 信号的采样率与幅值核对、两种传输结果一致性、前级削顶检查、蓝牙断线与重连、长时间空闲后的新采样，以及与 FPGA 的后续测量编号关联。
 
@@ -125,3 +125,4 @@ python -m unittest discover -s firmware/xiao_mg24/tests -v
 - [官方 IADC 硬件定时与 DMA 示例](https://github.com/SiliconLabsSoftware/peripheral_examples_gsdk/tree/master/series2/iadc/iadc_single_low_current)：本地定时触发与 DMA 外设接口依据。
 - [Silicon Labs BLE 服务示例](https://github.com/SiliconLabsSoftware/arduino/blob/5.0.0/libraries/SiliconLabs/examples/ble_spp/ble_spp.ino)：动态服务、通知、连接事件接口依据；本项目另定义 Nordic 服务与接收协议。
 - [Arduino 目录配置](https://docs.arduino.cc/arduino-cli/configuration/)：D 盘数据、库及缓存路径。
+- [EFR32xG24 参考手册](https://www.silabs.com/documents/public/reference-manuals/efr32xg24-rm.pdf)：本地采样定时器按 `CLK_SRC_ADC` 计数。

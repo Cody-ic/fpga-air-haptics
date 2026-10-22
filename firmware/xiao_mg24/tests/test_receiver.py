@@ -32,6 +32,13 @@ class NativeCoreTests(unittest.TestCase):
                                 capture_output=True, text=True, check=True)
         return [json.loads(line) for line in result.stdout.splitlines()]
 
+    def test_usb_sends_with_unbuffered_sdk_serial(self):
+        result = subprocess.run([str(self.binary), "usb-send"], capture_output=True, text=True, check=True)
+        complete, maximum, calls = map(int, result.stdout.split())
+        self.assertEqual(complete, 1)
+        self.assertLessEqual(maximum, 32)
+        self.assertGreater(calls, 1)
+
     def test_native_fit_against_known_signal(self):
         for fs in (400000, 390000, 410000):
             for phase in (0, .7, 2.4):
