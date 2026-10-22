@@ -1,0 +1,1057 @@
+{
+  "passed": true,
+  "revision": "P5-ADDON-20261022",
+  "documents": [
+    {
+      "file": "01_side_trestle.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 31,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 16,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "02_tx_carrier_4x4.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 41,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图6",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "03_tx_carrier_8x8.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 41,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图6",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "04_m3_rear_sleeve_6x5.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "05_receiver_flat_tray.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 19,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图6",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图7",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图8",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图9",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图10",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图11",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图12",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图13",
+          "constraint_status": 3,
+          "relation_count": 13,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图14",
+          "constraint_status": 3,
+          "relation_count": 58,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图15",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "06_receiver_edge_clip.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "07_fastener_fit_coupon.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "08_fixed_riser_30.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 16,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 46,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 16,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 35,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "09_riser_bridge.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 25,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "10_film_lower_stand.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 62,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 117,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "11_film_upper_ring.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 62,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "12_riser_fit_coupon.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 16,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 46,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 16,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 35,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_film_4x5in_10um.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M3_nylock.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M3_plain_nut.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M3_washer.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M3x16_screw.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M3x25_screw.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M4_nylock.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M4_plain_nut.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 17,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M4_washer.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 5,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M4x25_screw.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_M4x30_screw.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_receiver_electronics.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 30,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 49,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图6",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图7",
+          "constraint_status": 3,
+          "relation_count": 40,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图8",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图9",
+          "constraint_status": 3,
+          "relation_count": 149,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图10",
+          "constraint_status": 3,
+          "relation_count": 78,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图11",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图12",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图13",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图14",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图15",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图16",
+          "constraint_status": 3,
+          "relation_count": 77,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_tx4_electronics.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 34,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 149,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图6",
+          "constraint_status": 3,
+          "relation_count": 149,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图7",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图8",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图9",
+          "constraint_status": 3,
+          "relation_count": 140,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图10",
+          "constraint_status": 3,
+          "relation_count": 149,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图11",
+          "constraint_status": 3,
+          "relation_count": 311,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图12",
+          "constraint_status": 3,
+          "relation_count": 116,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图13",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图14",
+          "constraint_status": 3,
+          "relation_count": 20,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图15",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图16",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "REF_tx8_electronics.SLDPRT",
+      "feature_errors": [],
+      "sketches": [
+        {
+          "name": "草图1",
+          "constraint_status": 3,
+          "relation_count": 22,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图2",
+          "constraint_status": 3,
+          "relation_count": 3,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图3",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图4",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图5",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图6",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图7",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图8",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图9",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图10",
+          "constraint_status": 3,
+          "relation_count": 24,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图11",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图12",
+          "constraint_status": 3,
+          "relation_count": 157,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图13",
+          "constraint_status": 3,
+          "relation_count": 98,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图14",
+          "constraint_status": 3,
+          "relation_count": 107,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图15",
+          "constraint_status": 3,
+          "relation_count": 124,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图16",
+          "constraint_status": 3,
+          "relation_count": 140,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图17",
+          "constraint_status": 3,
+          "relation_count": 157,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图18",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图19",
+          "constraint_status": 3,
+          "relation_count": 157,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图20",
+          "constraint_status": 3,
+          "relation_count": 30,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图21",
+          "constraint_status": 3,
+          "relation_count": 40,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图22",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图23",
+          "constraint_status": 3,
+          "relation_count": 311,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图24",
+          "constraint_status": 3,
+          "relation_count": 190,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图25",
+          "constraint_status": 3,
+          "relation_count": 141,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图26",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图27",
+          "constraint_status": 3,
+          "relation_count": 167,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图28",
+          "constraint_status": 3,
+          "relation_count": 190,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图29",
+          "constraint_status": 3,
+          "relation_count": 190,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图30",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图31",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图32",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图33",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图34",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图35",
+          "constraint_status": 3,
+          "relation_count": 157,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图36",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图37",
+          "constraint_status": 3,
+          "relation_count": 141,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图38",
+          "constraint_status": 3,
+          "relation_count": 182,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图39",
+          "constraint_status": 3,
+          "relation_count": 98,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图40",
+          "constraint_status": 3,
+          "relation_count": 311,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图41",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图42",
+          "constraint_status": 3,
+          "relation_count": 218,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图43",
+          "constraint_status": 3,
+          "relation_count": 218,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图44",
+          "constraint_status": 3,
+          "relation_count": 218,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图45",
+          "constraint_status": 3,
+          "relation_count": 218,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图46",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图47",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "草图48",
+          "constraint_status": 3,
+          "relation_count": 10,
+          "fixed_relation_count": 0
+        }
+      ],
+      "reopened": true
+    },
+    {
+      "file": "Addons_4x4_film_100mm.SLDASM",
+      "reopened": true,
+      "component_count": 91,
+      "local_references_verified": true,
+      "transforms_verified": true,
+      "modeled_interferences": []
+    },
+    {
+      "file": "Addons_4x4_receiver_100mm.SLDASM",
+      "reopened": true,
+      "component_count": 74,
+      "local_references_verified": true,
+      "transforms_verified": true,
+      "modeled_interferences": []
+    },
+    {
+      "file": "Addons_8x8_film_100mm.SLDASM",
+      "reopened": true,
+      "component_count": 91,
+      "local_references_verified": true,
+      "transforms_verified": true,
+      "modeled_interferences": []
+    },
+    {
+      "file": "Addons_8x8_receiver_100mm.SLDASM",
+      "reopened": true,
+      "component_count": 74,
+      "local_references_verified": true,
+      "transforms_verified": true,
+      "modeled_interferences": []
+    }
+  ],
+  "scope": "Native sketches fully defined with dimensions and relations, no Fix relations; exact transformed solid clashes including original PCB envelopes, standard fasteners and 10um film reference.",
+  "printed_or_load_tested": false,
+  "acoustic_performance_verified": false
+}
