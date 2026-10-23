@@ -29,6 +29,13 @@ def main():
         'BLE：选择 BLE 蓝牙，扫描并选择模块，再连接；其他模块可修改连接设置。\n'
         'XIAO MG24 使用默认蓝牙服务；需配套构建接收后端为 mg24 的 FPGA 程序。\n'
         '图形需主动保存为 JSON。\n\n'
+        '声场页→接收板测点：默认底面坐标，原点为左增高底座左前外角。\n'
+        'X向右、Y向后；Z为接收面离桌高度。居中接收头R=(132,94,24.7) mm。\n'
+        '可切换填写托盘左前角A，保持4针口向右；查看坐标示意图核对方向。\n'
+        '本坐标适用于30mm增高版P5支架，仍需核实实际尺寸；旧阵列坐标也可继续使用。\n'
+        '测点导出同时保留原始波形、底面坐标与阵列坐标。\n'
+        '串口收发自动镜像：%LOCALAPPDATA%\\TouchSee\\live，电脑助手可读同一份记录。\n'
+        '其中latest.json指向本次连接，snapshot.json为最新状态，traffic.jsonl为逐条收发。\n\n'
         '接收板调试：打开调试模式→实测数据→接收波形，采集一次或连续查看。\n'
         'Demo 波形是合成数据。MG24 方案将 ADCV_P 接 D0 并共地；旧 STM32 原型仍接 PA0。\n'
         'MG24 的电脑控制入口是它自身的 USB 串口或蓝牙，非 FPGA 的调试 USB 串口。\n'
@@ -53,6 +60,8 @@ def main():
             bundle.write(path, path.name)
         for path in (app_dir.parent/'hardware/arrays').glob('*.json'):
             bundle.write(path, 'array-profiles/'+path.name)
+        bundle.write(app_dir/'SOUND_FIELD.md', '声场与测绘说明.md')
+        bundle.write(app_dir/'MEASUREMENT_COORDINATES.md', '底面坐标与实时记录.md')
         bundle.write(app_dir/'ARRAY_CALIBRATION.md', '阵列与校准说明.md')
         bundle.write(app_dir.parent/'firmware/xiao_mg24/README.md', 'MG24接线与使用说明.md')
         for distribution in metadata.distributions():

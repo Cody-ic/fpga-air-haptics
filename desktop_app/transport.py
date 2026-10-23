@@ -14,6 +14,9 @@ def available_ports():
 
 class SerialTransport:
     simulated = False
+    # Drain old USB/UART bytes in the session worker before the first HELLO.
+    # Keep this short and cancellable; opening a port never starts output.
+    startup_delay_s = 0.2
 
     def __init__(self, port, baudrate):
         # Avoid flow-control toggling where supported; some drivers can glitch

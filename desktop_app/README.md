@@ -174,3 +174,7 @@ python -m desktop_app.golden --file 图形.json --out desktop_app/exports/我的
 默认导出完整一圈，输出到 `desktop_app/exports/golden-*/`：`*.csv` 是每帧的焦点坐标与全部相位码（人看），`*_phases.mem` 每行一帧、每通道两位十六进制（`$readmemh` 可直接读），`*_focus.mem` 是 32 位补码的焦点坐标，`*.json` 记录参数与 SHA-256 校验和。
 
 导出内容是**设备期望值**，不是实测数据；更换阵列尺寸或修改图形后必须重新导出。
+
+## 底面坐标与共享串口读取
+
+声场测点页支持从左增高底座左前角量取的位置，也可填写托盘角点；串口收发自动写入实时镜像，助手可在上位机连接时读取。参见[底面坐标与实时串口记录](MEASUREMENT_COORDINATES.md)。
