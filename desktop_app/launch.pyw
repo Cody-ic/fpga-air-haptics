@@ -13,6 +13,12 @@ def launch():
     if len(sys.argv) == 3 and sys.argv[1] == '--self-test':
         from desktop_app.tests.gui_smoke import main
         return main(runtime_path=Path(sys.argv[2]).resolve())
+    if len(sys.argv) == 3 and sys.argv[1] == '--field-self-test':
+        from desktop_app.tests.acoustic_gui_smoke import main
+        return main(runtime_path=Path(sys.argv[2]).resolve())
+    if len(sys.argv) == 3 and sys.argv[1] == "--coords-self-test":
+        from desktop_app.tests.coordinate_gui_smoke import main
+        return main(runtime_path=Path(sys.argv[2]).resolve())
     from desktop_app.app import main
     main()
     return 0

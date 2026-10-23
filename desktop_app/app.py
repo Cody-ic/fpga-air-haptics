@@ -31,6 +31,7 @@ from .playback import PlaybackPanel
 from .presets import PresetPreview
 from .receiver_panel import ReceiverPanel
 from .calibration_panel import CalibrationPanel
+from .acoustic_panel import AcousticPanel
 from .array_geometry import Geometry
 from .transport import available_ports
 
@@ -100,7 +101,7 @@ class PlotPanel(ttk.Frame):
                                   vmin=0, vmax=max(1.0, float(values.max())), aspect="equal")
         self.field.set_xlabel("x / mm")
         self.field.set_ylabel("y / mm" if plane == "XY" else "z / mm")
-        self.field.set_title(f"{plane} 声场切片 · {'输出使能' if enabled else '输出关闭'}", fontsize=10)
+        self.field.set_title(f"{plane} 点声源参考 · {'载波开启时' if enabled else '输出关闭'}", fontsize=10)
         target_y = focus[1] if plane == "XY" else focus[2]
         self.field.plot(focus[0], target_y, marker="+", ms=11, mew=1.5, color="#68e4dc")
         self.colorbar = self.figure.colorbar(image, ax=self.field, fraction=0.038, pad=0.03)
@@ -248,6 +249,7 @@ class App:
         ttk.Label(header, text="触见", style="Title.TLabel").pack(side="left")
         ttk.Label(header, text=" /  图形工作台", style="Muted.TLabel").pack(side="left", pady=(7, 0))
         ttk.Checkbutton(header, text="调试模式", variable=self.debug_mode, command=self.toggle_debug).pack(side="left", padx=24, pady=(7, 0))
+        ttk.Button(header, text="查看声场", command=lambda: self.tabs.select(self.acoustic_tab)).pack(side="left", pady=(7, 0))
         self.header_stop = ttk.Button(header, text="停止输出", style="Stop.TButton", command=lambda: self.send("STOP"))
         self.header_stop.pack(side="right", padx=(14, 0))
         ttk.Label(header, textvariable=self.device_label, style="Heading.TLabel").pack(side="right")
@@ -430,6 +432,8 @@ class App:
                                       lambda: self.send("PAUSE"), lambda: self.send("STOP"),
                                       self.select_shape)
         self.playback.pack(fill="both", expand=True)
+        self.acoustic_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.acoustic_tab, text="声场")
         self._device_tab(device_tab)
         view_row = ttk.Frame(actual_tab, padding=8)
         view_row.pack(fill="x")
@@ -453,9 +457,12 @@ class App:
                                  on_change=lambda: self.vars["shape"].set(SHAPES["CUSTOM"]))
         self.editor.pack(fill="both", expand=True)
         self._measurement_tab(measured_tab)
+        self.acoustic_panel = AcousticPanel(self.acoustic_tab, self)
+        self.acoustic_panel.pack(fill="both", expand=True)
         log_controls = ttk.Frame(log_tab, padding=8)
         log_controls.pack(fill="x")
         ttk.Checkbutton(log_controls, text="显示心跳报文", variable=self.show_heartbeat, command=self.render_log).pack(side="left")
+        ttk.Button(log_controls, text="打开实时记录", command=self.open_live_log).pack(side="right", padx=8)
         ttk.Button(log_controls, text="导出日志", command=self.export_log).pack(side="right")
         self.log_view = tk.Text(log_tab, wrap="none", bg="#152638", fg="#d8e5f2", font=("Consolas", 10), state="disabled")
         scroll = ttk.Scrollbar(log_tab, orient="vertical", command=self.log_view.yview)
@@ -463,6 +470,14 @@ class App:
         scroll.pack(side="right", fill="y")
         self.log_view.pack(fill="both", expand=True)
         self.update_controls()
+
+    def open_live_log(self):
+        from .live_log import default_root
+        directory = self.session.mirror.directory if self.session and self.session.mirror else default_root()
+        if directory.is_dir():
+            os.startfile(str(directory))
+        else:
+            self.status_line.set("连接设备后会自动建立实时记录。")
 
     def toggle_debug(self):
         enabled = self.debug_mode.get()
@@ -748,6 +763,7 @@ class App:
         self.state, self.received, self.ready, self.busy = None, 0.0, False, False
         self.hardware, self.workspace, self.capabilities = None, None, set()
         self.receiver_panel.reset()
+        self.acoustic_panel.on_connect()
         self.await_revision, self.await_sample, self.pending_verb = None, None, None
         self.await_verb = self.pending_config = self.confirmed_config = None
         self.mute.set(False)
@@ -779,6 +795,12 @@ class App:
             self.update_controls()
 
     def send(self, verb, **fields):
+        if self.acoustic_panel.busy:
+            if verb == "STOP":
+                self.acoustic_panel.cancel_scan("停止输出，当前未完成测点没有保存")
+            else:
+                self.status_line.set("请等待当前测点采集完成，或取消采集后再操作。")
+                return
         if self.calibration_panel.busy:
             if verb == 'STOP':
                 self.calibration_panel.cancel()
@@ -844,7 +866,15 @@ class App:
 
     def _queue_plot(self, name, config, phases, focus, enabled, title, array=None, channel_mask=None):
         array = array or self.preview_array()
-        self.wanted[name] = (self.generation, config, array, tuple(phases), tuple(focus), enabled, self.plane.get(), title, channel_mask)
+        direction = 1
+        if name == "actual" and self.session and not self.session.is_demo:
+            device = (self.session.hello_fields or {}).get("device", "")
+            if device in ("STM32F103C8T6", "NUCLEO-F411RE"):
+                direction = -1
+            else:
+                title += " · 相位时序未核实，请用声场页选择"
+        self.wanted[name] = (self.generation, config, array, tuple(phases), tuple(focus), enabled,
+                             self.plane.get(), title, channel_mask, direction)
 
     def preview(self):
         if not self.debug_mode.get():
@@ -879,8 +909,9 @@ class App:
 
     @staticmethod
     def _compute_plot(request):
-        generation, config, array, phases, focus, enabled, plane, title, mask = request
-        x,y,values = field_slice(config, phases, focus, enabled=enabled, resolution=71, plane=plane, array=array, channel_mask=mask)
+        generation, config, array, phases, focus, enabled, plane, title, mask, direction = request
+        x,y,values = field_slice(config, phases, focus, enabled=enabled, resolution=71, plane=plane,
+                                array=array, channel_mask=mask, phase_direction=direction)
         return generation, (config, array, phases, focus, enabled, plane, x,y,values,title)
 
     def _pump_plots(self):
@@ -955,6 +986,12 @@ class App:
                         self.status_line.set("设备已接收，正在确认状态…")
                 elif kind == "capture":
                     self.receiver_panel.accept(event["capture"], event["when"])
+                    self.acoustic_panel.accept(event["capture"], event["when"])
+                elif kind == "mirror":
+                    self.log("INFO", "实时收发记录："+event["directory"])
+                elif kind == "mirror_error":
+                    self.status_line.set(event["text"])
+                    self.log("WARN", event["text"])
                 elif kind == "recording":
                     self.receiver_panel.recorded(event["directory"], event["count"])
                 elif kind == "recording_error":
@@ -981,6 +1018,7 @@ class App:
                 elif kind in ("error", "rejected"):
                     if event.get("verb") == "CAPTURE":
                         self.receiver_panel.reject(event.get("text", "采样失败"))
+                        self.acoustic_panel.reject(event.get("text", "采样失败"))
                     if kind == "error" or event.get("verb") == self.pending_verb:
                         self.busy = False
                         self.pending_verb = None
@@ -1026,15 +1064,16 @@ class App:
         fresh = bool(self.ready and self.state and time.monotonic() - self.received < 1.6)
         self.calibration_panel.tick(fresh and self.state.state == 'IDLE' and self.state.mode == 'REMOTE'
                                     and not self.busy and self.await_revision is None
+                                    and not self.acoustic_panel.busy
                                     and {'ADC_CAPTURE', 'CALIBRATION'} <= self.capabilities)
         calibrating = self.calibration_panel.busy
         self.receiver_panel.tick(fresh, "ADC_CAPTURE" in self.capabilities,
                                  self.debug_mode.get() and self.tabs.select() == str(self.measured_tab)
                                  and self.measurement_tabs.select() == str(self.receiver_panel),
-                                 blocked=self.busy or calibrating)
+                                 blocked=self.busy or calibrating or self.acoustic_panel.busy)
         remote = fresh and self.state.mode == "REMOTE"
         idle = fresh and self.state.state == "IDLE"
-        free = not self.busy and self.await_revision is None and not calibrating
+        free = not self.busy and self.await_revision is None and not calibrating and not self.acoustic_panel.busy
         scanning = self.ble_scan is not None
         for button, enabled in ((self.connect_button,not alive and not scanning), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
@@ -1135,6 +1174,7 @@ class App:
         self.playback.update_state(self.state, fresh, feedback,
                                    self.session.connection_label if self.session else "")
         self.preset_preview.apply_button.configure(state=self.apply_button["state"])
+        self.acoustic_panel.tick(fresh, self.tabs.select() == str(self.acoustic_tab))
 
     def draft_signature(self):
         # Include invalid/incomplete edits so they cannot be discarded silently.
@@ -1295,6 +1335,7 @@ class App:
         if not self.confirm_replace_draft("关闭"):
             return
         self.closing=True
+        self.acoustic_panel.cancel_scan()
         self.calibration_panel.cancel()
         self.root.after_cancel(self.tick_id)
         if self.ble_scan is not None:

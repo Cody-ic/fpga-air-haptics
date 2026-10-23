@@ -9,6 +9,7 @@ import time
 from .protocol import VERSION, Decoder, Snapshot, encode
 from .receiver import Capture
 from .receiver_log import CaptureRecorder
+from .live_log import LiveLog
 from .model import ArraySpec, Config, Workspace
 from .array_geometry import Geometry
 from .transport import DemoTransport, SerialTransport
@@ -30,8 +31,11 @@ class RemoteTakeover:
 
 
 class Session(threading.Thread):
+    HELLO_TIMEOUT_S = 2.0
+    HELLO_MAX_ATTEMPTS = 3
+
     def __init__(self, demo=True, port="", baudrate=115200, factory=None, demo_array=None,
-                 ble_device=None, ble_profile=None, record_root=None):
+                 ble_device=None, ble_profile=None, record_root=None, live_root=None):
         super().__init__(daemon=True, name="haptics-io")
         if demo and ble_device is not None:
             raise ValueError("BLE 连接不能作为 Demo")
@@ -62,6 +66,9 @@ class Session(threading.Thread):
         self.takeover = None
         self.record_root = record_root
         self.recorder = None
+        self.live_root = live_root
+        self.mirror = None
+        self.link_metadata = dict(connection=self.connection_label, simulated=demo, port=port, baudrate=baudrate)
 
     def subscribe(self):
         observer = queue.Queue(maxsize=2000)
@@ -74,6 +81,8 @@ class Session(threading.Thread):
 
     def emit(self, kind, **data):
         event = dict(kind=kind, when=time.monotonic(), **data)
+        if self.mirror is not None:
+            self.mirror.submit("event", event=event)
         for observer in tuple(self.observers):
             try:
                 observer.put_nowait(event)
@@ -120,9 +129,17 @@ class Session(threading.Thread):
                 break
         raw = encode("CMD", self.seq, verb, **(fields or {}))
         transport.write(raw)
+        if self.mirror is not None:
+            self.mirror.raw("TX", raw)
         self.pending[self.seq] = Pending(verb, time.monotonic())
         self.emit("tx", text=raw.decode("ascii").rstrip())
         return self.seq
+
+    def _read(self, transport):
+        raw = transport.read()
+        if self.mirror is not None:
+            self.mirror.raw("RX", raw)
+        return raw
 
     def _cancel_takeover(self, text):
         if self.takeover is not None:
@@ -272,6 +289,9 @@ class Session(threading.Thread):
         opened = time.monotonic()
         stop_sent = False
         try:
+            self.mirror = LiveLog(self.link_metadata, lambda text: self.emit("mirror_error", text=text), self.live_root)
+            self.mirror.start()
+            self.emit("mirror", directory=str(self.mirror.directory))
             transport = self.factory()
             if self.closing.is_set():
                 return
@@ -281,9 +301,22 @@ class Session(threading.Thread):
             opened = time.monotonic()
             next_ping = opened + 0.8
             self.emit("opening", text=f"{self.connection_label} 已接通，等待设备确认")
-            self._write(transport, "HELLO")
+            hello_due = opened + getattr(transport, "startup_delay_s", 0.0)
+            hello_attempts = 0
             while not self.closing.is_set():
                 now = time.monotonic()
+                if self.boot is None and now >= hello_due:
+                    # HELLO is read-only and may be retried. Superseded sequence
+                    # numbers cannot make a late ACK establish this session.
+                    for seq in [seq for seq, p in self.pending.items() if p.verb == "HELLO"]:
+                        del self.pending[seq]
+                    if hello_attempts >= self.HELLO_MAX_ATTEMPTS:
+                        raise RuntimeError("设备握手未回应，请检查串口、波特率和接线")
+                    self._write(transport, "HELLO")
+                    hello_attempts += 1
+                    hello_due = now + self.HELLO_TIMEOUT_S
+                    if hello_attempts > 1:
+                        self.emit("opening", text=f"设备未回应，正在重试连接（{hello_attempts}/{self.HELLO_MAX_ATTEMPTS}）")
                 if self.boot and now >= next_ping:
                     self._write(transport, "PING")
                     next_ping = now + 0.8
@@ -341,14 +374,19 @@ class Session(threading.Thread):
                             self._write(transport, verb, fields)
                         except ValueError as error:
                             self.emit("rejected", verb=verb, text=str(error))
-                frames, errors = decoder.feed(transport.read())
+                frames, errors = decoder.feed(self._read(transport))
+                if not hello_attempts:
+                    # Keep line assembly synchronized while ignoring stale
+                    # bytes from a previous connection. Reads remain bounded.
+                    continue
                 for error in errors:
                     self.emit("warning", text=error)
                 for frame, raw in frames:
                     self._receive(frame, raw, time.monotonic())
                 now = time.monotonic()
                 self._advance_takeover(transport, now)
-                expired = [(seq, p) for seq, p in self.pending.items() if now - p.sent > 2]
+                expired = [(seq, p) for seq, p in self.pending.items()
+                           if p.verb != "HELLO" and now - p.sent > 2]
                 if expired:
                     names = ",".join(p.verb for _, p in expired)
                     raise RuntimeError(f"命令应答超时：{names}；实际输出状态未知")
@@ -367,7 +405,7 @@ class Session(threading.Thread):
                         stop_sent = True
                         deadline = time.monotonic() + 0.3
                         while time.monotonic() < deadline:
-                            frames, _ = decoder.feed(transport.read())
+                            frames, _ = decoder.feed(self._read(transport))
                             for frame, raw in frames:
                                 self._receive(frame, raw, time.monotonic())
                             if (stop_seq not in self.pending and self.last_state
@@ -384,3 +422,5 @@ class Session(threading.Thread):
             if self.recorder is not None:
                 self.recorder.close()
             self.emit("closed", stop_sent=stop_sent)
+            if self.mirror is not None:
+                self.mirror.close()

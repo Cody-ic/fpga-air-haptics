@@ -3,10 +3,9 @@
 Coordinates: mm in computation; target coordinates use integer um on the wire.
 Legacy arrays use a row-major plane. Explicit arrays retain each channel's XYZ
 and normal from the device geometry table (nm / ppm storage units).
-Phasor convention: p = sum(exp(j*(k*r + phase))/r). Consequently the
-phase code at a target is -k*r modulo 2*pi. The FPGA interprets the code
-as a modulo-period waveform delay (acc - offset); its physical emitted
-phase has the opposite sign under the exp(+j*w*t) convention.
+Default delay-code convention: p = sum(exp(j*(k*r + phase))/r).
+The default target code is -k*r modulo 2*pi. Advancing (slot+code) MCU
+waveforms require phase_direction=-1 when reconstructing real readback.
 No calibrated pressure, element directivity, reflections, or haptic threshold.
 """
 
@@ -380,20 +379,24 @@ def trajectory_bounds(config):
 
 
 def focus_phases(config, focus_mm, array):
-    """Quantized modulo-period delay codes for the documented phasor convention."""
+    """Quantized abstract delay codes; advancing hardware uses their negation."""
     r = np.linalg.norm(array_coordinates(array) - np.asarray(focus_mm), axis=1) / 1000
     cycles = np.remainder(-r * config.carrier_hz / (array.resolved_geometry().sound_speed_mm_s/1000), 1.0)
     return (np.floor(cycles * config.phase_steps + 0.5).astype(int) % config.phase_steps)
 
 
-def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71, plane="XY", channel_mask=None):
+def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71, plane="XY", channel_mask=None,
+                phase_direction=1):
     """Return normalized |p|, NOT Pa, SPL, tactile intensity or modulation envelope.
 
     The normalization uses ideal coherent pressure at the specified target for
     unit drive. Thus disabled/zero-level output remains zero, not re-normalized.
-    'level' is a hypothetical linear source scale, not a voltage calibration.
+    This is the carrier-on envelope. Output level is not a voltage calibration:
+    F103 firmware gates full-amplitude carriers rather than scaling their voltage.
     """
     phases = np.asarray(phases, dtype=float)
+    if type(phase_direction) is not int or phase_direction not in (-1, 1):
+        raise ValueError("相位码时序无效")
     if phases.shape != (array.count,) or not np.isfinite(phases).all():
         raise ValueError("相位表长度或数值无效")
     if np.any(phases < 0) or np.any(phases >= config.phase_steps):
@@ -418,7 +421,7 @@ def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71,
             if channel_mask is not None and not (channel_mask >> i) & 1:
                 continue
             distance = np.maximum(.0001, np.sqrt((xx - x) ** 2 + (yy - y) ** 2 + (zz-z) ** 2) / 1000)
-            pressure += np.exp(1j * (k * distance + phase * 2 * math.pi / config.phase_steps)) / distance
+            pressure += np.exp(1j * (k * distance + phase_direction * phase * 2 * math.pi / config.phase_steps)) / distance
     reference = np.sum(1000 / np.maximum(.1, np.linalg.norm(coords - focus, axis=1)))
-    values = np.abs(pressure) / reference * config.level / 100
+    values = np.abs(pressure) / reference
     return horizontal, vertical, values

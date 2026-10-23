@@ -5,6 +5,30 @@ import math
 
 
 @dataclass(frozen=True)
+class AdcProbe:
+    valid: bool
+    count: int
+    minimum: int
+    maximum: int
+    mean: int
+    vrefint: int
+
+    @classmethod
+    def parse(cls, fields):
+        keys = ('probe_ok', 'direct_n', 'direct_min', 'direct_max', 'direct_mean', 'vrefint_raw')
+        if not any(k in fields for k in keys):
+            return None
+        if any(k not in fields or not fields[k].isascii() or not fields[k].isdecimal() for k in keys):
+            raise ValueError('ADC 对照读数格式错误')
+        valid, count, minimum, maximum, mean, vrefint = (int(fields[k]) for k in keys)
+        if valid not in (0, 1) or count != 8 or any(v > 4095 for v in (minimum, maximum, mean, vrefint)):
+            raise ValueError('ADC 对照读数越界')
+        if valid and not minimum <= mean <= maximum:
+            raise ValueError('ADC 对照读数范围错误')
+        return cls(bool(valid), count, minimum, maximum, mean, vrefint)
+
+
+@dataclass(frozen=True)
 class Capture:
     boot: str
     revision: int
@@ -16,6 +40,7 @@ class Capture:
     bits: int
     raw: tuple
     full_scale_mv: int = 3300
+    probe: AdcProbe | None = None
 
     @classmethod
     def parse(cls, fields):
@@ -45,7 +70,7 @@ class Capture:
         if any(v > 4095 for v in raw):
             raise ValueError("ADC 数值越界")
         return cls(fields["boot"], rev, uptime, fields["simulated"] == "1",
-                   fields["tx_running"] == "1", fields["pin"], fs, bits, raw, scale)
+                   fields["tx_running"] == "1", fields["pin"], fs, bits, raw, scale, AdcProbe.parse(fields))
 
     def analyze(self, vref_mv=None, divider=3.4):
         vref_mv = self.full_scale_mv if vref_mv is None else vref_mv
