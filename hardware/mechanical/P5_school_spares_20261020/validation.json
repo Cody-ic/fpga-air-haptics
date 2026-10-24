@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-20",
+  "order_revision": "P5-SCHOOL-R2",
+  "model_revision": "P5-20261015",
+  "source_archive": "TouchSee_Overhead_STL_P5_20261015.zip",
+  "source_sha256": "940edbc7a5616e396f87fd39b499def8d686b51681550ca02adfa18b71682f9f",
+  "geometry_changed": false,
+  "orders": [
+    {
+      "filename": "TouchSee_P5_School_TOPUP_17pcs_spares_20261020.zip",
+      "pieces": 17,
+      "quantities": {
+        "共用侧架": 1,
+        "绝缘套筒": 11,
+        "接收板短压片": 5
+      },
+      "sha256": "bf78fa834c04f09eca312e17779d232c84c33c1c96d8599acdb545faf835dff8"
+    },
+    {
+      "filename": "TouchSee_P5_School_FULL_24pcs_spares_20261020.zip",
+      "pieces": 24,
+      "quantities": {
+        "共用侧架": 2,
+        "4×4 发射承载框": 1,
+        "8×8 发射承载框": 1,
+        "绝缘套筒": 12,
+        "接收托盘": 1,
+        "接收板短压片": 6,
+        "孔径试片": 1
+      },
+      "sha256": "b7c614cb97c887ac7ca46396ec44ff2c2dccb4e304d1cd96d895c3a87d5549d9"
+    }
+  ]
+}

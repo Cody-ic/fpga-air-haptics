@@ -1,0 +1,73 @@
+{
+  "revision": "P5-ADDON-20261022",
+  "total_pieces": 8,
+  "assembly_pieces": 6,
+  "spare_pieces": 1,
+  "fit_coupons": 1,
+  "files": [
+    {
+      "file": "stl/08_fixed_riser_30_01of02.stl",
+      "original": "08_fixed_riser_30.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": false,
+      "sha256": "45ad42aff75f7e4f2e272f19686042489a0eb37889309bfc7ad7af729c0837b3"
+    },
+    {
+      "file": "stl/08_fixed_riser_30_02of02.stl",
+      "original": "08_fixed_riser_30.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": false,
+      "sha256": "45ad42aff75f7e4f2e272f19686042489a0eb37889309bfc7ad7af729c0837b3"
+    },
+    {
+      "file": "stl/09_riser_bridge_01of03.stl",
+      "original": "09_riser_bridge.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": false,
+      "sha256": "41e5471a5da9cd804d693c1fd33e9e82975f5db2b5636f12643f3cf6e1938af7"
+    },
+    {
+      "file": "stl/09_riser_bridge_02of03.stl",
+      "original": "09_riser_bridge.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": false,
+      "sha256": "41e5471a5da9cd804d693c1fd33e9e82975f5db2b5636f12643f3cf6e1938af7"
+    },
+    {
+      "file": "stl/09_riser_bridge_03of03.stl",
+      "original": "09_riser_bridge.stl",
+      "quantity": 1,
+      "spare": true,
+      "fit_coupon": false,
+      "sha256": "41e5471a5da9cd804d693c1fd33e9e82975f5db2b5636f12643f3cf6e1938af7"
+    },
+    {
+      "file": "stl/10_film_lower_stand_01of01.stl",
+      "original": "10_film_lower_stand.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": false,
+      "sha256": "dc5a112f42a169ec8a44f2eb990376d8cd535b2bd5f3650b68cd0df4b930bd62"
+    },
+    {
+      "file": "stl/11_film_upper_ring_01of01.stl",
+      "original": "11_film_upper_ring.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": false,
+      "sha256": "092fe01c710287c4be33d2eff933397f1d9ddb95e19a6c4ccd88a4c95e3c8d51"
+    },
+    {
+      "file": "stl/12_riser_fit_coupon_01of01.stl",
+      "original": "12_riser_fit_coupon.stl",
+      "quantity": 1,
+      "spare": false,
+      "fit_coupon": true,
+      "sha256": "7d2424a2e27d928095001f440defa4d5937e77d8349e7db7252b4881bce25d1a"
+    }
+  ]
+}

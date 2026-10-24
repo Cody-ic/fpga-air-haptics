@@ -1,0 +1,586 @@
+{
+  "schema": "haptics-tabletop-measurement-1",
+  "units": "mm",
+  "nominal": true,
+  "applies_to": "P5 with 30 mm fixed risers; receiver in the reference orientation",
+  "origin": "Left-front outside bottom corner of the left riser, on the table",
+  "axes": "Top view: +X right, +Y back/up in figure; +Z upward from table",
+  "origin_in_native_assembly_mm": [
+    -132.0,
+    -94.0,
+    0
+  ],
+  "floor_envelope_size_mm": [
+    244.0,
+    188.0
+  ],
+  "receiver_tray_corners_mm": {
+    "A": [
+      98.727,
+      73.872
+    ],
+    "B": [
+      174.727,
+      73.872
+    ],
+    "C": [
+      174.727,
+      128.491
+    ],
+    "D": [
+      98.727,
+      128.491
+    ]
+  },
+  "receiver_pcb_corners_mm": {
+    "A": [
+      106.727,
+      83.872
+    ],
+    "B": [
+      166.727,
+      83.872
+    ],
+    "C": [
+      166.727,
+      118.491
+    ],
+    "D": [
+      106.727,
+      118.491
+    ]
+  },
+  "corner_definition": "Bounding rectangle intersections; actual tray corners are clipped and PCB corners rounded",
+  "receiver_face_center_mm": [
+    132.0,
+    94.0,
+    24.7
+  ],
+  "receiver_pcb_front_z_mm": 17.6,
+  "receiver_face_offset_from_tray_A_mm": [
+    33.273,
+    20.128
+  ],
+  "array_face_center_mm": [
+    132.0,
+    94.0,
+    124.7
+  ],
+  "emitters": [
+    {
+      "pcb_reference": "U6",
+      "position_mm": [
+        95.95,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U7",
+      "position_mm": [
+        106.25,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U8",
+      "position_mm": [
+        116.55,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U9",
+      "position_mm": [
+        126.85,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U10",
+      "position_mm": [
+        137.15,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U11",
+      "position_mm": [
+        147.45,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U12",
+      "position_mm": [
+        157.75,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U13",
+      "position_mm": [
+        168.05,
+        57.95,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U19",
+      "position_mm": [
+        95.95,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U20",
+      "position_mm": [
+        106.25,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U21",
+      "position_mm": [
+        116.55,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U22",
+      "position_mm": [
+        126.85,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U23",
+      "position_mm": [
+        137.15,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U24",
+      "position_mm": [
+        147.45,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U25",
+      "position_mm": [
+        157.75,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U26",
+      "position_mm": [
+        168.05,
+        68.25,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U34",
+      "position_mm": [
+        95.95,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U35",
+      "position_mm": [
+        106.25,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U36",
+      "position_mm": [
+        116.55,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U37",
+      "position_mm": [
+        126.85,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U38",
+      "position_mm": [
+        137.15,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U39",
+      "position_mm": [
+        147.45,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U40",
+      "position_mm": [
+        157.75,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U41",
+      "position_mm": [
+        168.05,
+        78.55,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U47",
+      "position_mm": [
+        95.95,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U48",
+      "position_mm": [
+        106.25,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U49",
+      "position_mm": [
+        116.55,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U50",
+      "position_mm": [
+        126.85,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U51",
+      "position_mm": [
+        137.15,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U52",
+      "position_mm": [
+        147.45,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U53",
+      "position_mm": [
+        157.75,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U54",
+      "position_mm": [
+        168.05,
+        88.85,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U60",
+      "position_mm": [
+        95.95,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U61",
+      "position_mm": [
+        106.25,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U62",
+      "position_mm": [
+        116.55,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U63",
+      "position_mm": [
+        126.85,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U64",
+      "position_mm": [
+        137.15,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U65",
+      "position_mm": [
+        147.45,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U66",
+      "position_mm": [
+        157.75,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U67",
+      "position_mm": [
+        168.05,
+        99.15,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U73",
+      "position_mm": [
+        95.95,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U74",
+      "position_mm": [
+        106.25,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U75",
+      "position_mm": [
+        116.55,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U76",
+      "position_mm": [
+        126.85,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U77",
+      "position_mm": [
+        137.15,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U78",
+      "position_mm": [
+        147.45,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U79",
+      "position_mm": [
+        157.75,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U80",
+      "position_mm": [
+        168.05,
+        109.45,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U86",
+      "position_mm": [
+        95.95,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U87",
+      "position_mm": [
+        106.25,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U88",
+      "position_mm": [
+        116.55,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U89",
+      "position_mm": [
+        126.85,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U90",
+      "position_mm": [
+        137.15,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U91",
+      "position_mm": [
+        147.45,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U92",
+      "position_mm": [
+        157.75,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U93",
+      "position_mm": [
+        168.05,
+        119.75,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U99",
+      "position_mm": [
+        95.95,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U100",
+      "position_mm": [
+        106.25,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U101",
+      "position_mm": [
+        116.55,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U102",
+      "position_mm": [
+        126.85,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U103",
+      "position_mm": [
+        137.15,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U104",
+      "position_mm": [
+        147.45,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U105",
+      "position_mm": [
+        157.75,
+        130.05,
+        124.7
+      ]
+    },
+    {
+      "pcb_reference": "U106",
+      "position_mm": [
+        168.05,
+        130.05,
+        124.7
+      ]
+    }
+  ],
+  "measured_coordinates": false,
+  "receiver_position_requires_manual_measurement": true,
+  "channel_mapping": "pcb_reference is a component name, not a software or electrical channel number"
+}

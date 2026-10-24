@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "file": "TouchSee_P5_Print_ONLY_8pcs_20261022.zip",
+  "bytes": 209185,
+  "sha256": "e4524f6845feb94a1aea84c1ca762bd04f7b72a692f206ca4034786ff8992847",
+  "stl_files": 8,
+  "instruction_files": 1,
+  "other_files": 0,
+  "geometry_bytes_match_checked_order": true,
+  "source_archive_sha256": "980e73feac8f231715b6a9bd0831d481a3acdc4505f45e22fba888ef7867591c",
+  "files": {
+    "08_fixed_riser_30_01of02.stl": "45ad42aff75f7e4f2e272f19686042489a0eb37889309bfc7ad7af729c0837b3",
+    "08_fixed_riser_30_02of02.stl": "45ad42aff75f7e4f2e272f19686042489a0eb37889309bfc7ad7af729c0837b3",
+    "09_riser_bridge_01of03.stl": "41e5471a5da9cd804d693c1fd33e9e82975f5db2b5636f12643f3cf6e1938af7",
+    "09_riser_bridge_02of03.stl": "41e5471a5da9cd804d693c1fd33e9e82975f5db2b5636f12643f3cf6e1938af7",
+    "09_riser_bridge_03of03.stl": "41e5471a5da9cd804d693c1fd33e9e82975f5db2b5636f12643f3cf6e1938af7",
+    "10_film_lower_stand_01of01.stl": "dc5a112f42a169ec8a44f2eb990376d8cd535b2bd5f3650b68cd0df4b930bd62",
+    "11_film_upper_ring_01of01.stl": "092fe01c710287c4be33d2eff933397f1d9ddb95e19a6c4ccd88a4c95e3c8d51",
+    "12_riser_fit_coupon_01of01.stl": "7d2424a2e27d928095001f440defa4d5937e77d8349e7db7252b4881bce25d1a",
+    "00_打印说明.txt": "187668eea6a31be78a698e39e175b5d13813bd04862788cfd967d919533784f7"
+  }
+}
