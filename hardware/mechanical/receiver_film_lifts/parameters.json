@@ -1,0 +1,9 @@
+{
+  "revision": "P5-LIFTS20-20261025",
+  "lift_mm": 20.0,
+  "locating_lip_height_mm": 2.0,
+  "fit_clearance_per_side_mm": 0.4,
+  "locating_wall_mm": 3.0,
+  "film_aperture_extra_per_side_mm": 2.0,
+  "print_bed_mm": [200.0, 200.0, 200.0]
+}

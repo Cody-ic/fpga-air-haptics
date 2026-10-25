@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "parts": [
+    {
+      "name": "13_receiver_tray_lift20",
+      "size_mm": [
+        82.80000305175781,
+        61.41899871826172,
+        22.0
+      ],
+      "watertight": true,
+      "connected_solids": 1,
+      "volume_mm3": 103008.49335900869
+    },
+    {
+      "name": "14_film_stand_lift20",
+      "size_mm": [
+        128.8000030517578,
+        154.8000030517578,
+        22.0
+      ],
+      "watertight": true,
+      "connected_solids": 1,
+      "volume_mm3": 170404.02107543964
+    }
+  ],
+  "seat_height_mm": 20.0,
+  "locating_lip_height_mm": 2.0,
+  "observation_aperture_probes": 143,
+  "film_centered_right_riser_clearance_mm": 3.5999999999999943,
+  "actual_print_fit_not_tested": true
+}
