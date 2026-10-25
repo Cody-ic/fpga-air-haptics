@@ -78,9 +78,11 @@ module tb_hap2_top;
     // 顺便记住每一路有没有出现过高低电平（有没有哪一路一直不动）
     /* verilator lint_off BLKSEQ */
     /* verilator lint_off UNUSEDSIGNAL */
-    integer drive_edges;
-    integer drive_edges_neg;
-    reg [15:0] seen_hi, seen_lo;
+    // Explicit initialization also makes these checks meaningful in a
+    // four-state simulator; otherwise the edge counters remain X forever.
+    integer drive_edges = 0;
+    integer drive_edges_neg = 0;
+    reg [15:0] seen_hi = 0, seen_lo = 0;
     always @(posedge array_pos[0]) drive_edges     = drive_edges + 1;
     always @(posedge array_neg[0]) drive_edges_neg = drive_edges_neg + 1;
     always @(posedge clk) begin

@@ -134,6 +134,7 @@ module hap2_tx #(
     // 但电脑按名字匹配就会对不上）。OUT_OF_WORKSPACE 是 16 个字符。
     localparam [8*16-1:0] C_OOWSP   = "OUT_OF_WORKSPACE";
     localparam [8*18-1:0] C_HANDSH  = "HANDSHAKE_REQUIRED";
+    localparam [8*23-1:0] C_CALCFG  = "CAL_REQUIRES_40K_64STEP";
     localparam [8*17-1:0] C_HWMIS   = "HARDWARE_MISMATCH";
     localparam [8*11-1:0] C_NOTRUN  = "NOT_RUNNING";
     localparam [8*8-1:0]  C_BADMODE = "BAD_MODE";
@@ -310,6 +311,7 @@ module hap2_tx #(
                     4'd6: name_char = (pos < 11) ? {1'b0, C_NOTRUN [8*11-1 - 8*pos -: 8]} : 9'h100;
                     4'd7: name_char = (pos <  8) ? {1'b0, C_BADMODE[8*8 -1 - 8*pos -: 8]} : 9'h100;
                     4'd8: name_char = (pos < 15) ? {1'b0, C_UNKNOWN[8*15-1 - 8*pos -: 8]} : 9'h100;
+                    4'd10: name_char = (pos < 23) ? {1'b0, C_CALCFG[8*23-1 - 8*pos -: 8]} : 9'h100;
                     default: name_char = (pos < 18) ? {1'b0, C_HANDSH[8*18-1 - 8*pos -: 8]} : 9'h100;
                 endcase
                 3'd2: case (id)

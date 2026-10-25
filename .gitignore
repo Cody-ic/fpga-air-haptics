@@ -1,5 +1,8 @@
 # Python and local application outputs
 __pycache__/
+.runtime/
+firmware/xiao_mg24/build/
+firmware/xiao_mg24/.runtime/
 *.py[cod]
 .venv/
 .pytest_cache/

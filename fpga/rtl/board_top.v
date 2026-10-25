@@ -1,5 +1,18 @@
 `timescale 1ns/1ps
 
+// FPGA has one switch. MG24 -> PC transport is configured only in MG24 firmware.
+`ifndef FPGA_CALIBRATION_ENABLE
+`define FPGA_CALIBRATION_ENABLE 0
+`endif
+`ifndef FPGA_CALIBRATION_SOURCE
+`define FPGA_CALIBRATION_SOURCE 0
+`endif
+// 1: standalone U102 (channel 3) 40 kHz / 50% test; overrides normal/calibration.
+// Rebuild and download after changing. UART control is inactive in this mode.
+`ifndef FPGA_DEBUG_U102
+`define FPGA_DEBUG_U102 0
+`endif
+
 // 板级顶层：把「芯片里该有的逻辑」接到「板子上真实的引脚和器件」上。
 // 逻辑功能都在 hap2_top 里；这一层只做几件**必须**在真板子上做的事：
 //
@@ -7,19 +20,31 @@
 //   2. 复位标识 boot：协议要求「每次复位都变、同一会话里不变」。
 //      用一个**不受复位影响**的自由计数器当熵源，复位放开那一拍锁存。
 //   3. 把板上按键（低有效、需要内部上拉）取反成逻辑里的高有效，并交给 hap2_local 消抖。
-//   4. 把 16 路输出、串口、状态灯引到引脚（引脚号在 fpga/board/tang_mega_138k_pro.cst 里绑）。
+//   4. 把 8 路移位数据、4 根控制线、串口、状态灯引到引脚（引脚号在 fpga/board/tang_mega_138k_pro.cst 里绑）。
 //
 // 目标板：Sipeed Tang MEGA 138K Pro（GW5AST-LV138FPG676A，676 球 FCPBG676A 封装）。
 // 板上 50 MHz 在 P16，和固件默认参数一致，所以**不需要锁相环**。
 module board_top #(
+    // Explicit build-time reuse of a measured table; no new acoustic validation.
+    parameter integer CAL_RESTORE_ENABLE = 0,
+    parameter integer CAL_NULL_SCALED_QC = 0,
+    parameter integer BUTTON_FOCUS_ENABLE = 0,
+    parameter integer BUTTON_FOCUS_MS = 3000,
+    parameter integer BUTTON_FOCUS_Z_UM = 100000,
+    parameter integer BUTTON_FOCUS_LEVEL = 1,
+    parameter integer BUTTON_FOCUS_SHAPE = 0,
+    parameter integer BUTTON_FOCUS_RADIUS_UM = 0,
+    parameter integer BUTTON_FOCUS_REPEAT_MILLIHZ = 500,
+    parameter [511:0] CAL_RESTORE_OFFSETS = 512'd0,
+    parameter integer CAL_Z_UM     = 70000,        // fixed receiver: nominal (0,0,70) mm
+    parameter integer CAL_LEVEL    = 30,
     parameter integer CLK_HZ        = 50_000_000,   // 板上晶振频率（138K Pro 的 P16 = 50 MHz）
     parameter integer BAUD          = 115200,
-    // 阵列规模：4×4 = 16 路，分在 PMOD1（8 路）+ PMOD2（8 路）两个连接器上。
-    // 改成 2 就退回 8 路调试（同时把 .cst 里 array_pos[8..15] 那几行注释掉）。
-    parameter integer HW_ROWS       = 4,
-    parameter integer HW_COLS       = 4,
-    parameter integer HW_PITCH_UM   = 11000,        // 当前 4×4 R5 发射板：11 mm 阵元间距
-    parameter integer PH_PIPE       = 4,            // 相位并行流水线条数（8×8 建议 8）
+    // R2 8x8 / 10.3 mm, eight parallel SN74LV595A data lanes.
+    parameter integer HW_ROWS       = 8,
+    parameter integer HW_COLS       = 8,
+    parameter integer HW_PITCH_UM   = 10300,
+    parameter integer PH_PIPE       = 8,
     parameter integer OUT_DEAD_CYC  = 0,            // 互补输出的死区拍数；单端驱动填 0
     parameter integer POR_MS        = 10,           // 上电复位按住多少毫秒
     parameter integer KEY_DEB_MS    = 20,           // 按键消抖时间（毫秒）
@@ -35,20 +60,30 @@ module board_top #(
 ) (
     input  wire clk,          // 板上 50 MHz 晶振（P16）
     input  wire key_rst_n,    // 复位键（K16），低有效；没有按键就接 1'b1
-    input  wire key0_n,       // 用户按键 0（F15）→ 换下一个图形
-    input  wire key1_n,       // 用户按键 1（G15）→ 播放／暂停
+    input  wire key0_n,       // F15: next shape; BUTTON_FOCUS build: stop
+    input  wire key1_n,       // G15: play/pause; BUTTON_FOCUS build: bounded test / stop
     input  wire uart_rx_pin,  // 电脑 → 板子（N16，接板载调试器 BL616 的 TX）
     output wire uart_tx_pin,  // 板子 → 电脑（P15，接板载调试器 BL616 的 RX）
-    // 送给驱动电路的方波（单端驱动：每路一根线，多数半桥驱动芯片自己管死区）。
-    // ⚠️ 半桥要互补输入时：把下面这行改成
-    //     output wire [HW_ROWS*HW_COLS-1:0] array_pos, array_neg
-    //   再在 .cst 里给 array_neg 也分配引脚（现在故意不引出：顶层端口没约束时，
-    //   工具会把它们自动摆到随便哪个脚上，可能撞到 DDR/HDMI 那些不能乱动的脚）。
-    output wire [HW_ROWS*HW_COLS-1:0] array_pos,
+    output wire [7:0] sr_data, // H1 pins 7..14 = DATA0..DATA7
+    output wire sr_clk,        // H1 pin 3, SRCLK
+    output wire sr_latch,      // H1 pin 5, RCLK
+    output wire sr_oe_n,       // H1 pin 4, high = disabled
+    output wire sr_clear_n,    // H1 pin 6, low clears shift register only
     // 状态灯：输出开 / 正在扫描 / 走步器在跑（干净脚不够，只留最有用的三颗；
     // 本地模式、串口状态在状态帧里都看得到）
     output wire [2:0] led
 );
+
+    generate
+        if (HW_ROWS != 8 || HW_COLS != 8 || CLK_HZ != 50000000 || OUT_DEAD_CYC != 0) begin : invalid_shift_board
+            ERROR_R2_REQUIRES_8X8_50MHZ_SINGLE_ENDED invalid_board();
+        end
+        if ((`FPGA_CALIBRATION_ENABLE != 0 && `FPGA_CALIBRATION_ENABLE != 1) ||
+            (`FPGA_CALIBRATION_SOURCE != 0 && `FPGA_CALIBRATION_SOURCE != 1) ||
+            (`FPGA_DEBUG_U102 != 0 && `FPGA_DEBUG_U102 != 1)) begin : invalid_macros
+            ERROR_MACROS_MUST_BE_ZERO_OR_ONE invalid_configuration();
+        end
+    endgenerate
 
     // ---------------- 1. 上电复位 ----------------
     wire rst_n;
@@ -87,6 +122,8 @@ module board_top #(
 
     // ---------------- 4. 主逻辑 ----------------
     wire       output_on, scan_on, walk_running, mode_local;
+    wire       normal_uart_tx;
+    wire [63:0] array_pos;
     /* verilator lint_off UNUSEDSIGNAL */
     wire signed [20:0] focus_x, focus_y;
     wire [5:0]  stroke_index;
@@ -94,6 +131,20 @@ module board_top #(
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_top #(
+        .CAL_ENABLE    (`FPGA_CALIBRATION_ENABLE),
+        .CAL_SOURCE    (`FPGA_CALIBRATION_SOURCE),
+        .CAL_RESTORE_ENABLE (CAL_RESTORE_ENABLE),
+        .CAL_NULL_SCALED_QC(CAL_NULL_SCALED_QC),
+        .BUTTON_FOCUS_ENABLE(BUTTON_FOCUS_ENABLE),
+        .BUTTON_FOCUS_MS(BUTTON_FOCUS_MS),
+        .BUTTON_FOCUS_Z_UM(BUTTON_FOCUS_Z_UM),
+        .BUTTON_FOCUS_LEVEL(BUTTON_FOCUS_LEVEL),
+        .BUTTON_FOCUS_SHAPE(BUTTON_FOCUS_SHAPE),
+        .BUTTON_FOCUS_RADIUS_UM(BUTTON_FOCUS_RADIUS_UM),
+        .BUTTON_FOCUS_REPEAT_MILLIHZ(BUTTON_FOCUS_REPEAT_MILLIHZ),
+        .CAL_RESTORE_OFFSETS(CAL_RESTORE_OFFSETS),
+        .CAL_Z_UM      (CAL_Z_UM),
+        .CAL_LEVEL     (CAL_LEVEL),
         .CLK_HZ        (CLK_HZ),
         .BAUD          (BAUD),
         .HW_ROWS       (HW_ROWS),
@@ -114,7 +165,7 @@ module board_top #(
         .clk         (clk),
         .rst_n       (rst_n),
         .uart_rx_pin (uart_rx_pin),
-        .uart_tx_pin (uart_tx_pin),
+        .uart_tx_pin (normal_uart_tx),
         .boot_id     (boot_q),
         .key_next    (key_next),
         .key_play    (key_play),
@@ -133,11 +184,29 @@ module board_top #(
         /* verilator lint_on PINCONNECTEMPTY */
     );
 
+    generate if (`FPGA_DEBUG_U102 == 1) begin : debug_u102
+        // Separate, fixed-rate latch timing avoids the normal 380 ns frame
+        // quantization. Unused normal logic is removed during synthesis.
+        hap2_debug_u102 u_debug (
+            .clk(clk), .rst_n(rst_n),
+            .sr_data(sr_data), .sr_clk(sr_clk), .sr_latch(sr_latch),
+            .sr_oe_n(sr_oe_n), .sr_clear_n(sr_clear_n)
+        );
+    end else begin : normal_shift
+      hap2_shift8 u_shift (
+        .clk(clk), .rst_n(rst_n), .enable(output_on), .waves(array_pos),
+        .sr_data(sr_data), .sr_clk(sr_clk), .sr_latch(sr_latch),
+        .sr_oe_n(sr_oe_n), .sr_clear_n(sr_clear_n)
+      );
+    end endgenerate
+
+    assign uart_tx_pin = `FPGA_DEBUG_U102 ? 1'b1 : normal_uart_tx;
+
     // ---------------- 5. 状态灯 ----------------
     // 3 颗灯分别是：正在驱动换能器、正在扫描、走步器在跑。
     // 上板时一眼就能看出板子走到哪一步了。
     // ⚠️ 板上用户灯是**低电平点亮**（官方 LED 例程：assign led = ~led_reg），
     //    所以这里取反——逻辑 1 对应"灯亮"，不用在示波器前反着想。
-    assign led = ~{walk_running, scan_on, output_on};
+    assign led = `FPGA_DEBUG_U102 ? {2'b11, sr_oe_n} : ~{walk_running, scan_on, output_on};
 
 endmodule
