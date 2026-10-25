@@ -1,0 +1,46 @@
+{
+  "revision": "P5-LIFTS20-20261025",
+  "dimensions": {
+    "receiver_tray_mm": [
+      76.0,
+      54.619
+    ],
+    "film_stand_mm": [
+      122.0,
+      148.0
+    ],
+    "receiver_outer_mm": [
+      82.8,
+      61.419
+    ],
+    "film_outer_mm": [
+      128.8,
+      154.8
+    ],
+    "receiver_pocket_mm": [
+      76.8,
+      55.419
+    ],
+    "film_pocket_mm": [
+      122.8,
+      148.8
+    ],
+    "film_opening_mm": [
+      95.6,
+      121.0
+    ]
+  },
+  "source_parts_unchanged": {
+    "P5-20261015\\solidworks\\05_receiver_flat_tray.SLDPRT": "ce4741b9db8aa749e0cd420eaa06da85ea7b71e42e133edac0460dd0cb46b62d",
+    "P5-20261015\\stl\\05_receiver_flat_tray.stl": "02ae42ac3692704d11a13a6c6c8c1e29a106d8172290aed79196377e93d1dedf",
+    "P5-ADDON-20261022\\solidworks\\10_film_lower_stand.SLDPRT": "dc0b688193bb482fe68dffbad8728b0acff298254f0aca171a13365ea888c049",
+    "P5-ADDON-20261022\\stl\\10_film_lower_stand.stl": "dc5a112f42a169ec8a44f2eb990376d8cd535b2bd5f3650b68cd0df4b930bd62"
+  },
+  "support_lift_mm": 20.0,
+  "total_height_mm": 22.0,
+  "receiver_face_z_mm": 44.7,
+  "film_bottom_z_mm": 44.7,
+  "transmitter_face_z_mm": 124.7,
+  "acoustic_gap_with_tx_risers_mm": 80.0,
+  "physical_fit_not_yet_tested": true
+}

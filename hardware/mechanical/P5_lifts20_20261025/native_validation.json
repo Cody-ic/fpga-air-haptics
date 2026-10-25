@@ -1,0 +1,53 @@
+{
+  "parts": [
+    {
+      "name": "13_receiver_tray_lift20",
+      "errors": [],
+      "sketches": [
+        {
+          "name": "\u8349\u56fe1",
+          "constraint_status": 3,
+          "relation_count": 19,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "\u8349\u56fe2",
+          "constraint_status": 3,
+          "relation_count": 38,
+          "fixed_relation_count": 0
+        }
+      ]
+    },
+    {
+      "name": "14_film_stand_lift20",
+      "errors": [],
+      "sketches": [
+        {
+          "name": "\u8349\u56fe1",
+          "constraint_status": 3,
+          "relation_count": 38,
+          "fixed_relation_count": 0
+        },
+        {
+          "name": "\u8349\u56fe2",
+          "constraint_status": 3,
+          "relation_count": 38,
+          "fixed_relation_count": 0
+        }
+      ]
+    }
+  ],
+  "assemblies": [
+    {
+      "name": "Receiver_tray_on_20mm_lift",
+      "modeled_interferences": 0
+    },
+    {
+      "name": "Film_stand_on_20mm_lift",
+      "modeled_interferences": 0
+    }
+  ],
+  "all_sketches_fully_defined": true,
+  "no_fixed_sketch_relations": true,
+  "passed": true
+}
