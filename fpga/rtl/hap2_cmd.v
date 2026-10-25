@@ -21,6 +21,14 @@
 // 拷进生效寄存器。这样不会出现「换了一半」的中间状态。
 module hap2_cmd #(
     parameter integer CAL_LIMIT = 0,
+    parameter integer CLK_HZ = 50_000_000,
+    parameter integer BUTTON_FOCUS_ENABLE = 0,
+    parameter integer BUTTON_FOCUS_MS = 3000,
+    parameter integer BUTTON_FOCUS_Z_UM = 100000,
+    parameter integer BUTTON_FOCUS_LEVEL = 1,
+    parameter integer BUTTON_FOCUS_SHAPE = 0,
+    parameter integer BUTTON_FOCUS_RADIUS_UM = 0,
+    parameter integer BUTTON_FOCUS_REPEAT_MILLIHZ = 500,
     parameter integer ADDR_W = 13,     // 行缓冲 8192 字节，地址 13 位
     // ---- 设备声明的工作空间（握手应答里发给电脑的那组范围，单位微米）----
     // 单独一项字段合法不代表整个图形合法：比如 cx=90000 µm、radius=20000 µm
@@ -221,6 +229,14 @@ module hap2_cmd #(
     reg [15:0] lat_seq;
     reg       local_cfg;        // 这次待办配置是本地按键发起的（不回串口）
     reg       local_auto_run;   // 本地配置生效后要不要自动开始播放
+    // Optional receiver-test build: bounded, unmodulated center focus.
+    // The deadline includes preparation, so even a stalled compiler cannot
+    // leave an armed automatic start behind. Restore the previous mode on exit.
+    localparam integer BUTTON_CYCLES = (CLK_HZ / 1000) * BUTTON_FOCUS_MS;
+    localparam integer BUTTON_W = (BUTTON_CYCLES < 2) ? 1 : $clog2(BUTTON_CYCLES);
+    reg button_busy;
+    reg [BUTTON_W-1:0] button_count;
+    reg [1:0] button_return_mode;
 
     // ---------------- 影子配置寄存器 ----------------
     reg [31:0]     sh_carrier_hz;
@@ -360,6 +376,10 @@ module hap2_cmd #(
             reply_want_state <= 1'b0;
             local_cfg        <= 1'b0;
             local_auto_run   <= 1'b0;
+            if (BUTTON_FOCUS_ENABLE && button_busy) begin
+                button_busy <= 1'b0;
+                mode <= button_return_mode;
+            end
         end
     endtask
 
@@ -443,6 +463,9 @@ module hap2_cmd #(
     // ---------------- 时序逻辑 ----------------
     always @(posedge clk) begin
         if (!rst_n) begin
+            button_busy    <= 1'b0;
+            button_count   <= 0;
+            button_return_mode <= M_REMOTE;
             connected      <= 1'b0;
             array_bad      <= 1'b0;
             mode_value     <= M_REMOTE;
@@ -522,7 +545,7 @@ module hap2_cmd #(
                 if (field_id == F_MAPPING  && field_enum  != 3'd0)           array_bad <= 1'b1;
                 if (field_id == F_VALUE)                                     mode_value <= field_enum[1:0];
 
-                if (verb == V_CONFIG) begin          // CONFIG 的字段先写进影子
+                if (verb == V_CONFIG && !(BUTTON_FOCUS_ENABLE && local_cfg)) begin
                     case (field_id)
                         F_CARRIER_HZ:  sh_carrier_hz     <= field_value;
                         F_PHASE_STEPS: sh_phase_steps    <= field_value;
@@ -621,7 +644,7 @@ module hap2_cmd #(
             // ---- 2.6 本地按键（LOCAL 模式下的面板操作）----
             // 只在「这一拍没有命令帧」且确实是本地模式时动手，免得和远程命令抢同一拍。
             // 本地动作和远程命令的区别只有两处：不回串口、不用握手。
-            if (!frame_ok && (mode == M_LOCAL)) begin
+            if (!BUTTON_FOCUS_ENABLE && !frame_ok && (mode == M_LOCAL)) begin
                 if (loc_stop) begin
                     run_state      <= R_IDLE;
                     reason         <= REASON_NONE;
@@ -719,6 +742,64 @@ module hap2_cmd #(
                 run_state <= R_IDLE;
                 reason    <= REASON_HB;
                 walk_stop <= 1'b1;
+            end
+
+            if (BUTTON_FOCUS_ENABLE) begin
+                if (button_busy) button_count <= button_count + 1'b1;
+                // Start only from idle, never replace an active serial test.
+                if (loc_play && !loc_next && !loc_stop && !button_busy &&
+                    run_state == R_IDLE && pending == P_IDLE && !frame_ok && !frame_bad) begin
+                    button_busy <= 1'b1;
+                    button_count <= 0;
+                    button_return_mode <= mode;
+                    mode <= M_LOCAL;
+                    local_cfg <= 1'b1;
+                    local_auto_run <= 1'b1;
+                    sh_carrier_hz <= 40000;
+                    sh_phase_steps <= 64;
+                    sh_cx_um <= 0;
+                    sh_cy_um <= 0;
+                    sh_z_um <= BUTTON_FOCUS_Z_UM;
+                    sh_radius_um <= BUTTON_FOCUS_RADIUS_UM;
+                    sh_repeat_millihz <= BUTTON_FOCUS_REPEAT_MILLIHZ;
+                    sh_mod_hz <= 0;
+                    sh_level <= BUTTON_FOCUS_LEVEL;
+                    sh_shape <= BUTTON_FOCUS_SHAPE; // 0 POINT, 1 LINE_X
+                    sh_path_closed <= 1;
+                    sh_path_off <= 0;
+                    sh_path_size <= 0;
+                    sh_scan_off <= 0;
+                    sh_scan_size <= 0;
+                    sh_blank_us <= 0;
+                    pending <= P_SHAPE;
+                    traj_shape_start <= 1'b1;
+                    traj_preset <= 1'b1;
+                    lat_verb <= V_CONFIG;
+                    lat_seq <= 0;
+                end
+                // Last assignments win even on the exact configuration commit
+                // cycle. Let a pending compiler drain, but revoke auto-start.
+                // A valid STOP is acknowledged even during button preparation.
+                if (loc_next || loc_stop ||
+                    (loc_play && (button_busy || run_state != R_IDLE)) ||
+                    (button_busy && button_count == BUTTON_CYCLES-1) ||
+                    (frame_ok && header_ok && kind == 0 && verb == V_STOP && dec_err == C_NONE)) begin
+                    run_state <= R_IDLE;
+                    reason <= REASON_NONE;
+                    walk_stop <= 1'b1;
+                    walk_start <= 1'b0;
+                    local_auto_run <= 1'b0;
+                    button_busy <= 1'b0;
+                    if (button_busy) mode <= button_return_mode;
+                    if (frame_ok && header_ok && kind == 0 && verb == V_STOP && dec_err == C_NONE) begin
+                        reply_valid <= 1'b1;
+                        reply_kind <= 0;
+                        reply_verb <= verb;
+                        reply_seq <= seq;
+                        reply_code <= C_NONE;
+                        reply_want_state <= 1'b1;
+                    end
+                end
             end
         end
     end

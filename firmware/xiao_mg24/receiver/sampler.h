@@ -7,7 +7,8 @@
 #include "dmadrv.h"
 
 namespace mg24 {
-// Single foreground owner; the DMA callback only stops hardware and sets flags.
+// Single foreground owner; DMA stops the trigger at the end of the window.
+// The completion callback publishes timestamps/flags, not the sampling limit.
 class HardwareSampler final : public Sampler {
 public:
     bool begin() {
@@ -66,11 +67,18 @@ public:
         capture_epoch_ = next_epoch_ + uint32_t(start_low_ - uint32_t(next_epoch_));
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-        descriptor_ = (LDMA_Descriptor_t)LDMA_DESCRIPTOR_LINKREL_P2M_WORD(&IADC0->SINGLEFIFODATA, dma_, SAMPLE_COUNT, 0);
+        descriptors_[0] = (LDMA_Descriptor_t)LDMA_DESCRIPTOR_LINKREL_P2M_WORD(
+            &IADC0->SINGLEFIFODATA, dma_, SAMPLE_COUNT, 1);
+        // Do not wait for the DMA interrupt to stop the ADC: RTOS/radio critical
+        // sections can delay it until the undrained FIFO overflows. The linked
+        // immediate write runs in hardware after sample 200, without another
+        // peripheral request. Only this final descriptor raises completion.
+        descriptors_[0].xfer.doneIfs = 0;
+        descriptors_[1] = (LDMA_Descriptor_t)LDMA_DESCRIPTOR_SINGLE_WRITE(
+            IADC_CMD_TIMERDIS | IADC_CMD_SINGLESTOP, &IADC0->CMD);
 #pragma GCC diagnostic pop
-        descriptor_.xfer.link = 0; // Finite window: never link back and overwrite completed samples.
         LDMA_TransferCfg_t transfer = LDMA_TRANSFER_CFG_PERIPHERAL(ldmaPeripheralSignal_IADC0_IADC_SINGLE);
-        if (DMADRV_LdmaStartTransfer(channel_, &transfer, &descriptor_, complete, this)
+        if (DMADRV_LdmaStartTransfer(channel_, &transfer, descriptors_, complete, this)
             != ECODE_EMDRV_DMADRV_OK) return false;
         IADC_command(IADC0, iadcCmdStartSingle);
         IADC_command(IADC0, iadcCmdEnableTimer);
@@ -107,11 +115,11 @@ private:
     double sample_hz_ = 0;
     uint32_t dma_[SAMPLE_COUNT] = {};
     uint16_t samples_[SAMPLE_COUNT] = {};
-    LDMA_Descriptor_t descriptor_ = {};
+    LDMA_Descriptor_t descriptors_[2] = {};
     static bool complete(unsigned, unsigned, void *context) {
         auto *self = static_cast<HardwareSampler *>(context);
-        IADC_command(IADC0, iadcCmdDisableTimer);
-        IADC_command(IADC0, iadcCmdStopSingle);
+        // Hardware has already disabled the timer and single queue. Leave FIFO
+        // fault flags intact so a real in-window overrun is still rejected.
         self->done_low_ = micros();
         self->done_ = true;
         return false;

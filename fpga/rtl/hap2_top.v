@@ -18,7 +18,17 @@
 // 还需要上板确认的：相位符号、死区取值、驱动板与真实换能器。
 // 板级封装（上电复位、boot 标识、引脚约束）见 rtl/board_top.v 和 fpga/board/。
 module hap2_top #(
+    parameter integer CAL_NULL_SCALED_QC = 0,
+    parameter integer BUTTON_FOCUS_ENABLE = 0,
+    parameter integer BUTTON_FOCUS_MS = 3000,
+    parameter integer BUTTON_FOCUS_Z_UM = 100000,
+    parameter integer BUTTON_FOCUS_LEVEL = 1,
+    parameter integer BUTTON_FOCUS_SHAPE = 0,
+    parameter integer BUTTON_FOCUS_RADIUS_UM = 0,
+    parameter integer BUTTON_FOCUS_REPEAT_MILLIHZ = 500,
     parameter integer        CAL_ENABLE=0, CAL_SOURCE=0,
+    parameter integer        CAL_RESTORE_ENABLE=0,
+    parameter [511:0]        CAL_RESTORE_OFFSETS=512'd0,
     parameter integer        CAL_Z_UM=100000, CAL_LEVEL=30,
     parameter integer        CLK_HZ       = 50_000_000,
     parameter integer        BAUD         = 115200,
@@ -83,9 +93,18 @@ module hap2_top #(
     wire [HW_ROWS*HW_COLS-1:0] normal_pos,normal_neg,cal_pos,cal_neg;
     wire [8*HW_ROWS*HW_COLS-1:0] cal_offsets;
     generate
-        if(CAL_ENABLE==1) begin : startup_calibration
+        if(CAL_RESTORE_ENABLE!=0 && (CAL_RESTORE_ENABLE!=1 || CAL_ENABLE!=1 ||
+           HW_ROWS!=8 || HW_COLS!=8 || HW_PITCH_UM!=10300)) begin : invalid_restore
+            ERROR_RESTORE_REQUIRES_CALIBRATED_R2_8X8 invalid_restore_configuration();
+        end
+        for(genvar restore_ch=0;restore_ch<64;restore_ch=restore_ch+1) begin : check_restore
+            if(CAL_RESTORE_ENABLE==1 && CAL_RESTORE_OFFSETS[8*restore_ch +: 8]>63) begin : invalid_offset
+                ERROR_RESTORED_OFFSET_OUT_OF_RANGE invalid_offset_value();
+            end
+        end
+        if(CAL_ENABLE==1 && CAL_RESTORE_ENABLE==0) begin : startup_calibration
             hap2_cal_startup #(.CLK_HZ(CLK_HZ),.BAUD(BAUD),.ROWS(HW_ROWS),.COLS(HW_COLS),
-                .PITCH_UM(HW_PITCH_UM),.SOURCE(CAL_SOURCE),
+                .PITCH_UM(HW_PITCH_UM),.SOURCE(CAL_SOURCE),.NULL_SCALED_QC(CAL_NULL_SCALED_QC),
                 .Z_UM(CAL_Z_UM),.LEVEL(CAL_LEVEL),.DEAD_CYC(OUT_DEAD_CYC)) u_startup (
                 .clk(clk),.rst_n(rst_n),.rx_line(uart_rx_pin),.boot_id(boot_id),
                 .tx_line(cal_tx),.out_pos(cal_pos),.out_neg(cal_neg),
@@ -93,7 +112,10 @@ module hap2_top #(
         end else begin : no_calibration
             assign cal_released=1'b1;
             assign cal_tx=1'b1;
-            assign cal_pos=0; assign cal_neg=0; assign cal_output_on=0; assign cal_offsets=0;
+            assign cal_pos=0; assign cal_neg=0; assign cal_output_on=0;
+            // Reuse known measurements without pretending a fresh CAL2 round
+            // passed. Normal power-on idle, STOP and watchdog remain active.
+            assign cal_offsets=CAL_RESTORE_ENABLE==1 ? CAL_RESTORE_OFFSETS : 0;
         end
     endgenerate
     assign business_rst_n=rst_n && cal_released;
@@ -211,6 +233,14 @@ module hap2_top #(
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_cmd #(
+        .CLK_HZ(CLK_HZ),
+        .BUTTON_FOCUS_ENABLE(BUTTON_FOCUS_ENABLE),
+        .BUTTON_FOCUS_MS(BUTTON_FOCUS_MS),
+        .BUTTON_FOCUS_Z_UM(BUTTON_FOCUS_Z_UM),
+        .BUTTON_FOCUS_LEVEL(BUTTON_FOCUS_LEVEL),
+        .BUTTON_FOCUS_SHAPE(BUTTON_FOCUS_SHAPE),
+        .BUTTON_FOCUS_RADIUS_UM(BUTTON_FOCUS_RADIUS_UM),
+        .BUTTON_FOCUS_REPEAT_MILLIHZ(BUTTON_FOCUS_REPEAT_MILLIHZ),
         .CAL_LIMIT   (CAL_ENABLE),
         .ADDR_W      (ADDR_W),
         .WS_X_MIN_UM (WS_X_MIN_UM),

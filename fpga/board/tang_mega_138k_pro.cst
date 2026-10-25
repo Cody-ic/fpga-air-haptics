@@ -47,54 +47,38 @@ IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP BANK_VCCIO=3.3;
 IO_LOC  "uart_tx_pin" P15;
 IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
 
-// ==================== 16 路输出（4×4）====================
-// 全部放在 PMOD1 和 PMOD2 两个连接器上：每个连接器 8 个信号脚，两根 PMOD 排线接驱动板。
-//
-// 为什么不用 PMOD0：官方「全引脚约束」和两块底板的原理图在 **PMOD0 的第 2 个信号脚**
-// 上互相矛盾（官方表写 N26，原理图写 L22）✗。PMOD1 / PMOD2 的 8 个脚两边资料完全一致 ✓，
-// 所以先用这两个，把不确定的那个连接器留着以后单独核。
-//
-// 顺序 = 阵列的第 1..16 个换能器。PMOD 上的顺序按原理图网名 PMOD1_IO0..IO7 / PMOD2_IO0..IO7，
-// 括号里的数字是原理图连接器符号的针脚号（信号脚是 11/9/7/5 一排 + 12/10/8/6 另一排）。
-// ⚠️ 排线上哪个物理脚对应哪一路，上板后用示波器量 40 kHz 波形逐个确认一次再焊驱动板。
-IO_LOC  "array_pos[0]"  C24;    // PMOD1_IO0（针 11）
-IO_PORT "array_pos[0]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[1]"  E25;    // PMOD1_IO1（针 9）
-IO_PORT "array_pos[1]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[2]"  L17;    // PMOD1_IO2（针 7）
-IO_PORT "array_pos[2]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[3]"  H14;    // PMOD1_IO3（针 5）
-IO_PORT "array_pos[3]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[4]"  B24;    // PMOD1_IO4（针 12）
-IO_PORT "array_pos[4]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[5]"  D25;    // PMOD1_IO5（针 10）
-IO_PORT "array_pos[5]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[6]"  L18;    // PMOD1_IO6（针 8）
-IO_PORT "array_pos[6]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[7]"  H15;    // PMOD1_IO7（针 6）
-IO_PORT "array_pos[7]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-
-IO_LOC  "array_pos[8]"  C21;    // PMOD2_IO0（针 11）
-IO_PORT "array_pos[8]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[9]"  B20;    // PMOD2_IO1（针 9）
-IO_PORT "array_pos[9]"  IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[10]" B19;    // PMOD2_IO2（针 7）
-IO_PORT "array_pos[10]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[11]" A17;    // PMOD2_IO3（针 5）
-IO_PORT "array_pos[11]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[12]" B21;    // PMOD2_IO4（针 12）
-IO_PORT "array_pos[12]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[13]" A20;    // PMOD2_IO5（针 10）
-IO_PORT "array_pos[13]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[14]" A19;    // PMOD2_IO6（针 8）
-IO_PORT "array_pos[14]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-IO_LOC  "array_pos[15]" A18;    // PMOD2_IO7（针 6）
-IO_PORT "array_pos[15]" IO_TYPE=LVCMOS33 PULL_MODE=NONE DRIVE=8 BANK_VCCIO=3.3;
-
-// 互补输出（半桥驱动才用）：board_top 现在**故意不引出** array_neg——顶层端口没约束时
-// 工具会把它们自动摆到随便哪个脚上，可能撞到 DDR/HDMI 那些不能乱动的脚。
-// 要半桥方案时：把 board_top 里那行端口改成同时引出 array_pos/array_neg，
-// 再在这里给 array_neg[0..15] 分配一组自己的脚（不能和上面的通道重脚）。
+// R2 H1 via seven adjacent rows of the photographed X4 expansion header.
+// First row: 5V (LEAVE DISCONNECTED), GND -> H1.2; H1.1 left empty.
+// Next rows: T23/R23, R25/T25, W23/P25, U24/V23, AC26/U25, AB25/AB26.
+// User wiring swaps left/right within each SIGNAL row (2026-10-22).
+// GND stays GND; NEVER swap in the 5V conductor.
+// Use silk labels and H1 pad numbers; rear-side viewing mirrors the connector.
+// SDRAM expansion nets: do not attach an SDRAM module concurrently.
+// Dock 4071f schematic sheet 16 (J23) corroborates these signal balls.
+IO_LOC  "sr_data[0]" P25; // H1 pin 7, DATA0
+IO_PORT "sr_data[0]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[1]" W23; // H1 pin 8, DATA1
+IO_PORT "sr_data[1]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[2]" V23; // H1 pin 9, DATA2
+IO_PORT "sr_data[2]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[3]" U24; // H1 pin 10, DATA3
+IO_PORT "sr_data[3]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[4]" U25; // H1 pin 11, DATA4
+IO_PORT "sr_data[4]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[5]" AC26; // H1 pin 12, DATA5
+IO_PORT "sr_data[5]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[6]" AB26; // H1 pin 13, DATA6
+IO_PORT "sr_data[6]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_data[7]" AB25; // H1 pin 14, DATA7
+IO_PORT "sr_data[7]" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_clk" R23; // H1 pin 3, SRCLK
+IO_PORT "sr_clk" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_oe_n" T23; // H1 pin 4, OE_N
+IO_PORT "sr_oe_n" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_latch" T25; // H1 pin 5, RCLK
+IO_PORT "sr_latch" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
+IO_LOC  "sr_clear_n" R25; // H1 pin 6, SRCLR_N
+IO_PORT "sr_clear_n" IO_TYPE=LVCMOS33 PULL_MODE=DOWN DRIVE=8 BANK_VCCIO=3.3;
 
 // ==================== 状态灯 ====================
 // 板上有 6 颗用户灯（官方 led[0..5] = R26 J14 L20 M25 N21 N23），我们用前 3 颗：

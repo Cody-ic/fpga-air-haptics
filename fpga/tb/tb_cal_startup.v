@@ -5,9 +5,9 @@ module tb_cal_startup;
     always #5 clk=~clk;
     reg rst_n=0, rx=1;
     wire tx,on,released;
-    wire [15:0] pos,neg;
-    wire [127:0] saved;
-    hap2_cal_startup #(.CLK_HZ(CLK_HZ),.BAUD(BAUD),.ROWS(4),.COLS(4),.SOURCE(1),
+    wire [63:0] pos,neg;
+    wire [511:0] saved;
+    hap2_cal_startup #(.CLK_HZ(CLK_HZ),.BAUD(BAUD),.ROWS(8),.COLS(8),.PITCH_UM(10300),.Z_UM(70000),.SOURCE(1),
         .SETTLE_MS(3),.REPEAT_MS(3),.TIMEOUT_MS(500)) dut (
         .clk(clk),.rst_n(rst_n),.rx_line(rx),.boot_id(32'h12345678),.tx_line(tx),
         .out_pos(pos),.out_neg(neg),.output_on(on),.released(released),.saved_offsets(saved));
@@ -16,6 +16,7 @@ module tb_cal_startup;
     hap2_cal_packet #(.CLK_HZ(CLK_HZ),.BAUD(BAUD)) monitor (
         .clk(clk),.rst_n(rst_n),.rx_line(tx),.tx_line(),.rx_valid(received),.rx_body(packet),
         .tx_start(1'b0),.tx_body(256'd0),.tx_busy(),.tx_done());
+    reg [3:0] trim_blocks=0;
     reg saw_trim=0,saw_release=0,saw_reference=0,saw_pair=0;
     always @(posedge clk) begin
         if(rst_n) begin
@@ -26,8 +27,9 @@ module tb_cal_startup;
             if(dut.stage>=3 && pos!=0) saw_pair<=1;
             if(received && packet[31:24]==8'h81) begin
                 for(integer k=0;k<16;k=k+1)
-                    if(packet[128+8*k +: 8]!=(k*9)%64) $fatal(1,"trim UART readback channel %0d",k);
-                saw_trim<=1;
+                    if(packet[128+8*k +: 8]!=((packet[127:96]+k)*9)%64) $fatal(1,"trim UART readback channel %0d",k);
+                trim_blocks[packet[101:100]]<=1;
+                if(packet[127:96]==48) saw_trim<=1;
             end
             if(received && packet[31:24]==8'h82) saw_release<=1;
         end
@@ -65,12 +67,13 @@ module tb_cal_startup;
         end
     endtask
     real p,angle;
-    integer n;
+    integer n,k;
+    reg [127:0] imported_block;
     reg [31:0] old_token;
     initial begin
         repeat(5) @(negedge clk); rst_n=1;
         repeat(2500) @(negedge clk);
-        send(7,32'h12345678,0,0,0,100000,30,0,0);
+        send(7,32'h12345678,0,0,0,70000,30,0,0);
         wait(dut.phase_ready);
         send(1,32'h12345677,0,0,0,0,0,0,0); // stale boot
         send(1,32'h12345678,0,0,0,0,0,0,0); // wrong source
@@ -78,10 +81,18 @@ module tb_cal_startup;
         if(dut.attempted || on || pos!=0) $fatal(1,"invalid READY started calibration");
         byte_out(8'ha5); byte_out(8'h5a); byte_out(1); // partial packet must expire
         repeat(51000) @(negedge clk);
-        send(1,32'h12345678,0,1,0,0,0,0,0);
+        // Reverify a full 64-channel candidate through real UART packets.
+        // Exhaustive solve sequencing is covered by tb_cal_modes.
+        for(n=0;n<4;n=n+1) begin
+            for(k=0;k<16;k=k+1) imported_block[8*k +: 8]=((n*16+k)*9)%64;
+            send(8,32'h12345678,0,n*16,imported_block[31:0],imported_block[63:32],
+                 imported_block[95:64],imported_block[127:96],0);
+            wait(dut.pending_type==0 && !dut.packet_busy);
+        end
+        send(1,32'h12345678,0,1,1,0,0,0,0);
         if(!dut.busy || !dut.attempted) $fatal(1,"did not auto-start on READY");
         old_token=0;
-        for(n=0;n<276;n=n+1) begin
+        for(n=0;n<384;n=n+1) begin
             wait(dut.state==2);
             if(dut.token!=old_token+1) $fatal(1,"token sequence");
             if(n==0) begin
@@ -106,7 +117,10 @@ module tb_cal_startup;
         end
         wait(dut.state==4);
         if(saved[15:8]!=9 || !saw_reference || !saw_pair || released) $fatal(1,"run/output integration");
-        send(5,32'h12345678,0,0,0,0,0,0,0);
+        for(n=0;n<4;n=n+1) begin
+            send(5,32'h12345678,0,n*16,0,0,0,0,0);
+            wait(trim_blocks[n]);
+        end
         wait(saw_trim);
         send(6,32'h12345678,old_token,0,0,0,0,0,0);
         wait(released);
@@ -115,5 +129,5 @@ module tb_cal_startup;
         $display("PASS startup UART: readiness/boot/CRC/partial timeout/token/measurement/trim/release and channel masks");
         $finish;
     end
-    initial begin #100000000; $fatal(1,"test deadline"); end
+    initial begin #400000000; $fatal(1,"test deadline"); end
 endmodule

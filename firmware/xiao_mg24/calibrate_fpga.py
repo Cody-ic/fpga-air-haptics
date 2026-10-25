@@ -92,6 +92,7 @@ class FpgaLink:
         self.connection = connection
         self.decoder = PacketDecoder()
         self.queue = asyncio.Queue(maxsize=64)
+        self.pending_status = None
         self.error = None
         self.lock = asyncio.Lock()
         self.reader = asyncio.create_task(self._read())
@@ -100,7 +101,12 @@ class FpgaLink:
         try:
             while True:
                 for packet in self.decoder.feed(await self.connection.read()):
+                    # While MG24 is sampling, repeated identical FPGA statuses
+                    # need only one queue entry. Preserve transitions and ACKs.
+                    if packet.kind == STATUS and packet == self.pending_status:
+                        continue
                     self.queue.put_nowait(packet)
+                    self.pending_status = packet if packet.kind == STATUS else None
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -117,6 +123,8 @@ class FpgaLink:
             raise ProtocolError("未收到校准状态：请检查串口和校准开关；正常业务固件不提供校准端点") from error
         if self.error:
             raise self.error
+        if packet is self.pending_status:
+            self.pending_status = None
         return packet
 
     async def send(self, kind, boot, token=0, *args):
@@ -157,7 +165,7 @@ def measured_power(capture):
 
 @dataclass(frozen=True)
 class Settings:
-    position_um: tuple = (0, 0, 100000)
+    position_um: tuple = (0, 0, 70000)
     level: int = 30
     reference: int = 0
 

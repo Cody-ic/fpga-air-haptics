@@ -4,6 +4,7 @@
 // successful verification and host RELEASE. No wireless transport exists here.
 module hap2_cal_startup #(
     parameter integer CLK_HZ=50000000, BAUD=115200,
+    parameter integer NULL_SCALED_QC=0,
     parameter integer ROWS=4, COLS=4, PITCH_UM=11000, SOURCE=0,
     parameter integer Z_UM=100000, LEVEL=30, DEAD_CYC=0,
     parameter integer SETTLE_MS=200, REPEAT_MS=220, TIMEOUT_MS=6000, LINK_MS=3000
@@ -50,7 +51,7 @@ module hap2_cal_startup #(
     wire [8*N-1:0] trial;
     reg [31:0] silent_ms,ms_div;
     wire ms_tick=ms_div>=CLK_HZ/1000-1;
-    hap2_calibrate #(.CHANNELS(N),.SOURCE(SOURCE),.CLK_HZ(CLK_HZ),
+    hap2_calibrate #(.CHANNELS(N),.SOURCE(SOURCE),.CLK_HZ(CLK_HZ),.NULL_SCALED_QC(NULL_SCALED_QC),
         .SETTLE_MS(SETTLE_MS),.REPEAT_MS(REPEAT_MS),.TIMEOUT_MS(TIMEOUT_MS)) u_cal (
         .clk(clk),.rst_n(rst_n),.begin_run(begin_run),.abort_run(abort_run),.clear_saved(1'b0),
         .reference(reference),.import_run(import_run),.import_offsets(imported),
@@ -167,8 +168,11 @@ module hap2_cal_startup #(
                           (v1==1 ? phase_ready : saved_valid)) begin
                         pending_type<=8'h81; pending_args<=0;
                         pending_args[31:0]<=v0|(v1<<16);
-                        for(i=0;i<16;i=i+1) if(v0+i<N)
-                            pending_args[32+8*i +: 8]<=v1==1 ? baseline[8*(v0+i) +: 8] : saved_offsets[8*(v0+i) +: 8];
+                        // Protocol bases are aligned to 16 channels. Constant
+                        // byte slices avoid sixteen independent full-table
+                        // barrel selectors when the array grows to 64 lanes.
+                        for(i=0;i<N;i=i+1) if(v0==(i/16)*16)
+                            pending_args[32+8*(i%16) +: 8]<=v1==1 ? baseline[8*i +: 8] : saved_offsets[8*i +: 8];
                     end
                     6: if(state==4 && saved_valid && request_token==token && no_args && pending_type==0)
                         release_pending<=1;
@@ -178,8 +182,8 @@ module hap2_cal_startup #(
                         pending_type<=8'h83; pending_args<=packet[255:96];
                     end
                     8: if(idle_command && state!=4 && configured && request_token==0 && upload_valid && pending_type==0) begin
-                        for(i=0;i<16;i=i+1) if(v0+i<N) begin
-                            imported[8*(v0+i) +: 8]<=packet[128+8*i +: 8]; imported_mask[v0+i]<=1;
+                        for(i=0;i<N;i=i+1) if(v0==(i/16)*16) begin
+                            imported[8*i +: 8]<=packet[128+8*(i%16) +: 8]; imported_mask[i]<=1;
                         end
                         pending_type<=8'h85; pending_args<=packet[255:96];
                     end

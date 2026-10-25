@@ -47,7 +47,7 @@ class CalibrationWindow:
         self.ble_address = tk.StringVar()
         self.x = tk.StringVar(value="0")
         self.y = tk.StringVar(value="0")
-        self.z = tk.StringVar(value="100")
+        self.z = tk.StringVar(value="70")
         self.level = tk.StringVar(value="30")
         self.reference = tk.StringVar(value="0")
         self.fixed = tk.BooleanVar()

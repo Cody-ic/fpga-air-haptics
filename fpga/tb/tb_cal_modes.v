@@ -1,17 +1,17 @@
 `timescale 1ns/1ps
-module tb_cal_modes #(parameter integer REF=7);
+module tb_cal_modes #(parameter integer REF=63, N=64);
     reg clk=0,rst_n=0,start=0,abort_run=0,mv=0,importing=0;
     always #5 clk=~clk;
     reg [31:0] power_in=0;
-    reg [127:0] imported=0;
+    reg [8*N-1:0] imported=0;
     wire busy,valid;
     wire [2:0] state;
     wire [3:0] stage,error;
     wire [7:0] channel;
     wire [31:0] token;
-    wire [127:0] saved,trial;
-    wire [15:0] mask;
-    hap2_calibrate #(.CHANNELS(16),.SOURCE(0),.CLK_HZ(1000),.SETTLE_MS(1),.REPEAT_MS(1)) dut (
+    wire [8*N-1:0] saved,trial;
+    wire [N-1:0] mask;
+    hap2_calibrate #(.CHANNELS(N),.SOURCE(0),.CLK_HZ(1000),.SETTLE_MS(1),.REPEAT_MS(1)) dut (
         .clk(clk),.rst_n(rst_n),.begin_run(start),.abort_run(abort_run),.clear_saved(1'b0),
         .reference(REF[7:0]),.import_run(importing),.import_offsets(imported),.measure_valid(mv),
         .measure_good(1'b1),.measure_power(power_in),.busy(busy),.saved_valid(valid),
@@ -30,7 +30,7 @@ module tb_cal_modes #(parameter integer REF=7);
             reads=0;
             while(busy) begin
                 if(state==2) begin
-                    delta=(channel*5-REF*5+128)%64;
+                    delta=(channel*5-REF*5+1024)%64;
                     angle=(delta-trial[8*channel +: 8])*6.283185307179586/64.0;
                     if(stage==0) p=9; // wideband scope background is a bound,
                     else if(stage==1) p=10000; // not subtracted from signal.
@@ -42,16 +42,16 @@ module tb_cal_modes #(parameter integer REF=7);
             end
         end
     endtask
-    reg [127:0] old_saved;
+    reg [8*N-1:0] old_saved;
     initial begin
         repeat(3) @(negedge clk); rst_n=1;
         begin_round; feed_round;
-        if(state!=4 || !valid || reads!=276) $fatal(1,"manual full round");
-        for(i=0;i<16;i=i+1)
-            if(saved[8*i +: 8]!=(i*5-REF*5+128)%64) $fatal(1,"reference mapping channel=%0d",i);
+        if(state!=4 || !valid || reads!=(2+6*(N-1))*3) $fatal(1,"manual full round");
+        for(i=0;i<N;i=i+1)
+            if(saved[8*i +: 8]!=(i*5-REF*5+1024)%64) $fatal(1,"reference mapping channel=%0d",i);
         old_saved=saved; imported=saved; importing=1;
         begin_round; feed_round;
-        if(state!=4 || saved!==old_saved || reads!=96) $fatal(1,"import must reverify every channel");
+        if(state!=4 || saved!==old_saved || reads!=N*6) $fatal(1,"import must reverify every channel");
         imported[7:0]=(imported[7:0]+16)%64;
         begin_round; feed_round;
         if(state!=5 || error!=6 || saved!==old_saved) $fatal(1,"reject bad imported candidate");
@@ -62,7 +62,7 @@ module tb_cal_modes #(parameter integer REF=7);
         if(!busy || state!=2) $fatal(1,"manual must wait longer than ADC timeout");
         repeat(114000) @(negedge clk);
         if(busy || state!=5 || error!=2 || saved!==old_saved) $fatal(1,"manual 120-second timeout");
-        $display("PASS scope source: 16 channels/ref=7, no background subtraction, import reverify, atomic rollback, 120-second timeout");
+        $display("PASS scope source: 64 channels/ref=63, no background subtraction, import reverify, atomic rollback, 120-second timeout");
         $finish;
     end
     initial begin #100000000; $fatal(1,"deadline"); end

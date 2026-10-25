@@ -4,6 +4,7 @@
 // powers; channel sequencing, relative phase solving, verification and commit
 // are performed here. A failed/cancelled run never overwrites saved_offsets.
 module hap2_calibrate #(
+    parameter integer NULL_SCALED_QC = 0,
     parameter integer CHANNELS = 16,
     parameter integer SOURCE = 1,
     parameter integer REFERENCE = 0,
@@ -101,7 +102,20 @@ module hap2_calibrate #(
         end
     endfunction
 
+    wire [23:0] model_noise = SOURCE==0 ? 24'd0 : noise;
+    wire [23:0] a = reference_power > model_noise ? reference_power-model_noise : 0;
+    wire [23:0] b = single_power > model_noise ? single_power-model_noise : 0;
+    // In destructive interference, relative error to the nearly-zero measured
+    // power is ill-conditioned. For quadrature trials ONLY, bound the absolute
+    // spread by 15% of (a+b)/16 = 0.9375% of the two single-emitter powers.
+    // Bright trials retain their original 15% relative rule; background,
+    // singles and corrected-pair verification are unchanged. Phase-fit and
+    // post-correction checks still independently reject inconsistent data.
+    wire [24:0] pair_power = {1'b0,a}+{1'b0,b};
+    wire [31:0] null_floor = {7'd0,pair_power} >> 4;
     reg [31:0] median,spread;
+    wire [31:0] repeat_scale = NULL_SCALED_QC && stage>=3 && stage<=6 && null_floor>median
+                               ? null_floor : median;
     reg unstable;
     reg [38:0] sample100,verify_low,verify_high,verify_quad;
     reg [23:0] max01,max23,strongest;
@@ -112,7 +126,7 @@ module hap2_calibrate #(
         end else begin
             median<=median3({8'd0,r0},{8'd0,r1},{8'd0,sampled_power});
             spread<=max3({8'd0,r0},{8'd0,r1},{8'd0,sampled_power})-min3({8'd0,r0},{8'd0,r1},{8'd0,sampled_power});
-            unstable<=spread>4 && {7'd0,spread}*100>{7'd0,median}*15;
+            unstable<=spread>4 && {7'd0,spread}*100>{7'd0,repeat_scale}*15;
             sample100<=median*100;
             verify_low<=expected_peak*85; verify_high<=expected_peak*120;
             max01<=powers[0]>powers[1] ? powers[0] : powers[1];
@@ -121,9 +135,6 @@ module hap2_calibrate #(
             verify_quad<=strongest*90;
         end
     end
-    wire [23:0] model_noise = SOURCE==0 ? 24'd0 : noise;
-    wire [23:0] a = reference_power > model_noise ? reference_power-model_noise : 0;
-    wire [23:0] b = single_power > model_noise ? single_power-model_noise : 0;
     wire [47:0] ab = a*b;
     wire signed [24:0] c_fit=$signed({1'b0,powers[0]})-$signed({1'b0,powers[2]});
     wire signed [24:0] s_fit=$signed({1'b0,powers[3]})-$signed({1'b0,powers[1]});
