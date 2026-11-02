@@ -25,15 +25,16 @@ def main():
     button.add_argument('--button-line', action='store_true')
     button.add_argument('--button-circle', action='store_true')
     parser.add_argument('--button-radius-mm', type=int, choices=range(1,31), default=20)
-    parser.add_argument('--button-z-mm', type=int, choices=(70,100), default=100)
-    parser.add_argument('--calibration-z-mm', type=int, choices=(70,100), default=70)
+    parser.add_argument('--button-z-mm', type=int, choices=(50,70,100), default=100)
+    parser.add_argument('--calibration-z-mm', type=int, choices=(50,70,100), default=70)
     parser.add_argument('--calibration-reference', type=int, choices=range(64), default=0)
+    parser.add_argument('--calibration-level', type=int, choices=range(1,101), default=30)
     args = parser.parse_args()
     button_motion=args.button_line or args.button_circle
     button_enabled=args.button_focus or button_motion
     if args.button_radius_mm!=20 and not button_motion:
         parser.error('--button-radius-mm requires --button-line or --button-circle')
-    packed, info = load_restore(args.calibration_file, args.calibration_z_mm, args.calibration_reference)
+    packed, info = load_restore(args.calibration_file, args.calibration_z_mm, args.calibration_reference, args.calibration_level)
     doc = json.loads(Path(args.calibration_file).read_bytes())
     # Reject simulated, partial and corrupt inputs before they can be synthesized.
     with tempfile.TemporaryDirectory() as temp:
@@ -44,13 +45,13 @@ def main():
             else: bad['phase_offsets'][3] = 64
             path = Path(temp) / 'bad.json'
             path.write_text(json.dumps(bad), encoding='utf-8')
-            try: load_restore(path, args.calibration_z_mm, args.calibration_reference)
+            try: load_restore(path, args.calibration_z_mm, args.calibration_reference, args.calibration_level)
             except (ValueError, RuntimeError): pass
             else: raise AssertionError('Accepted invalid calibration: ' + change)
     bench = 'tb_button_focus' if button_enabled else 'tb_cal_restore'
-    folder = ROOT / '.runtime/calibration/tests' / (bench + ('_z100' if args.calibration_z_mm==100 else '')
+    folder = ROOT / '.runtime/calibration/tests' / (bench + (f'_z{args.calibration_z_mm}' if args.calibration_z_mm!=70 else '')
               + (f'_ref{args.calibration_reference}' if args.calibration_reference else '')
-              + ('_focus70' if button_enabled and args.button_z_mm==70 else '')
+              + (f'_focus{args.button_z_mm}' if button_enabled and args.button_z_mm!=100 else '')
               + ('_circle' if args.button_circle else '_line' if args.button_line else '')
               + (f'_r{args.button_radius_mm}' if button_motion and args.button_radius_mm!=20 else ''))
     folder.mkdir(parents=True, exist_ok=True)

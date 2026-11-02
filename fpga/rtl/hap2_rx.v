@@ -11,6 +11,7 @@
 //   field_* / seen_mask               逐个字段的解析结果
 // 命令是否被允许、要不要改配置、怎么应答，都属于下一个模块。
 module hap2_rx #(
+    parameter integer CHANNELS = 16,
     parameter integer CLK_HZ   = 50_000_000,
     parameter integer BAUD     = 115200,
     parameter integer MAX_LINE = 4096,
@@ -47,7 +48,8 @@ module hap2_rx #(
     output wire [2:0]      field_enum,
     output wire [ADDR_W:0] field_off,
     output wire [ADDR_W:0] field_size,
-    output wire [18:0]     seen_mask,
+    output wire [19:0]     seen_mask,
+    output wire [8*CHANNELS-1:0] phase_table,
     // 调试
     output wire [15:0]     crc_value,
     output wire [15:0]     crc_expected,
@@ -136,6 +138,7 @@ module hap2_rx #(
     );
 
     hap2_field_parse #(
+        .CHANNELS(CHANNELS),
         .ADDR_W (ADDR_W)
     ) u_parse (
         .clk           (clk),
@@ -161,6 +164,7 @@ module hap2_rx #(
         .field_enum    (field_enum),
         .field_off     (field_off),
         .field_size    (field_size),
+        .phase_table(phase_table),
         .seen_mask     (seen_mask)
     );
 

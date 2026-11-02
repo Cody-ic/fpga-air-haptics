@@ -71,7 +71,10 @@ module board_top #(
     output wire sr_clear_n,    // H1 pin 6, low clears shift register only
     // 状态灯：输出开 / 正在扫描 / 走步器在跑（干净脚不够，只留最有用的三颗；
     // 本地模式、串口状态在状态帧里都看得到）
-    output wire [2:0] led
+    output wire [2:0] led,
+    // Read-only display observation; no feedback into the transmitter.
+    output wire [188:0] view_snapshot,
+    output wire view_reset_n
 );
 
     generate
@@ -128,6 +131,13 @@ module board_top #(
     wire signed [20:0] focus_x, focus_y;
     wire [5:0]  stroke_index;
     wire        beat_pulse;
+    wire [31:0] view_z,view_carrier,view_steps,view_level;
+    wire [15:0] view_revision;
+    wire [1:0] view_run;
+    wire view_active;
+    assign view_reset_n=rst_n;
+    assign view_snapshot={focus_x,focus_y,view_z,view_carrier,view_steps,view_level,
+                          view_revision,view_run,view_active};
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_top #(
@@ -178,6 +188,9 @@ module board_top #(
         .output_on   (output_on),
         .beat_pulse  (beat_pulse),
         .walk_running(walk_running),
+        .view_z_um(view_z),.view_carrier_hz(view_carrier),.view_phase_steps(view_steps),
+        .view_level(view_level),.view_revision(view_revision),
+        .view_run_state(view_run),.view_active(view_active),
         .array_pos   (array_pos),
         /* verilator lint_off PINCONNECTEMPTY */
         .array_neg   ()          // 单端驱动不用；要半桥就照上面的说明把端口引出来

@@ -43,25 +43,25 @@ class HandView:
     def draw(self):
         c, width, height = self.canvas, self.width, self.height
         c.create_rectangle(46, 28, width-26, height-36, outline="#e5eaf0")
-        c.create_text(width-40, 14, text="手掌示意 · 非位置检测", anchor="e", fill="#748398",
+        c.create_text(width-40, 14, text="手掌示意 · 非位置检测", anchor="e", fill="#86868b",
                       font=("Microsoft YaHei UI", 9), tags="hand_caption")
         outline = [value for point in HAND_OUTLINE for value in self.screen(point)]
-        c.create_polygon(*outline, fill="#fff0df", outline="#d6b99d", width=2, tags="hand_reference")
+        c.create_polygon(*outline, fill="#f6f3ee", outline="#d3cbc0", width=2, tags="hand_reference")
         creases = [((-26, 17), [((-13, 11), (11, 14), (32, 22))]),
                    ((-21, -1), [((-6, 3), (13, -3), (28, -8))]),
                    ((-29, 5), [((-14, -7), (-12, -23), (-22, -33))]),
                    ((-20, -46), [((-6, -43), (9, -43), (23, -44))])]
         for start, segments in creases:
-            c.create_line(*self.curve(start, segments), fill="#e6cdb6", width=1.5, tags="hand_reference")
+            c.create_line(*self.curve(start, segments), fill="#e0d9cf", width=1.5, tags="hand_reference")
         x, y = self.screen((0, 0))
         c.create_line(x-5, y, x+5, y, fill="#ccb299", tags="hand_reference")
         c.create_line(x, y-5, x, y+5, fill="#ccb299", tags="hand_reference")
-        c.create_text(48, 14, text="Y / mm", anchor="w", fill="#7a8da2", font=("Microsoft YaHei UI", 8))
-        c.create_text(width-28, height-16, text="X / mm", anchor="e", fill="#7a8da2", font=("Microsoft YaHei UI", 8))
+        c.create_text(48, 14, text="Y / mm", anchor="w", fill="#86868b", font=("Microsoft YaHei UI", 8))
+        c.create_text(width-28, height-16, text="X / mm", anchor="e", fill="#86868b", font=("Microsoft YaHei UI", 8))
         for fraction in (0, .25, .5, .75, 1):
             px = 48+(width-100)*fraction
             py = 30+(height-70)*fraction
             vx = (px-self.center[0])/self.scale+self.origin[0]
             vy = (self.center[1]-py)/self.scale+self.origin[1]
-            c.create_text(px, height-24, text=f"{vx:.0f}", fill="#8794a5", font=("Microsoft YaHei UI", 8))
-            c.create_text(40, py, text=f"{vy:.0f}", anchor="e", fill="#8794a5", font=("Microsoft YaHei UI", 8))
+            c.create_text(px, height-24, text=f"{vx:.0f}", fill="#86868b", font=("Microsoft YaHei UI", 8))
+            c.create_text(40, py, text=f"{vy:.0f}", anchor="e", fill="#86868b", font=("Microsoft YaHei UI", 8))

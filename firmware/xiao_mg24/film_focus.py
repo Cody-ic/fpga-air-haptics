@@ -16,8 +16,8 @@ from desktop_app.model import Config, ArraySpec, focus_phases
 
 def center_plan(saved, z_mm=70, level=1):
     """Build and validate a center target without opening hardware."""
-    if z_mm not in (70, 100) or not 1 <= level <= 100:
-        raise ValueError('Require height 70 or 100 mm and level 1..100')
+    if z_mm not in (50, 70, 100) or not 1 <= level <= 100:
+        raise ValueError('Require height 50, 70 or 100 mm and level 1..100')
     offsets = saved['phase_offsets']
     if len(offsets) != 64 or any(type(v) is not int or not 0 <= v < 64 for v in offsets):
         raise ValueError('Invalid measured calibration offsets')
@@ -27,7 +27,7 @@ def center_plan(saved, z_mm=70, level=1):
     def expected_at(height):
         return [(int(a)+b)%64 for a,b in zip(focus_phases(cfg,(0,0,height),array),offsets)]
     reference_position = saved.get('position_um', [0, 0, 70000])
-    if reference_position not in ([0, 0, 70000], [0, 0, 100000]):
+    if reference_position not in ([0, 0, 50000], [0, 0, 70000], [0, 0, 100000]):
         raise ValueError('Unsupported calibration reference position')
     if expected_at(reference_position[2]/1000) != saved['expected_center_phases']:
         raise ValueError('Reference model does not match measured calibration')
@@ -112,7 +112,7 @@ def main():
     p.add_argument('--port', default='COM7')
     p.add_argument('--manifest', required=True)
     p.add_argument('--level', type=int, default=1)
-    p.add_argument('--z-mm', type=int, choices=(70,100), default=70)
+    p.add_argument('--z-mm', type=int, choices=(50,70,100), default=70)
     p.add_argument('--seconds', type=float, default=2)
     p.add_argument('--repeat', type=int, default=1)
     p.add_argument('--off-seconds', type=float, default=4, help='Output-off interval between repetitions, 1..30 seconds')

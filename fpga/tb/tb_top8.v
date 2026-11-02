@@ -10,11 +10,11 @@
 // 状态帧里的相位串正好是 64 个数。
 //
 // 运行方式见 fpga/README.md：cd fpga && bash tb/run_verilator.sh
-module tb_top8;
+module tb_top8 #(parameter integer SIM_SCALE=1);
 
-    localparam integer CLK_HZ       = 50_000_000;
-    localparam integer BAUD         = 115200;
-    localparam integer CLK_NS       = 20;
+    localparam integer CLK_HZ       = 50_000_000 / SIM_SCALE;
+    localparam integer BAUD         = 1000000; // Accelerated serial regression.
+    localparam integer CLK_NS       = 20 * SIM_SCALE;
     localparam integer CLKS_PER_BIT = CLK_HZ / BAUD;
     localparam integer PT_BITS      = 21;
     localparam integer ROWS         = 8;
@@ -39,6 +39,7 @@ module tb_top8;
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_top #(
+        .TICK_CYC(500 / SIM_SCALE),
         .CLK_HZ      (CLK_HZ),
         .BAUD        (BAUD),
         .HW_ROWS     (ROWS),
@@ -206,7 +207,7 @@ module tb_top8;
         begin
             w_beats = 0; w_blank = 0;
             w_xmin = 100000000; w_xmax = -100000000;
-            for (c = 0; c < cycles; c = c + 1) begin
+            for (c = 0; c < cycles / SIM_SCALE; c = c + 1) begin
                 @(negedge clk);
                 if (beat_pulse) begin
                     w_beats = w_beats + 1;

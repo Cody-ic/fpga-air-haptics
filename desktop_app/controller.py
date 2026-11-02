@@ -160,6 +160,13 @@ class Session(threading.Thread):
                 if frame.verb == 'GEOMETRY' and not self.ready:
                     raise RuntimeError('无法读取设备阵列坐标')
                 return
+            if frame.verb == 'PING':
+                # A newer, matched heartbeat ACK proves current liveness even
+                # if an earlier heartbeat reply was lost. Never retire control
+                # requests this way: CONFIG/START still need their own ACK.
+                for seq, pending in list(self.pending.items()):
+                    if pending.verb == 'PING' and pending.sent <= request.sent:
+                        del self.pending[seq]
             if frame.verb == "HELLO":
                 if frame.fields.get("proto") != str(VERSION) or not frame.fields.get("boot"):
                     raise RuntimeError("设备协议版本不匹配")
@@ -284,11 +291,22 @@ class Session(threading.Thread):
             self._write(transport, "HELLO")
             while not self.closing.is_set():
                 now = time.monotonic()
-                if self.boot and now >= next_ping:
+                if (self.boot and now >= next_ping and not any(
+                        p.verb in ('CONFIG', 'MODE', 'START', 'PAUSE', 'STOP', 'CALIBRATION')
+                        for p in self.pending.values())):
                     self._write(transport, "PING")
                     next_ping = now + 0.8
                 try:
-                    _, _, verb, fields = self.commands.get_nowait()
+                    # Peek instead of removing/reinserting: a concurrent STOP
+                    # must be able to discard the waiting control permanently.
+                    with self.commands.mutex:
+                        defer_control = bool(self.commands.queue and
+                            self.commands.queue[0][2] in ('CONFIG', 'MODE', 'START', 'PAUSE', 'CALIBRATION') and
+                            any(p.verb == 'PING' for p in self.pending.values()))
+                    if defer_control:
+                        verb, fields = None, {}
+                    else:
+                        _, _, verb, fields = self.commands.get_nowait()
                 except queue.Empty:
                     verb, fields = None, {}
                 if verb:
@@ -327,6 +345,15 @@ class Session(threading.Thread):
                                     raise ValueError("上一采样请求尚未完成")
                             if verb == "CONFIG":
                                 config = Config.from_wire(fields)
+                                if config.phase_table != "NONE":
+                                    if "STATIC_PHASE" not in self.capabilities:
+                                        raise ValueError("设备固件不支持压力单帧，未发送")
+                                    config.static_phases(self.array)
+                                    if ArraySpec.from_wire(fields) != self.array:
+                                        raise ValueError("生成压力帧后阵列已改变，请重新生成")
+                                    if (not self.last_state or now-self.state_received >= 1.6
+                                            or self.last_state.mode != "REMOTE" or self.last_state.state != "IDLE"):
+                                        raise ValueError("请等待设备停止并切换电脑控制后发送压力帧")
                                 mismatch = self.workspace.incompatibility(config)
                                 if mismatch:
                                     raise ValueError(mismatch)

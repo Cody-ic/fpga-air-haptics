@@ -11,11 +11,11 @@
 //        → 预设图形 → 启动 → 停止 → 探活。
 //
 // 运行方式见 fpga/README.md：cd fpga && bash tb/run_verilator.sh
-module tb_hap2_top;
+module tb_hap2_top #(parameter integer SIM_SCALE=1);
 
-    localparam integer CLK_HZ       = 50_000_000;
-    localparam integer BAUD         = 115200;
-    localparam integer CLK_NS       = 20;
+    localparam integer CLK_HZ       = 50_000_000 / SIM_SCALE;
+    localparam integer BAUD         = 1000000; // Accelerated serial regression.
+    localparam integer CLK_NS       = 20 * SIM_SCALE;
     localparam integer CLKS_PER_BIT = CLK_HZ / BAUD;   // 434
     localparam integer PT_BITS      = 21;
 
@@ -39,6 +39,7 @@ module tb_hap2_top;
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_top #(
+        .TICK_CYC(500 / SIM_SCALE),
         .CLK_HZ  (CLK_HZ),
         .BAUD    (BAUD),
         .HW_ROWS (4),
@@ -250,7 +251,7 @@ module tb_hap2_top;
 
     // ---- 面板按键：模拟真人按一下 ----
     // 按下 3 ms、松开 3 ms（都比消抖的 2 ms 长），所以一定会被认一次、且只认一次。
-    localparam integer KEY_CYC = 150_000;      // 3 ms @ 50 MHz
+    localparam integer KEY_CYC = 150_000 / SIM_SCALE;      // 3 ms @ 50 MHz
     task press_key;                             // 带抖动地按一下：先抖几下再按住
         input [1:0] which;                      // 0 = next, 1 = play, 2 = stop
         integer b;
@@ -260,7 +261,7 @@ module tb_hap2_top;
                 if (which == 0) key_next = ~key_next;
                 if (which == 1) key_play = ~key_play;
                 if (which == 2) key_stop = ~key_stop;
-                repeat (5000) @(negedge clk);
+                repeat (5000 / SIM_SCALE) @(negedge clk);
             end
             // 按住足够久 → 认一次
             if (which == 0) key_next = 1'b1;
@@ -278,7 +279,7 @@ module tb_hap2_top;
     // 本地按键触发的配置要走「生成点表 + 编译节拍表」，等它一会儿
     task wait_local_build;
         begin
-            repeat (300000) @(negedge clk);      // 6 ms，够几毫秒的编译
+            repeat (300000 / SIM_SCALE) @(negedge clk);      // 6 ms，够几毫秒的编译
         end
     endtask
 
@@ -293,7 +294,7 @@ module tb_hap2_top;
             pm_beats = 0; pm_blank = 0;
             pm_xmin = 100000000; pm_xmax = -100000000;
             pm_ymin = 100000000; pm_ymax = -100000000;
-            for (c = 0; c < cycles; c = c + 1) begin
+            for (c = 0; c < cycles / SIM_SCALE; c = c + 1) begin
                 @(negedge clk);
                 if (beat_pulse) begin
                     pm_beats = pm_beats + 1;
@@ -391,7 +392,7 @@ module tb_hap2_top;
         begin
             seen_scan = 0; seen_blank = 0; stroke_max = 0;
             fx_min = 1000000; fx_max = -1000000; gate_bad = 0;
-            for (c = 0; c < cycles; c = c + 1) begin
+            for (c = 0; c < cycles / SIM_SCALE; c = c + 1) begin
                 @(negedge clk);
                 if (beat_pulse) begin
                     if (scan_on) seen_scan = seen_scan + 1;
@@ -441,7 +442,7 @@ module tb_hap2_top;
         begin
             dot_scan = 0; dot_blank = 0; dot_moved = 0; dot_gate_bad = 0;
             lx = 0; ly = 0;
-            for (c = 0; c < cycles; c = c + 1) begin
+            for (c = 0; c < cycles / SIM_SCALE; c = c + 1) begin
                 @(negedge clk);
                 if (beat_pulse) begin
                     if (scan_on) dot_scan = dot_scan + 1;
@@ -494,7 +495,7 @@ module tb_hap2_top;
             cc_rmin = 100000000; cc_rmax = -100000000;
             cc_fxmin = 100000000; cc_fxmax = -100000000;
             cc_fymin = 100000000; cc_fymax = -100000000;
-            for (c = 0; c < cycles; c = c + 1) begin
+            for (c = 0; c < cycles / SIM_SCALE; c = c + 1) begin
                 @(negedge clk);
                 if (beat_pulse) begin
                     cc_beats = cc_beats + 1;
@@ -553,7 +554,7 @@ module tb_hap2_top;
             drv_before = drive_edges;
             // 窗口取 6 毫秒：抬笔最长 2 毫秒，所以这段时间里一定包含扫描段，
             // 40 kHz 的方波一定在动
-            repeat (300000) @(negedge clk);
+            repeat (300000 / SIM_SCALE) @(negedge clk);
             drv_after  = drive_edges;
             checks = checks + 1;
             if (want_edges && drv_after == drv_before) begin
@@ -611,7 +612,8 @@ module tb_hap2_top;
         send_case(0);
         wait_frames(2);
         found("HAP3 ACK 1 HELLO proto=3");
-        found("caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS ");
+        found("caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,");
+        found("STATIC_PHASE,CAL_READBACK");
         found("state=IDLE");
 
         // ---- 2. 发一份带两笔草图的配置 ----
@@ -651,7 +653,7 @@ module tb_hap2_top;
             errors = errors + 1;
         end
         st = focus_x;                     // 暂停时的位置（后面核对「接着走」）
-        repeat (60000) @(negedge clk);     // 60 万拍 = 12 毫秒，早就该冻住了
+        repeat (60000 / SIM_SCALE) @(negedge clk);     // 60 万拍 = 12 毫秒，早就该冻住了
         checks = checks + 1;
         if (focus_x !== st) begin
             $display("[用例 %0d] 暂停之后焦点还在动：%0d -> %0d  **失败**", case_i, st, focus_x);
@@ -673,7 +675,7 @@ module tb_hap2_top;
         end
         wait_frames(2);
         found("state=RUNNING");
-        repeat (60000) @(negedge clk);
+        repeat (60000 / SIM_SCALE) @(negedge clk);
 
         // ---- 6. 停止：回到起点 ----
         case_i = 5;
@@ -794,7 +796,7 @@ module tb_hap2_top;
         send_case(16);
         wait_frames(1);
         found("HAP3 ACK 17 PING");
-        repeat (20000) @(negedge clk);
+        repeat (20000 / SIM_SCALE) @(negedge clk);
         checks = checks + 1;
         if (lf_count !== 1) begin
             $display("[用例 %0d] 探活应当只回一条报文，实测 %0d 条  **失败**", case_i, lf_count);
@@ -936,7 +938,7 @@ module tb_hap2_top;
         press_key(1);
         checks = checks + 1;
         st = focus_x;
-        repeat (200000) @(negedge clk);
+        repeat (200000 / SIM_SCALE) @(negedge clk);
         if (focus_x !== st || output_on !== 1'b0) begin
             $display("[用例 %0d] 本地暂停没生效：焦点 %0d→%0d、输出 %b  **失败**",
                      case_i, st, focus_x, output_on);

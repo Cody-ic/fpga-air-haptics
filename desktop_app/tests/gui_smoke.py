@@ -28,6 +28,7 @@ def main(runtime_path=None):
     runtime = Path(runtime_path) if runtime_path is not None else Path(__file__).resolve().parents[1] / ".runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()
+    root.tk.call('tk', 'scaling', 96 / 72)
     app = App(root)
     root.geometry("1380x920+25+25")
     errors = []
@@ -96,6 +97,7 @@ def main(runtime_path=None):
                 app.connect()
                 check(error.called and not session.called, 'Invalid baud is explained before any connection')
         app.baud_choice.set('115200')
+        app.navigate('experiment')
         capture('serial-baud-options.png', lambda: root.tk.call('ttk::combobox::Post', str(app.baud_picker)))
         root.tk.call('ttk::combobox::Unpost', str(app.baud_picker))
         app.baud_choice.set('31250')
@@ -111,6 +113,7 @@ def main(runtime_path=None):
         app.baud_choice.set('115200')
         app.mode_choice.set('Demo 模拟设备')
         app.update_controls()
+        app.tabs.select(app.editor_tab)
         capture("demo-startup.png")
         app.tabs.select(5)
         capture("demo-device.png")
@@ -567,11 +570,11 @@ def main(runtime_path=None):
         root.geometry("1100x780+25+25")
         app.tabs.select(app.playback_tab)
         capture("demo-playback-minimum.png")
-        check(app.playback.play_button.winfo_ismapped(), "Playback controls visible at minimum size")
+        check(app.start_button.winfo_ismapped(), "Persistent playback controls visible at minimum size")
         app.tabs.select(app.editor_tab)
         capture("demo-minimum.png")
-        check(app.editor.apply_button.winfo_ismapped(), "Send button visible at minimum size")
-        check(app.editor.apply_button.winfo_rooty()+app.editor.apply_button.winfo_height()
+        check(app.apply_button.winfo_ismapped(), "Persistent send button visible at minimum size")
+        check(app.apply_button.winfo_rooty()+app.apply_button.winfo_height()
               <= root.winfo_rooty()+root.winfo_height(), "Editor actions fit minimum window")
         app.send("_MUTE", value=True)
 

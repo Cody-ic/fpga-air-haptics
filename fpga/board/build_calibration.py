@@ -12,17 +12,17 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def load_restore(path, calibration_z_mm=70, calibration_reference=0):
+def load_restore(path, calibration_z_mm=70, calibration_reference=0, calibration_level=30):
     """Validate measured input for an explicit reuse build, not a new calibration."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "firmware/xiao_mg24"))
     from firmware.xiao_mg24.calibrate_fpga import Settings, validate_document
     raw = Path(path).read_bytes()
     doc = json.loads(raw)
-    if calibration_z_mm not in (70, 100):
-        raise ValueError("Supported measured reference heights are 70 and 100 mm")
+    if calibration_z_mm not in (50, 70, 100):
+        raise ValueError("Supported measured reference heights are 50, 70 and 100 mm")
     offsets = validate_document(doc, dict(rows=8, cols=8, pitch_um=10300),
-                                Settings(position_um=(0, 0, calibration_z_mm*1000), level=30, reference=calibration_reference))
+                                Settings(position_um=(0, 0, calibration_z_mm*1000), level=calibration_level, reference=calibration_reference))
     measurements = doc.get("measurements", [])
     expected = 384 if doc.get("imported_and_reverified") else 1140
     if len(measurements) != expected or any(m.get("good") is not True for m in measurements):
@@ -61,6 +61,7 @@ def main():
     parser.add_argument("--calibration-file", help="Required only for explicit restore mode; reuses measurements without acoustic re-verification")
     parser.add_argument("--gowin", default=r"D:\Gowin\Gowin_V1.9.12.04_x64\IDE\bin\gw_sh.exe")
     parser.add_argument("--syn-only", action="store_true")
+    parser.add_argument("--output-root", type=Path, help="Separate build root; preserve earlier calibration artifacts")
     parser.add_argument("--cal-null-scaled-qc", action="store_true", help="Explicit ADC build with bounded absolute near-null repeatability criterion")
     button = parser.add_mutually_exclusive_group()
     button.add_argument("--button-focus", action="store_true", help="Restore build with 3 s / level 1 physical center-test button")
@@ -68,12 +69,14 @@ def main():
     button.add_argument("--button-circle", action="store_true", help="Restore build with 6 s / level 100 / 0.5 Hz physical circle-test button")
     parser.add_argument("--button-radius-mm", type=int, choices=range(1,31), default=20,
                         help="Line half-length or circle radius, default 20 mm")
-    parser.add_argument("--button-z-mm", type=int, choices=(70,100), default=100,
+    parser.add_argument("--button-z-mm", type=int, choices=(50,70,100), default=100,
                         help="Physical button target height (independent of calibration height)")
-    parser.add_argument("--calibration-z-mm", type=int, choices=(70,100), default=70,
+    parser.add_argument("--calibration-z-mm", type=int, choices=(50,70,100), default=70,
                         help="Explicit reference height of the measured restore file")
     parser.add_argument("--calibration-reference", type=int, choices=range(64), default=0,
                         help="Explicit reference channel of the measured restore file")
+    parser.add_argument("--calibration-level", type=int, choices=range(1,101), default=30,
+                        help="Drive level recorded during calibration, not the later playback level")
     args = parser.parse_args()
     button_motion = args.button_line or args.button_circle
     button_enabled = args.button_focus or button_motion
@@ -89,16 +92,18 @@ def main():
         parser.error("--calibration-z-mm applies to explicit restore mode only")
     if args.calibration_reference != 0 and args.mode != "restore":
         parser.error("--calibration-reference applies to explicit restore mode only")
+    if args.calibration_level != 30 and args.mode != "restore":
+        parser.error("--calibration-level applies to explicit restore mode only")
     if (args.mode == "restore") != bool(args.calibration_file):
         parser.error("--mode restore requires --calibration-file; other modes must omit it")
-    packed, restored = load_restore(args.calibration_file, args.calibration_z_mm, args.calibration_reference) if args.calibration_file else (0, None)
+    packed, restored = load_restore(args.calibration_file, args.calibration_z_mm, args.calibration_reference, args.calibration_level) if args.calibration_file else (0, None)
     modes = ("normal", "scope", "adc") if args.mode == "all" else (args.mode,)
     for mode in modes:
-        folder = ROOT / ".runtime/fpga-calibration-8x8" / (mode + ("_button_circle" if args.button_circle else "_button_line" if args.button_line else "_button_focus" if args.button_focus else "")
-                    + ("_z100" if args.calibration_z_mm == 100 else "")
+        folder = (args.output_root.resolve() if args.output_root else ROOT / ".runtime/fpga-calibration-8x8") / (mode + ("_button_circle" if args.button_circle else "_button_line" if args.button_line else "_button_focus" if args.button_focus else "")
+                    + (f"_z{args.calibration_z_mm}" if args.calibration_z_mm != 70 else "")
                     + (f"_ref{args.calibration_reference}" if args.calibration_reference else "")
                     + ("_null_qc" if args.cal_null_scaled_qc else "")
-                    + ("_focus70" if button_enabled and args.button_z_mm==70 else "")
+                    + (f"_focus{args.button_z_mm}" if button_enabled and args.button_z_mm!=100 else "")
                     + (f"_r{args.button_radius_mm}" if button_motion and args.button_radius_mm!=20 else ""))
         staging = folder / "rtl"
         staging.mkdir(parents=True, exist_ok=True)

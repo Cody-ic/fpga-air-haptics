@@ -9,6 +9,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from .theme import BLUE, style_axis, wrap_to_width
 
 
 class ReceiverPanel(ttk.Frame):
@@ -57,6 +58,9 @@ class ReceiverPanel(ttk.Frame):
                   "×3.4 仅还原末级分压前的等效交流幅值，不换算声压；未报警也不能排除前级削顶。",
                   padding=8, wraplength=780).pack(side="bottom", fill="x")
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        for child in self.winfo_children():
+            if isinstance(child, ttk.Label):
+                wrap_to_width(child, 16)
         self.render()
 
     def reset(self):
@@ -152,7 +156,7 @@ class ReceiverPanel(ttk.Frame):
             self.axis.set_ylim(0, 1100)
         else:
             x = [i*1e6/self.capture.fs_hz for i in range(len(self.capture.raw))]
-            self.axis.plot(x, result["mv"], color="#2463c5", lw=1, label="ADC 原始波形")
+            self.axis.plot(x, result["mv"], color="#0071e3", lw=1, label="ADC 原始波形")
             self.axis.plot(x, [v+result["mean_mv"] for v in result["filtered_mv"]],
                            color="#c26119", lw=1.2, alpha=.85, label="40 kHz 分量 + 均值")
             self.axis.legend(loc="upper right", fontsize=8)
@@ -164,6 +168,7 @@ class ReceiverPanel(ttk.Frame):
                            f"40 kHz 峰值 {result['peak40_mv']:.1f} mV · 分压前等效峰值 "
                            f"{result['stage2_peak40_mv']:.1f} mV{clip}")
         self.axis.grid(alpha=.2)
+        style_axis(self.axis)
         self.canvas.draw_idle()
 
     def save_csv(self, path):

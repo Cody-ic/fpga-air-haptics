@@ -59,6 +59,9 @@ def main():
         x,y=root.winfo_rootx(),root.winfo_rooty()
         ImageGrab.grab(bbox=(x,y,x+root.winfo_width(),y+root.winfo_height())).save(runtime/'receiver-demo.png')
         root.attributes('-topmost',False)
+        # Screen capture can block the UI thread at high display scaling.
+        # Resume telemetry before testing the independent capability gate.
+        wait(lambda: time.monotonic()-app.received < .2)
         app.capabilities.discard('ADC_CAPTURE');app.update_controls()
         assert str(panel.capture_button['state'])=='disabled'
         assert '不支持' in panel.notice.get()

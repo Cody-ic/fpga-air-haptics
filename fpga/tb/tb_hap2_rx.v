@@ -14,7 +14,7 @@
 module tb_hap2_rx;
 
     localparam integer CLK_HZ       = 50_000_000;
-    localparam integer BAUD         = 115200;
+    localparam integer BAUD         = 1000000; // Accelerated serial regression.
     localparam integer CLKS_PER_BIT = (CLK_HZ + (BAUD / 2)) / BAUD;      // 434
     localparam real    CLK_NS       = 1000.0 / (CLK_HZ / 1000000.0);     // 20.0 ns
     localparam integer ADDR_W       = 13;   // 行缓冲 8192 字节
@@ -417,7 +417,7 @@ module tb_hap2_rx;
     );
 
     // 应答对照表
-    reg [7:0]  txexp [0:511];
+    reg [7:0]  txexp [0:1023]; // HELLO now includes firmware/calibration capabilities.
     reg [31:0] txplan [0:5];
 
     // ---------------- 向量表 ----------------
@@ -1327,6 +1327,7 @@ module tb_hap2_rx;
             send_byte(cpkt[offset + j]);
             sent_bytes = sent_bytes + 1;
         end
+        repeat (900) @(negedge clk); // CRC/parser must enqueue STOP before waiting for TX idle.
         timeout = 0;
         while (tx_busy && timeout < 4000000) begin
             @(negedge clk);

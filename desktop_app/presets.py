@@ -8,6 +8,7 @@ import numpy as np
 from .model import SHAPES, trajectory_path, trajectory_paths
 from .hand_view import HandView
 from .palm import palm_warning
+from .theme import wrap_to_width
 
 
 class PresetPreview(ttk.Frame):
@@ -16,7 +17,7 @@ class PresetPreview(ttk.Frame):
         self.config = None
         self.title = tk.StringVar(value="选择基本图形")
         ttk.Label(self, textvariable=self.title, style="Heading.TLabel").pack(anchor="w")
-        ttk.Label(self, text="这是待发送的图形。可在左侧调整大小、位置和显示高度。",
+        ttk.Label(self, text="待发送图形 · 在右侧调整大小、位置和聚焦高度。",
                   style="Muted.TLabel", wraplength=620).pack(anchor="w", pady=8)
         self.apply_button = ttk.Button(self, text="发送到设备", style="Primary.TButton", command=on_apply)
         self.apply_button.pack(side="bottom", anchor="w", pady=(10, 0))
@@ -27,6 +28,10 @@ class PresetPreview(ttk.Frame):
         self.canvas = tk.Canvas(self, bg="#ffffff", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Configure>", lambda _: self.draw())
+        for child in self.winfo_children():
+            if isinstance(child, ttk.Label):
+                child.pack_configure(fill='x')
+                wrap_to_width(child)
 
     def set_config(self, config):
         if config != self.config:
@@ -51,9 +56,9 @@ class PresetPreview(ttk.Frame):
         for stroke in trajectory_paths(config):
             positions = [self.view.screen(point[:2]) for point in stroke]
             if len(positions) > 1:
-                c.create_line(*[value for point in positions for value in point], fill="#2463c5", width=3, tags='preview_path')
+                c.create_line(*[value for point in positions for value in point], fill="#0071e3", width=3, tags='preview_path')
             if len(positions) == 1 or np.all(np.ptp(stroke, axis=0) == 0):
                 x, y = positions[0]
-                c.create_oval(x-7, y-7, x+7, y+7, fill="#2463c5", outline="", tags='preview_path')
-        self.dimensions.set(f"宽 {high[0]-low[0]:g} mm · 高 {high[1]-low[1]:g} mm · 显示高度 {config.z_um/1000:g} mm")
+                c.create_oval(x-7, y-7, x+7, y+7, fill="#0071e3", outline="", tags='preview_path')
+        self.dimensions.set(f"宽 {high[0]-low[0]:g} mm · 高 {high[1]-low[1]:g} mm · 聚焦高度 {config.z_um/1000:g} mm")
         self.warning.set(palm_warning([stroke[:, :2] for stroke in trajectory_paths(config)]))
