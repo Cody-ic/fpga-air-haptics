@@ -14,11 +14,12 @@ from .theme import DisplayVar, configure_if_changed
 
 
 class PressureWindow(tk.Toplevel):
-    def __init__(self, app, sequence, index):
+    def __init__(self, app, sequence, index, consumer=False):
         super().__init__(app.root)
         self.app = app
+        self.consumer = consumer
         self.title("当前帧压力 · 离线生成与发送")
-        self.geometry("1060x680")
+        self.geometry('1300x860' if consumer else '1060x680')
         self.transient(app.root)
         self.result = None
         self.submitted = False
@@ -45,6 +46,8 @@ class PressureWindow(tk.Toplevel):
         self.entries = []
         for label, variable in (("高度 / mm", self.z), ("接触范围 / mm", self.span),
                                 ("驱动等级 / %", self.level), ("调制 / Hz", self.mod)):
+            if consumer and variable in (self.level, self.mod):
+                continue
             ttk.Label(settings, text=label).pack(side="left", padx=(0,5))
             entry = ttk.Entry(settings, textvariable=variable, width=7)
             entry.pack(side="left", padx=(0,14))
@@ -83,7 +86,8 @@ class PressureWindow(tk.Toplevel):
         try:
             self.array = self.app.hardware if self.app.ready else ArraySpec(8,8,10300)
             options = dict(z_mm=float(self.z.get()), span_mm=float(self.span.get()),
-                           level=int(self.level.get()), mod_hz=int(self.mod.get()))
+                           level=DEFAULT_OUTPUT_LEVEL if self.consumer else int(self.level.get()),
+                           mod_hz=BUTTON_OUTPUT_SETTINGS['mod_hz'] if self.consumer else int(self.mod.get()))
             self.future = self.app.executor.submit(compile_pressure, self.raw, self.array, **options)
             self.status.set(f"正在生成第 {self.frame_id} 帧 · {self.array.rows}×{self.array.cols} · 间距 {self.array.pitch_um/1000:g} mm…")
             for entry in self.entries:

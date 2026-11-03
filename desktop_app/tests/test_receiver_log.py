@@ -1,5 +1,5 @@
 import csv
-from dataclasses import replace
+from dataclasses import asdict, replace
 import io
 import json
 from pathlib import Path
@@ -11,11 +11,26 @@ from unittest.mock import patch
 from desktop_app.controller import Pending, Session
 from desktop_app.demo import DemoDevice
 from desktop_app.protocol import Snapshot, decode, encode
-from desktop_app.receiver import Capture
+from desktop_app.receiver import Capture, AdcProbe
 from desktop_app.receiver_log import CaptureRecorder, capture_from_record, main, summarize
 
 
 class ReceiverLogTests(unittest.TestCase):
+    def test_direct_probe_survives_recording_and_offline_analysis(self):
+        capture = replace(self.capture(False), probe=AdcProbe(True, 8, 598, 610, 604, 1490))
+        record = dict(schema="haptics-adc-record-1", index=1, received_utc="2026-10-10T16:00:00+00:00",
+                      capture=asdict(capture))
+        self.assertEqual(capture_from_record(record), capture)
+        row = summarize(record)
+        self.assertEqual((row['probe_ok'], row['direct_mean_code'], row['vrefint_code']), (1, 604, 1490))
+        record['capture']['probe']['valid'] = False
+        row = summarize(record)
+        self.assertEqual(row['probe_ok'], 0)
+        self.assertEqual(row['direct_mean_code'], '')
+        record['capture']['probe']['valid'] = '1'
+        with self.assertRaises(ValueError):
+            capture_from_record(record)
+
     def capture(self, simulated=True):
         return Capture("test-boot", 2, 1000, simulated, True, "PA0", 400000, 12,
                        tuple(600 + i % 10 for i in range(200)))

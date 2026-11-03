@@ -413,14 +413,18 @@ def focus_phases(config, focus_mm, array):
     return (np.floor(cycles * config.phase_steps + 0.5).astype(int) % config.phase_steps)
 
 
-def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71, plane="XY", channel_mask=None):
+def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71, plane="XY", channel_mask=None,
+                phase_direction=1):
     """Return normalized |p|, NOT Pa, SPL, tactile intensity or modulation envelope.
 
     The normalization uses ideal coherent pressure at the specified target for
     unit drive. Thus disabled/zero-level output remains zero, not re-normalized.
-    'level' is a hypothetical linear source scale, not a voltage calibration.
+    Carrier-on amplitude is not scaled by the output-level setting; that setting
+    is not a calibrated drive-voltage or pressure conversion.
     """
     phases = np.asarray(phases, dtype=float)
+    if type(phase_direction) is not int or phase_direction not in (-1, 1):
+        raise ValueError('相位码时序无效')
     if phases.shape != (array.count,) or not np.isfinite(phases).all():
         raise ValueError("相位表长度或数值无效")
     if np.any(phases < 0) or np.any(phases >= config.phase_steps):
@@ -445,7 +449,7 @@ def field_slice(config, phases, focus_mm, *, array, enabled=True, resolution=71,
             if channel_mask is not None and not (channel_mask >> i) & 1:
                 continue
             distance = np.maximum(.0001, np.sqrt((xx - x) ** 2 + (yy - y) ** 2 + (zz-z) ** 2) / 1000)
-            pressure += np.exp(1j * (k * distance + phase * 2 * math.pi / config.phase_steps)) / distance
+            pressure += np.exp(1j * (k * distance + phase_direction * phase * 2 * math.pi / config.phase_steps)) / distance
     reference = np.sum(1000 / np.maximum(.1, np.linalg.norm(coords - focus, axis=1)))
-    values = np.abs(pressure) / reference * config.level / 100
+    values = np.abs(pressure) / reference
     return horizontal, vertical, values

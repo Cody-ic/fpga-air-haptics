@@ -8,6 +8,15 @@ import traceback
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 def launch():
+    if len(sys.argv) == 3 and sys.argv[1] == '--user-self-test':
+        runtime = Path(sys.argv[2]).resolve()
+        try:
+            from desktop_app.tests.user_gui_smoke import main
+            return main(runtime)
+        except Exception:
+            runtime.mkdir(parents=True, exist_ok=True)
+            (runtime/'self-test-error.log').write_text(traceback.format_exc(),encoding='utf-8')
+            return 1
     if len(sys.argv) == 3 and sys.argv[1] == '--pressure-self-test':
         runtime = Path(sys.argv[2]).resolve()
         try:
