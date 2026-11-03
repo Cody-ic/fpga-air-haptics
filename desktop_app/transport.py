@@ -14,6 +14,7 @@ def available_ports():
 
 class SerialTransport:
     simulated = False
+    startup_delay_s = 0.2
 
     def __init__(self, port, baudrate):
         # Avoid flow-control toggling where supported; some drivers can glitch
@@ -27,11 +28,6 @@ class SerialTransport:
         self.port.port = port
         try:
             self.port.open()
-            # The Tang MEGA FTDI bridge can drop an immediate first write.
-            # On the real board HELLO timed out at 0 ms but worked after
-            # 300 ms. Settle before the handshake, then discard queued old
-            # telemetry; never retry START/CONFIG to work around this.
-            time.sleep(0.3)
             self.port.reset_input_buffer()
         except Exception:
             self.port.close()

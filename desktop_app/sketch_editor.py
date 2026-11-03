@@ -11,7 +11,6 @@ from .editor import clip_segment
 from .model import encode_strokes
 from .palm import HAND_OUTLINE, PALM_OUTLINE, palm_warning
 from .sketch import Bezier, Sketch, cross, rotation_matrix
-from .theme import WHITE, MUTED, BLUE, LINE, wrap_to_width
 
 
 RELATIONS = {'horizontal': '水平', 'vertical': '竖直', 'parallel': '平行',
@@ -20,8 +19,10 @@ RELATIONS = {'horizontal': '水平', 'vertical': '竖直', 'parallel': '平行',
 
 
 class SketchEditor(ttk.Frame):
-    def __init__(self, parent, on_preview, on_apply, on_save, on_load, on_change=None, inspector_parent=None):
+    def __init__(self, parent, on_preview, on_apply, on_save, on_load, on_change=None, consumer=False, inspector_parent=None):
         super().__init__(parent)
+        self.consumer = consumer
+        self.scroll_views = []
         self.on_change = on_change or (lambda: None)
         self.sketch = Sketch()
         self.raw_fields = None
@@ -60,51 +61,61 @@ class SketchEditor(ttk.Frame):
         self.tool_buttons = {}
         tools = ttk.Frame(self, padding=(8, 6))
         tools.pack(fill='x')
-        for key, label in [('select', '选择'), ('polyline', '直线'), ('bezier', '曲线'),
+        for key, label in [('select', '选择'), ('polyline', '连续直线'), ('bezier', '曲线' if consumer else '控制点曲线'),
                            ('rectangle', '矩形'), ('circle', '圆'), ('move', '移动'), ('erase', '擦除')]:
-            button = ttk.Radiobutton(tools, text=label, value=key, variable=self.tool, command=self.choose_tool,
-                                     style='Tool.TRadiobutton')
-            button.pack(side='left', padx=2, expand=True, fill='x')
+            if consumer:
+                button = ttk.Button(tools, text=label, style='Tool.TButton',
+                                    command=lambda k=key: self.select_tool(k))
+                button.pack(side='left', fill='x', expand=True, padx=3, pady=4)
+            else:
+                button = ttk.Radiobutton(tools, text=label, value=key, variable=self.tool, command=self.choose_tool)
+                button.pack(side='left', padx=2)
             self.tool_buttons[key] = button
+        if consumer:
+            self.tool.trace_add('write', lambda *_: self.sync_tool_buttons())
         bar = ttk.Frame(self, padding=(8, 2))
         bar.pack(fill='x')
         for label, command in [('撤销', self.undo), ('重做', self.redo), ('清空', self.clear),
                                ('完成绘制', self.finish), ('适合窗口', self.fit), ('放入掌面', self.fit_to_palm)]:
-            ttk.Button(bar, text=label, command=command, width=6, padding=(4, 5)).pack(side='left', padx=2, expand=True, fill='x')
-        if inspector_parent is None:
-            ttk.Button(bar, text='导入图形', width=8, command=on_load).pack(side='right', padx=2)
-            ttk.Button(bar, text='保存图形', width=8, command=on_save).pack(side='right', padx=2)
-        hint_label = ttk.Label(self, textvariable=self.hint, foreground=MUTED, padding=(10, 5))
-        hint_label.pack(fill='x')
-        wrap_to_width(hint_label, 20)
+            ttk.Button(bar, text=label, command=command, width=6).pack(side='left', padx=2)
+        ttk.Button(bar, text='导入图形', width=8, command=on_load).pack(side='right', padx=2)
+        ttk.Button(bar, text='保存图形', width=8, command=on_save).pack(side='right', padx=2)
+        if consumer:
+            ttk.Button(bar, text='呈现顺序…', command=self.show_order).pack(side='right', padx=2)
+        ttk.Label(self, textvariable=self.hint, foreground='#526680', padding=(10, 5)).pack(fill='x')
         self.palm_label = ttk.Label(self, textvariable=self.palm_notice, foreground='#8a8179', padding=(10, 0), wraplength=740)
         self.palm_label.pack(fill='x')
-        wrap_to_width(self.palm_label, 20)
         actions = ttk.Frame(self, padding=8)
         if inspector_parent is None:
             actions.pack(side='bottom', fill='x')
-        self.apply_button = ttk.Button(actions, text='发送到设备', command=on_apply)
-        if inspector_parent is None:
-            self.apply_button.pack(side='left', padx=2)
-        ttk.Button(actions, text='手掌预览', command=on_preview).pack(side='right', padx=8)
-        self.message_label = ttk.Label(self, textvariable=self.message, foreground='#6e6e73', padding=(10, 6), wraplength=680)
+        self.apply_button = ttk.Button(actions, text='呈现图形' if consumer else '发送到设备',
+                                       style='Primary.TButton' if consumer else 'TButton', command=on_apply)
+        self.apply_button.pack(side='left', padx=2)
+        if not consumer:
+            ttk.Button(actions, text='手掌预览', command=on_preview).pack(side='left', padx=8)
+        self.message_label = ttk.Label(self, textvariable=self.message, foreground='#526680', padding=(10, 6), wraplength=680)
         self.message_label.pack(side='bottom', fill='x')
-        wrap_to_width(self.message_label, 20)
         body = ttk.Frame(self)
         body.pack(fill='both', expand=True)
+        scale = max(1., float(self.tk.call('tk', 'scaling'))/(4/3))
         side = ttk.Frame(inspector_parent if inspector_parent is not None else body,
-                         width=224, padding=(6, 8, 8, 0))
-        if inspector_parent is not None:
-            side.pack(fill='both', expand=True)
-        else:
+                         width=round(236*scale), padding=(6, 0, 8, 0))
+        if inspector_parent is None:
             side.pack(side='right', fill='y')
             side.pack_propagate(False)
+        else:
+            side.pack(fill='both', expand=True)
+        if consumer:
+            left = ttk.Frame(body, width=round(212*scale), padding=(8, 0, 6, 0))
+            left.pack(side='left', fill='y')
+            left.pack_propagate(False)
         canvas_holder = ttk.Frame(body)
         canvas_holder.pack(fill='both', expand=True, padx=(8, 0))
-        self.canvas = tk.Canvas(canvas_holder, bg=WHITE, highlightthickness=0, takefocus=True)
+        self.canvas = tk.Canvas(canvas_holder, bg='#f8fbff', highlightthickness=0, takefocus=True)
         # Frame the palm prominently; the shared full hand continues naturally
         # into partially visible fingers. All of the white surface accepts drawing.
-        self.canvas.pack(fill='both', expand=True)
+        canvas_holder.bind('<Configure>', lambda e: self.canvas.place(
+            relx=.5, rely=.5, anchor='center', width=min(e.width, max(160, e.height*1.05)), height=e.height))
         self.canvas.bind('<Configure>', lambda _: self.draw())
         self.canvas.bind('<Button-1>', self.press)
         self.canvas.bind('<Double-Button-1>', self.select_contour)
@@ -117,35 +128,40 @@ class SketchEditor(ttk.Frame):
         self.canvas.bind('<Control-z>', lambda _: self.undo())
         self.canvas.bind('<Control-y>', lambda _: self.redo())
         self.canvas.bind('<MouseWheel>', lambda e: self.zoom(.8 if e.delta > 0 else 1.25))
-        tabs = self.property_tabs = ttk.Notebook(side)
-        tabs.pack(fill='both', expand=True)
-        def scroll_page(label):
-            tab = ttk.Frame(tabs)
-            tabs.add(tab, text=label)
-            scroll = ttk.Scrollbar(tab, orient='vertical')
-            scroll.pack(side='right', fill='y')
-            view = tk.Canvas(tab, width=170, highlightthickness=0, bg=WHITE, yscrollcommand=scroll.set)
-            view.pack(fill='both', expand=True)
-            scroll.configure(command=view.yview)
-            frame = ttk.Frame(view, padding=6)
-            window = view.create_window(0, 0, window=frame, anchor='nw')
-            frame.bind('<Configure>', lambda _: view.configure(scrollregion=view.bbox('all')))
-            view.bind('<Configure>', lambda e: view.itemconfigure(window, width=e.width))
-            view.bind('<MouseWheel>', lambda e: view.yview_scroll(-1 if e.delta > 0 else 1, 'units'))
-            return frame
-        properties, relationships, ordering = scroll_page('尺寸'), scroll_page('关系'), scroll_page('顺序')
+        if consumer:
+            ttk.Label(left, text='尺寸', style='Section.TLabel', padding=(6, 10)).pack(fill='x')
+            properties = self.dimension_panel = self.scroll_content(left)
+            ttk.Label(side, text='几何关系', style='Section.TLabel', padding=(6, 10)).pack(fill='x')
+            relationships = self.relationship_panel = self.scroll_content(side)
+            self.order_dialog = tk.Toplevel(self)
+            self.order_dialog.withdraw()
+            self.order_dialog.title('轮廓呈现顺序')
+            self.order_dialog.transient(self.winfo_toplevel())
+            self.order_dialog.protocol('WM_DELETE_WINDOW', self.order_dialog.withdraw)
+            self.order_dialog.bind('<Escape>', lambda _: self.order_dialog.withdraw())
+            ordering = self.scroll_content(self.order_dialog)
+        else:
+            tabs = self.property_tabs = ttk.Notebook(side)
+            tabs.pack(fill='both', expand=True)
+            def scroll_page(label):
+                tab = ttk.Frame(tabs)
+                tabs.add(tab, text=label)
+                return self.scroll_content(tab)
+            properties, relationships, ordering = scroll_page('尺寸'), scroll_page('几何关系'), scroll_page('顺序')
         ttk.Label(properties, textvariable=self.selection_text, wraplength=168).pack(fill='x', pady=5)
         ttk.Label(relationships, textvariable=self.selection_text, wraplength=168).pack(fill='x', pady=5)
         relation_buttons = ttk.Frame(relationships)
         relation_buttons.pack(fill='x')
+        for column in (0, 1):
+            relation_buttons.columnconfigure(column, weight=1, uniform='relation')
         self.relation_buttons = {}
         for i, kind in enumerate(('coincident', 'horizontal', 'vertical', 'parallel', 'perpendicular', 'tangent')):
-            button = ttk.Button(relation_buttons, text=RELATIONS[kind], width=7, state='disabled',
+            button = ttk.Button(relation_buttons, text=RELATIONS[kind], width=0, state='disabled',
                                 command=lambda k=kind: self.add_relation(k))
-            button.grid(row=i//2, column=i % 2, padx=2, pady=2)
+            button.grid(row=i//2, column=i % 2, padx=2, pady=3, sticky='ew')
             button.bind('<Enter>', lambda _, k=kind: self.relation_hint.set(self.relation_states.get(k, (False, '请先选择点或线条。'))[1]))
             self.relation_buttons[kind] = button
-        ttk.Label(relationships, textvariable=self.relation_hint, foreground='#6e6e73', wraplength=170).pack(fill='x', pady=5)
+        ttk.Label(relationships, textvariable=self.relation_hint, foreground='#526680', wraplength=170).pack(fill='x', pady=5)
         ttk.Label(properties, text='设置实际尺寸 / mm').pack(anchor='w', pady=(10, 3))
         row = ttk.Frame(properties)
         row.pack(fill='x')
@@ -155,32 +171,40 @@ class SketchEditor(ttk.Frame):
         ttk.Entry(row, textvariable=self.size_value, width=9).pack(side='right')
         self.dimension_button = ttk.Button(properties, text='应用尺寸', command=self.dimension)
         self.dimension_button.pack(fill='x', pady=4)
-        ttk.Label(properties, textvariable=self.dimension_hint, foreground='#6e6e73', wraplength=170).pack(fill='x')
+        ttk.Label(properties, textvariable=self.dimension_hint, foreground='#526680', wraplength=170).pack(fill='x')
+        if consumer:
+            ttk.Label(properties, text='已设尺寸', style='Heading.TLabel').pack(anchor='w', pady=(12, 4))
+            self.dimension_list = tk.Listbox(properties, height=3, width=1, exportselection=False)
+            self.dimension_list.pack(fill='x')
+            self.remove_dimension_button = ttk.Button(properties, text='移除选中尺寸', command=self.remove_dimension, state='disabled')
+            self.remove_dimension_button.pack(fill='x', pady=4)
+            self.dimension_list.bind('<<ListboxSelect>>', lambda _: self.remove_dimension_button.configure(
+                state='normal' if self.dimension_list.curselection() else 'disabled'))
         ttk.Label(properties, text='旋转所选图形 / °').pack(anchor='w', pady=(10, 3))
         row = ttk.Frame(properties)
         row.pack(fill='x')
         ttk.Entry(row, textvariable=self.rotation_value, width=8).pack(side='left')
         self.rotate_button = ttk.Button(row, text='旋转', width=7, command=self.rotate_selected)
         self.rotate_button.pack(side='right')
-        ttk.Label(properties, textvariable=self.rotation_hint, foreground='#6e6e73', wraplength=170).pack(fill='x', pady=4)
+        ttk.Label(properties, textvariable=self.rotation_hint, foreground='#526680', wraplength=170).pack(fill='x', pady=4)
         ttk.Label(properties, text='整体缩放（改变实际大小）', wraplength=170).pack(anchor='w', pady=(8, 3))
         row = ttk.Frame(properties)
         row.pack(fill='x')
         ttk.Entry(row, textvariable=self.scale_value, width=8).pack(side='left')
         ttk.Button(row, text='缩放', width=7, command=self.scale_all).pack(side='right')
-        ttk.Label(properties, text='例如 2 倍：20 mm → 40 mm；已设尺寸一起更新。', foreground='#6e6e73', wraplength=170).pack(fill='x', pady=4)
-        ttk.Label(relationships, text='所选对象的关系与尺寸').pack(anchor='w', pady=(10, 3))
-        self.relation_list = tk.Listbox(relationships, height=5, exportselection=False)
+        ttk.Label(properties, text='例如 2 倍：20 mm → 40 mm；已设尺寸一起更新。', foreground='#526680', wraplength=170).pack(fill='x', pady=4)
+        ttk.Label(relationships, text='已添加的几何关系' if consumer else '所选对象的关系与尺寸').pack(anchor='w', pady=(10, 3))
+        self.relation_list = tk.Listbox(relationships, height=5, width=1, exportselection=False)
         self.relation_list.pack(fill='both', expand=True)
         self.remove_relation_button = ttk.Button(relationships, text='移除选中的关系', command=self.remove_relation, state='disabled')
         self.remove_relation_button.pack(fill='x', pady=4)
         self.relation_list.bind('<<ListboxSelect>>', lambda _: self.remove_relation_button.configure(
             state='normal' if self.relation_list.curselection() else 'disabled'))
-        ttk.Label(relationships, text='取消关系：先选中下方列表中的一项，再点“移除”。', foreground='#6e6e73', wraplength=170).pack(fill='x', pady=4)
+        ttk.Label(relationships, text='取消关系：先选中下方列表中的一项，再点“移除”。', foreground='#526680', wraplength=170).pack(fill='x', pady=4)
         ttk.Button(relationships, text='删除所选线条', command=self.delete_selected).pack(fill='x')
         ttk.Checkbutton(ordering, text='自动安排（跳过排序）', variable=self.order_auto, command=self.auto_order).pack(anchor='w')
         ttk.Label(ordering, text='选中轮廓后上下移动。\n公共线仅在首次经过时呈现。', wraplength=168).pack(fill='x', pady=8)
-        self.order_list = tk.Listbox(ordering, height=9, exportselection=False)
+        self.order_list = tk.Listbox(ordering, height=9, width=1, exportselection=False)
         self.order_list.pack(fill='both', expand=True)
         self.order_list.bind('<<ListboxSelect>>', self.select_group)
         row = ttk.Frame(ordering)
@@ -188,12 +212,48 @@ class SketchEditor(ttk.Frame):
         ttk.Button(row, text='上移', width=7, command=lambda: self.reorder(-1)).pack(side='left')
         ttk.Button(row, text='下移', width=7, command=lambda: self.reorder(1)).pack(side='right')
         ttk.Label(ordering, text='尽量避免闭合轮廓共边；删除部分线条后，剩余线条仍可呈现。', wraplength=168).pack(fill='x', pady=5)
-        for page in (properties, relationships, ordering):
-            for child in page.winfo_children():
-                if isinstance(child, ttk.Label):
-                    child.pack_configure(fill='x')
-                    wrap_to_width(child)
+        self.bind_all('<MouseWheel>', self.scroll_properties, add='+')
         self.choose_tool()
+
+    def scroll_content(self, parent):
+        scroll = ttk.Scrollbar(parent, orient='vertical')
+        scroll.pack(side='right', fill='y')
+        view = tk.Canvas(parent, width=1, highlightthickness=0, bg='white', yscrollcommand=scroll.set)
+        view.pack(fill='both', expand=True)
+        scroll.configure(command=view.yview)
+        frame = ttk.Frame(view, padding=6)
+        window = view.create_window(0, 0, window=frame, anchor='nw')
+        frame.bind('<Configure>', lambda _: view.configure(scrollregion=view.bbox('all')))
+        def resize(event):
+            view.itemconfigure(window, width=event.width)
+            for widget in frame.winfo_children():
+                if isinstance(widget, ttk.Label):
+                    widget.configure(wraplength=max(100, event.width-16))
+        view.bind('<Configure>', resize)
+        self.scroll_views.append((parent, view))
+        return frame
+
+    def scroll_properties(self, event):
+        widget = event.widget
+        while widget is not None:
+            for parent, view in self.scroll_views:
+                if widget == parent:
+                    view.yview_scroll(-1 if event.delta > 0 else 1, 'units')
+                    return 'break'
+            widget = getattr(widget, 'master', None)
+
+    def select_tool(self, key):
+        self.tool.set(key)
+        self.choose_tool()
+
+    def sync_tool_buttons(self):
+        for key, button in self.tool_buttons.items():
+            button.configure(style='ActiveTool.TButton' if key == self.tool.get() else 'Tool.TButton')
+
+    def show_order(self):
+        self.order_dialog.geometry('480x520')
+        self.order_dialog.deiconify()
+        self.order_dialog.lift()
 
     def snapshot(self):
         return self.sketch.document(), self.raw_fields
@@ -322,6 +382,9 @@ class SketchEditor(ttk.Frame):
             'move': '拖动线条移动位置，相连端点会一起调整。',
             'erase': '点击擦除一条线或一段圆弧；可撤销。'}
         self.hint.set(descriptions[self.tool.get()])
+        if self.consumer:
+            self.hint.set(self.hint.get().replace('绿色手柄', '旋转手柄'))
+            self.sync_tool_buttons()
         self.canvas.configure(cursor='arrow' if self.tool.get() == 'select' else 'crosshair')
         self.draw()
 
@@ -634,6 +697,13 @@ class SketchEditor(ttk.Frame):
                 extra = '依赖该重合点的相切关系也已移除。' if len(self.sketch.constraints) < count-1 else ''
                 self.message.set(f'已移除{name}关系，图形保留当前位置；可继续编辑或撤销。'+extra)
 
+    def remove_dimension(self):
+        choice = self.dimension_list.curselection()
+        if choice:
+            index = self.visible_dimensions[choice[0]]
+            if self.transaction(lambda s: s.remove_constraint(index)):
+                self.message.set('已移除所选尺寸，图形保留当前位置；可继续编辑或撤销。')
+
     def auto_order(self):
         automatic = self.order_auto.get()
         self.transaction(lambda s: setattr(s, 'order', [] if automatic else list(range(len(s.groups)))))
@@ -710,6 +780,10 @@ class SketchEditor(ttk.Frame):
         self.relation_list.delete(0, 'end')
         self.remove_relation_button.configure(state='disabled')
         self.visible_relations = []
+        self.visible_dimensions = []
+        if self.consumer:
+            self.dimension_list.delete(0, 'end')
+            self.remove_dimension_button.configure(state='disabled')
         related_edges = set(self.selected) | {e['id'] for e in self.sketch.edges
                                             if self.sketch.edge_nodes([e['id']]).intersection(self.selected_nodes)}
         related_nodes = set(self.selected_nodes) | self.sketch.edge_nodes(self.selected)
@@ -718,8 +792,12 @@ class SketchEditor(ttk.Frame):
                 label = RELATIONS[c['kind']]+(' '+f"{c['value']:g} mm" if 'value' in c else '')
                 refs = c.get('nodes', []) if c['kind'] == 'coincident' else c['edges']
                 label += ' · '+('点 ' if c['kind'] == 'coincident' else '线 ')+', '.join(str(i+1 if c['kind'] == 'coincident' else i) for i in refs)
-                self.relation_list.insert('end', label)
-                self.visible_relations.append(i)
+                if self.consumer and c['kind'] in ('length', 'radius', 'diameter', 'width', 'height'):
+                    self.dimension_list.insert('end', label)
+                    self.visible_dimensions.append(i)
+                else:
+                    self.relation_list.insert('end', label)
+                    self.visible_relations.append(i)
         self.refresh_relation_states()
 
     def refresh_relation_states(self):
@@ -739,8 +817,10 @@ class SketchEditor(ttk.Frame):
         self.relation_hint.set('可用关系已亮起；指向灰色按钮可查看原因。')
         self.rotate_button.configure(state='normal' if self.selected and not self.selected_nodes else 'disabled')
         self.rotation_hint.set('拖绿色手柄旋转；Shift 按 15° 调整。输入正数逆时针，负数顺时针。' if self.can_rotate else
-                               '方向或连接关系限制了自由旋转；可在“关系”页移除，或一起选中相关图形。' if self.selected else
+                               '方向或连接关系限制了自由旋转；可移除相应几何关系，或一起选中相关图形。' if self.selected else
                                '双击选中轮廓后，可拖绿色手柄或输入角度旋转。')
+        if self.consumer:
+            self.rotation_hint.set(self.rotation_hint.get().replace('绿色手柄', '旋转手柄'))
 
     def show_dimension(self):
         if not self.selected or self.selected_nodes:
@@ -818,15 +898,15 @@ class SketchEditor(ttk.Frame):
         self.scale = min(self.right-self.left, self.bottom-self.top)/self.view_span
         self.center_x = (self.left+self.right)/2-self.view_center[0]*self.scale
         self.center_y = (self.top+self.bottom)/2+self.view_center[1]*self.scale
-        c.create_rectangle(self.left, self.top, self.right, self.bottom, fill='white', outline='#ececf0')
-        c.create_line(self.left, self.center_y, self.right, self.center_y, fill='#ececf0')
-        c.create_line(self.center_x, self.top, self.center_x, self.bottom, fill='#ececf0')
+        c.create_rectangle(self.left, self.top, self.right, self.bottom, fill='white', outline='#dce5ef')
+        c.create_line(self.left, self.center_y, self.right, self.center_y, fill='#dce5ef')
+        c.create_line(self.center_x, self.top, self.center_x, self.bottom, fill='#dce5ef')
         palm_positions = [self.to_screen(p-np.array([self.cx, self.cy])) for p in HAND_OUTLINE]
         for a, b in zip(palm_positions, palm_positions[1:]):
             clipped = clip_segment((self.left, self.top, self.right, self.bottom), a, b)
             if clipped:
-                c.create_line(*clipped, fill='#d6d3cf', width=1.5, tags='palm_reference')
-        c.create_text(self.right, height-8, text=f'毫米 · 视野 {self.view_span:.0f} mm', anchor='e', fill='#86868b', font=('Microsoft YaHei UI', 8))
+                c.create_line(*clipped, fill='#e4dbd1', width=1.5, tags='palm_reference')
+        c.create_text(self.right, height-8, text=f'毫米 · 视野 {self.view_span:.0f} mm', anchor='e', fill='#647994', font=('Microsoft YaHei UI', 8))
         drawn_paths = []
         for edge in self.sketch.edges:
             curve = self.sketch.curve(edge)
@@ -835,11 +915,11 @@ class SketchEditor(ttk.Frame):
             positions = [self.to_screen(p) for p in points]
             if np.linalg.norm(curve.end-curve.start) < .001 and curve.center is None and not isinstance(curve, Bezier):
                 x, y = positions[0]
-                c.create_oval(x-4, y-4, x+4, y+4, fill='#0071e3', outline='white', tags='sketch_line')
+                c.create_oval(x-4, y-4, x+4, y+4, fill='#2463c5', outline='white', tags='sketch_line')
             for a, b in zip(positions, positions[1:]):
                 clipped = clip_segment((self.left, self.top, self.right, self.bottom), a, b)
                 if clipped:
-                    c.create_line(*clipped, fill='#e68a2e' if edge['id'] in self.selected else '#0071e3',
+                    c.create_line(*clipped, fill='#e68a2e' if edge['id'] in self.selected else '#2463c5',
                                   width=3 if edge['id'] in self.selected else 2, tags='sketch_line')
             if edge['id'] in self.selected or self.sketch.edge_nodes([edge['id']]).intersection(self.selected_nodes):
                 nodes = [edge['a'], *(edge['controls'] or [])] + ([edge['b']] if edge['b'] is not None else [])
@@ -891,9 +971,10 @@ class SketchEditor(ttk.Frame):
             x, y = self.to_screen([(low[0]+high[0])/2, high[1]])
             y = max(self.top+13, y-34)
             x = min(self.right-13, max(self.left+13, x))
-            c.create_line(*self.to_screen(pivot), x, y, fill='#98c1b5', dash=(3, 4), tags='rotation_handle')
-            c.create_oval(x-9, y-9, x+9, y+9, fill='#edf8f2', outline='#308c6c', width=2, tags='rotation_handle')
-            c.create_text(x, y, text='↻', fill='#308c6c', tags='rotation_handle')
+            color = '#425fe0' if self.consumer else '#308c6c'
+            c.create_line(*self.to_screen(pivot), x, y, fill='#b9c6f6' if self.consumer else '#98c1b5', dash=(3, 4), tags='rotation_handle')
+            c.create_oval(x-9, y-9, x+9, y+9, fill='#edf1ff' if self.consumer else '#edf8f2', outline=color, width=2, tags='rotation_handle')
+            c.create_text(x, y, text='↻', fill=color, tags='rotation_handle')
             self.rotation_handle = (x, y, pivot.tolist())
         if self.curve_points:
             pts = self.curve_points+([self.hover_point] if self.hover_point is not None else [])
@@ -901,7 +982,7 @@ class SketchEditor(ttk.Frame):
                 c.create_line(*[v for p in pts for v in self.to_screen(p)], fill='#087e8b', dash=(3, 4))
             if len(pts) == 4:
                 preview = Bezier(pts)
-                c.create_line(*[v for p in preview.samples() for v in self.to_screen(p)], fill='#0071e3', width=2)
+                c.create_line(*[v for p in preview.samples() for v in self.to_screen(p)], fill='#2463c5', width=2)
             for p in self.curve_points:
                 x, y = self.to_screen(p)
                 c.create_rectangle(x-3, y-3, x+3, y+3, fill='#087e8b')
@@ -918,7 +999,7 @@ class SketchEditor(ttk.Frame):
                 else:
                     c.create_line(x, y, u, v, fill='#087e8b', dash=(4, 3))
         if not self.sketch.edges:
-            c.create_text(width/2, height/2-20, text='选择上方工具，开始绘制草图', fill='#86868b', font=('Microsoft YaHei UI', 12))
+            c.create_text(width/2, height/2-20, text='选择上方工具，开始绘制草图', fill='#647994', font=('Microsoft YaHei UI', 12))
         # The same mm reference is used by the editor and palm preview. It only
         # warns, never crops paths, rescales silently, or blocks transmission.
         notice = palm_warning(drawn_paths)

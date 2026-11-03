@@ -914,6 +914,8 @@ class App:
         self.state, self.received, self.ready, self.busy = None, 0.0, False, False
         self.hardware, self.workspace, self.capabilities = None, None, set()
         self.receiver_panel.reset()
+        if hasattr(self, 'acoustic_panel'):
+            self.acoustic_panel.on_connect()
         self.await_revision, self.await_sample, self.pending_verb = None, None, None
         self.await_verb = self.pending_config = self.confirmed_config = None
         self.mute.set(False)
@@ -945,6 +947,13 @@ class App:
             self.update_controls()
 
     def send(self, verb, **fields):
+        panel = getattr(self, 'acoustic_panel', None)
+        if panel and panel.busy:
+            if verb == 'STOP':
+                panel.cancel_scan('停止呈现，当前未完成测点没有保存')
+            else:
+                self.status_line.set('请等待测点采集完成，或取消采集后再操作。')
+                return
         if self.calibration_panel.busy:
             if verb == 'STOP':
                 self.calibration_panel.cancel()
@@ -1144,6 +1153,8 @@ class App:
                         self.status_line.set("设备已接收，正在确认状态…")
                 elif kind == "capture":
                     self.receiver_panel.accept(event["capture"], event["when"])
+                    if hasattr(self, 'acoustic_panel'):
+                        self.acoustic_panel.accept(event['capture'], event['when'])
                 elif kind == "recording":
                     self.receiver_panel.recorded(event["directory"], event["count"])
                 elif kind == "recording_error":
@@ -1170,6 +1181,8 @@ class App:
                 elif kind in ("error", "rejected"):
                     if event.get("verb") == "CAPTURE":
                         self.receiver_panel.reject(event.get("text", "采样失败"))
+                        if hasattr(self, 'acoustic_panel'):
+                            self.acoustic_panel.reject(event.get('text', '采样失败'))
                     if kind == "error" or event.get("verb") == self.pending_verb:
                         self.busy = False
                         self.pending_verb = None
@@ -1490,6 +1503,8 @@ class App:
         if not self.confirm_replace_draft("关闭"):
             return
         self.closing=True
+        if hasattr(self, 'acoustic_panel'):
+            self.acoustic_panel.cancel_scan()
         self.calibration_panel.cancel()
         self.root.after_cancel(self.tick_id)
         if self.ble_scan is not None:
@@ -1513,11 +1528,17 @@ def main():
     import argparse
     parser=argparse.ArgumentParser(description="触见上位机")
     parser.add_argument("--demo",action="store_true",help="启动后连接模拟设备，不自动播放")
+    parser.add_argument('--developer', action='store_true', help='打开开发者工作台')
     args=parser.parse_args()
     root=tk.Tk()
-    app=App(root)
-    app.navigate("replay")
+    if args.developer:
+        app=App(root)
+        app.navigate('replay')
+    else:
+        from .user_app import UserApp
+        app=UserApp(root)
     if args.demo:
+        app.mode_choice.set('Demo 模拟设备')
         root.after(300,app.connect)
     root.mainloop()
 

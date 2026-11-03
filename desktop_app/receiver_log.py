@@ -19,6 +19,7 @@ SUMMARY_FIELDS = (
     "min_code", "max_code", "mean_mv", "pp_mv", "rms_mv", "peak40_mv",
     "stage2_peak40_mv", "adc_rail", "last_state_sample", "last_state_rev",
     "last_state_age_ms", "last_state_same_revision", "last_state_shape",
+    "probe_ok", "direct_min_code", "direct_max_code", "direct_mean_code", "vrefint_code",
 )
 
 
@@ -28,11 +29,19 @@ def capture_from_record(record):
     data = record["capture"]
     if type(data["simulated"]) is not bool or type(data["tx_running"]) is not bool:
         raise ValueError("测量记录的来源标志无效")
-    return Capture.parse(dict(boot=data["boot"], rev=str(data["revision"]),
+    fields = dict(boot=data["boot"], rev=str(data["revision"]),
         uptime_ms=str(data["uptime_ms"]), simulated=str(int(data["simulated"])),
         tx_running=str(int(data["tx_running"])), pin=data["pin"],
         fs_hz=str(data["fs_hz"]), bits=str(data["bits"]), n=str(len(data["raw"])),
-        raw=",".join(map(str, data["raw"]))))
+        raw=",".join(map(str, data["raw"])))
+    probe = data.get("probe")
+    if probe is not None:
+        if not isinstance(probe, dict) or type(probe.get("valid")) is not bool:
+            raise ValueError("测量记录的 ADC 对照读数无效")
+        fields.update(probe_ok=str(int(probe["valid"])), direct_n=str(probe["count"]),
+                      direct_min=str(probe["minimum"]), direct_max=str(probe["maximum"]),
+                      direct_mean=str(probe["mean"]), vrefint_raw=str(probe["vrefint"]))
+    return Capture.parse(fields)
 
 
 def summarize(record, vref_mv=3300.0, divider=3.4):
@@ -51,7 +60,12 @@ def summarize(record, vref_mv=3300.0, divider=3.4):
         adc_rail=int(analysis["adc_rail"]), last_state_sample=context.get("sample", ""),
         last_state_rev=context.get("rev", ""), last_state_age_ms=context.get("age_ms", ""),
         last_state_same_revision=int(same_revision),
-        last_state_shape=context.get("config", {}).get("shape", ""))
+        last_state_shape=context.get("config", {}).get("shape", ""),
+        probe_ok=int(capture.probe.valid) if capture.probe else "",
+        direct_min_code=capture.probe.minimum if capture.probe and capture.probe.valid else "",
+        direct_max_code=capture.probe.maximum if capture.probe and capture.probe.valid else "",
+        direct_mean_code=capture.probe.mean if capture.probe and capture.probe.valid else "",
+        vrefint_code=capture.probe.vrefint if capture.probe and capture.probe.valid else "")
 
 
 class CaptureRecorder(threading.Thread):
