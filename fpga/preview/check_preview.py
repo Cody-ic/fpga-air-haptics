@@ -46,7 +46,9 @@ def main():
         primitive_file=folder/"reset_primitive.v"
         serializer_model=re.search(r"module OSER10\s*\(.*?endmodule",primitive,re.S)
         if serializer_model is None:raise RuntimeError("OSER10 primitive model missing")
-        primitive_file.write_text(serializer_model.group()+
+        reset_flop_model=re.search(r"module DFFSE\s*\(.*?endmodule",primitive,re.S)
+        if reset_flop_model is None:raise RuntimeError("DFFSE primitive model missing")
+        primitive_file.write_text(serializer_model.group()+"\n"+reset_flop_model.group()+
                                  "\nmodule reset_global; reg GSRO=1; endmodule\n",encoding="utf-8")
         simulate(compiler,folder,"tb_serializer_reset",'''module tb_serializer_reset;
 reset_global GSR();

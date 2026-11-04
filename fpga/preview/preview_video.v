@@ -1,7 +1,9 @@
 `timescale 1ns/1ps
 // Waveshare C published EDID: 49 MHz, 1024 48 96 144 / 600 3 10 11.
 // A field bank flips only at the beginning of vertical blank, never mid-map.
-module preview_video(
+module preview_video #(
+    parameter integer LINK_TEST=0
+)(
     input wire clk,rst_n,
     input wire [7:0] field_value,
     input wire field_valid,
@@ -104,6 +106,19 @@ module preview_video(
     wire [7:0] legend_value=x_d-590;
     always @* begin
         color=24'h0b1424;glyph=0;nx=0;ny=0;slot=0;digit_x=0;digit_y=0;
+        if(LINK_TEST!=0) begin
+            // Static full-amplitude bars exercise each color lane. The lower
+            // checkerboard exercises transitions without dynamic field data.
+            case(x_d[9:7])
+                0:color=24'hffffff;1:color=24'hffff00;
+                2:color=24'h00ffff;3:color=24'h00ff00;
+                4:color=24'hff00ff;5:color=24'hff0000;
+                6:color=24'h0000ff;7:color=24'h000000;
+            endcase
+            if(y_d>=300) color=(x_d[5]^y_d[5])?24'hffffff:24'h101010;
+            if(x_d<4 || x_d>=1020 || y_d<4 || y_d>=596) color=24'hff8000;
+            if(y_d>=296 && y_d<304) color=24'hff8000;
+        end else begin
         if(map_d) begin
             color=field_valid?palette(field_value):24'h081024;
             // Axes are reference lines, not an assumed peak.
@@ -114,7 +129,7 @@ module preview_video(
         if((x_d==31 || x_d==544) && y_d>=55 && y_d<=568) color=24'h456078;
         if((y_d==55 || y_d==568) && x_d>=31 && x_d<=544) color=24'h456078;
         if(x_d>=590 && x_d<610 && y_d>=122 && y_d<142)
-            color=run_state==1?24'h40dda5:run_state==2?24'hf4bc54:24'h66758a;
+            color=run_state==1?24'h40dda5:run_state==2?24'hf4bc54:run_state==3?24'h64b5ff:24'h66758a;
         if(x_d>=790 && x_d<844 && ((y_d>=202 && y_d<223)||(y_d>=274 && y_d<295))) begin
             slot=x_d>=826?2:x_d>=808?1:0;
             digit_x=x_d-(slot==2?826:slot==1?808:790);
@@ -129,6 +144,7 @@ module preview_video(
         if(map_d && field_valid &&
            ((x_d==marker_x && y_d>=marker_y-5 && y_d<=marker_y+5) ||
             (y_d==marker_y && x_d>=marker_x-5 && x_d<=marker_x+5))) color=24'hffffff;
+        end
     end
     always @(posedge clk) begin
         if(!rst_n) begin red<=0;green<=0;blue<=0;de<=0;hs<=1;vs<=1;end

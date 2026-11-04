@@ -135,8 +135,9 @@ module board_top #(
     wire [15:0] view_revision;
     wire [1:0] view_run;
     wire view_active;
+    wire signed [20:0] view_fx,view_fy;
     assign view_reset_n=rst_n;
-    assign view_snapshot={focus_x,focus_y,view_z,view_carrier,view_steps,view_level,
+    assign view_snapshot={view_fx,view_fy,view_z,view_carrier,view_steps,view_level,
                           view_revision,view_run,view_active};
     /* verilator lint_on UNUSEDSIGNAL */
 
@@ -189,6 +190,7 @@ module board_top #(
         .beat_pulse  (beat_pulse),
         .walk_running(walk_running),
         .view_z_um(view_z),.view_carrier_hz(view_carrier),.view_phase_steps(view_steps),
+        .view_focus_x(view_fx),.view_focus_y(view_fy),
         .view_level(view_level),.view_revision(view_revision),
         .view_run_state(view_run),.view_active(view_active),
         .array_pos   (array_pos),

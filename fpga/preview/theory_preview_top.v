@@ -1,4 +1,9 @@
 `timescale 1ns/1ps
+// ==================== VIDEO LINK TEST SWITCH ====================
+// 0: theory preview; 1: static bars/checkerboard, no UART or emission.
+// build_preview.py --link-test sets this macro in its generated source copy.
+`define FPGA_VIDEO_LINK_TEST 0
+// ================================================================
 // Standalone PREVIEW image. Shift-register outputs are constant-disabled at the pads.
 module theory_preview_top(
     input wire clk,key_rst_n,key0_n,key1_n,uart_rx_pin,
@@ -29,12 +34,18 @@ module theory_preview_top(
     wire [31:0] z,cycles,frames;
     wire [1:0] run_state;
     wire de,hs,vs;
+    generate if (`FPGA_VIDEO_LINK_TEST) begin:link_test
+        assign uart_tx_pin=1'b1;
+        assign valid=0;assign value=0;assign fx=0;assign fy=0;
+        assign z=0;assign cycles=0;assign frames=0;assign run_state=0;
+    end else begin:theory
     theory_preview_core core(.clk(pixel_clk),.rst_n(rst_n),.key_next(~key0_n),.key_play(~key1_n),
         .uart_rx_pin(uart_rx_pin),.uart_tx_pin(uart_tx_pin),.frame_boundary(boundary),
         .field_read_addr(address),.field_read_value(value),.field_valid(valid),
         .displayed_x(fx),.displayed_y(fy),.displayed_z(z),.field_cycles(cycles),
         .frame_number(frames),.run_state(run_state));
-    preview_video video(.clk(pixel_clk),.rst_n(rst_n),.field_value(value),.field_valid(valid),
+    end endgenerate
+    preview_video #(.LINK_TEST(`FPGA_VIDEO_LINK_TEST)) video(.clk(pixel_clk),.rst_n(rst_n),.field_value(value),.field_valid(valid),
         .focus_x(fx),.focus_y(fy),.z_um(z),.field_cycles(cycles),.frame_number(frames),
         .run_state(run_state),.frame_boundary(boundary),.field_addr(address),
         .red(r),.green(g),.blue(b),.de(de),.hs(hs),.vs(vs));

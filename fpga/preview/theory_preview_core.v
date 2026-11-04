@@ -105,8 +105,8 @@ module theory_preview_core #(
             phase_start<=0;engine_start<=0;
             if(state!=0 && state!=6) cycles<=cycles+1'b1;
             // Invalidate stale configuration immediately, including an in-flight old image.
-            if(revision!=revision_q || run_state==0) field_valid<=0;
-            if(run_state==0) begin
+            if(revision!=revision_q || run_state==0 || run_state==3) field_valid<=0;
+            if(run_state==0 || run_state==3) begin
                 active_q<=0;
                 // No valid field is shown while stopped; label the current
                 // configured plane rather than the reset/default frame height.
@@ -127,7 +127,7 @@ module theory_preview_core #(
                 end
                 5: if(engine_done) begin field_cycles<=cycles;state<=6;end
                 6: if(frame_boundary) begin
-                    front<=~front;field_valid<=active_q && revision==revision_q && run_state!=0;
+                    front<=~front;field_valid<=active_q && revision==revision_q && (run_state==1 || run_state==2);
                     displayed_x<=fx_q;displayed_y<=fy_q;displayed_z<=z_q;
                     frame_number<=frame_number+1'b1;state<=0;
                 end

@@ -15,7 +15,10 @@ module hap2_cal_startup #(
     output wire [ROWS*COLS-1:0] out_pos,out_neg,
     output wire output_on,
     output reg released,
-    output wire [8*ROWS*COLS-1:0] saved_offsets
+    output wire [8*ROWS*COLS-1:0] saved_offsets,
+    // Read-only display observation. No display signal enters this controller.
+    output wire signed [20:0] view_x,view_y,
+    output wire [31:0] view_z_um
 );
     localparam integer N=ROWS*COLS;
     wire packet_valid,packet_busy,packet_done;
@@ -66,6 +69,9 @@ module hap2_cal_startup #(
     reg copy_active,copy_wait;
     reg [8*N-1:0] baseline;
     wire signed [20:0] fx=x_um[20:0]<<<1,fy=y_um[20:0]<<<1;
+    assign view_x=fx;
+    assign view_y=fy;
+    assign view_z_um=z_um;
     hap2_phase #(.ROWS(ROWS),.COLS(COLS),.PITCH_UM(PITCH_UM),.PIPE(1)) u_phase (
         .clk(clk),.rst_n(rst_n),.cfg_carrier_hz(32'd40000),.cfg_phase_steps(32'd64),
         .cfg_z_um(z_um),.cfg_change(configure_phase),.focus_x(fx),.focus_y(fy),.start(1'b0),

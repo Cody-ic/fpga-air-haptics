@@ -88,6 +88,7 @@ module hap2_top #(
     output wire [HW_ROWS*HW_COLS-1:0] array_neg,
     // Optional display observer; all signals belong to clk. No feedback into control.
     output wire [31:0] view_z_um, view_carrier_hz, view_phase_steps, view_level,
+    output wire signed [20:0] view_focus_x,view_focus_y,
     output wire [15:0] view_revision,
     output wire [1:0] view_run_state,
     output wire view_active
@@ -98,6 +99,8 @@ module hap2_top #(
     wire business_rst_n, cal_released, normal_tx, cal_tx, cal_output_on;
     wire [HW_ROWS*HW_COLS-1:0] normal_pos,normal_neg,cal_pos,cal_neg;
     wire [8*HW_ROWS*HW_COLS-1:0] cal_offsets;
+    wire signed [20:0] cal_view_x,cal_view_y;
+    wire [31:0] cal_view_z;
     generate
         if(CAL_RESTORE_ENABLE!=0 && (CAL_RESTORE_ENABLE!=1 || CAL_ENABLE!=1 ||
            HW_ROWS!=8 || HW_COLS!=8 || HW_PITCH_UM!=10300)) begin : invalid_restore
@@ -114,7 +117,8 @@ module hap2_top #(
                 .Z_UM(CAL_Z_UM),.LEVEL(CAL_LEVEL),.DEAD_CYC(OUT_DEAD_CYC)) u_startup (
                 .clk(clk),.rst_n(rst_n),.rx_line(uart_rx_pin),.boot_id(boot_id),
                 .tx_line(cal_tx),.out_pos(cal_pos),.out_neg(cal_neg),
-                .output_on(cal_output_on),.released(cal_released),.saved_offsets(cal_offsets));
+                .output_on(cal_output_on),.released(cal_released),.saved_offsets(cal_offsets),
+                .view_x(cal_view_x),.view_y(cal_view_y),.view_z_um(cal_view_z));
         end else begin : no_calibration
             assign cal_released=1'b1;
             assign cal_tx=1'b1;
@@ -122,6 +126,7 @@ module hap2_top #(
             // Reuse known measurements without pretending a fresh CAL2 round
             // passed. Normal power-on idle, STOP and watchdog remain active.
             assign cal_offsets=CAL_RESTORE_ENABLE==1 ? CAL_RESTORE_OFFSETS : 0;
+            assign cal_view_x=0;assign cal_view_y=0;assign cal_view_z=CAL_Z_UM;
         end
     endgenerate
     assign business_rst_n=rst_n && cal_released;
@@ -441,13 +446,17 @@ module hap2_top #(
     end
     wire normal_output_on = (cmd_run == 2'd1) && (cfg_level != 32'd0) && scan_on && corrected_config;
     assign output_on = PREVIEW_ONLY ? 0 : (cal_released ? normal_output_on : cal_output_on);
-    assign view_z_um = cfg_z_um;
-    assign view_carrier_hz = cfg_carrier_hz;
-    assign view_phase_steps = cfg_phase_steps;
-    assign view_level = cfg_static ? 0 : cfg_level; // Observer only supports a moving focus.
-    assign view_revision = cmd_rev;
-    assign view_run_state = cmd_run;
-    assign view_active = normal_output_on && !cfg_static;
+    assign view_focus_x = cal_released ? focus_x : cal_view_x;
+    assign view_focus_y = cal_released ? focus_y : cal_view_y;
+    assign view_z_um = cal_released ? cfg_z_um : cal_view_z;
+    assign view_carrier_hz = cal_released ? cfg_carrier_hz : 40000;
+    assign view_phase_steps = cal_released ? cfg_phase_steps : 64;
+    // CAL2 exercises selected emitters, not the ideal full-array target. Show
+    // its real output status but never label it as a computed sound field.
+    assign view_level = !cal_released || cfg_static ? 0 : cfg_level;
+    assign view_revision = cal_released ? cmd_rev : 0;
+    assign view_run_state = cal_released ? cmd_run : (cal_output_on ? 2'd1 : 2'd3);
+    assign view_active = cal_released && normal_output_on && !cfg_static;
 
     // ---------------- 相位计算 ----------------
     // 每拍更新一次：把焦点坐标变成每一路的相位码。载波换了要重算常数。
