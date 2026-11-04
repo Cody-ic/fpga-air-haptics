@@ -142,6 +142,26 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(verified["imported_and_reverified"])
         self.assertIn(cal.UPLOAD, [v[0] for v in repeat.sent])
 
+    async def test_reply_deadline_is_not_renewed_by_unrelated_statuses(self):
+        link = FakeLink()
+        async def repeated_status():
+            await asyncio.sleep(.01)
+            return link.status(0)
+        link.receive = repeated_status
+        started = asyncio.get_running_loop().time()
+        with self.assertRaises(asyncio.TimeoutError):
+            await cal.wait_reply(link, link.boot, cal.TRIM, timeout=.06)
+        self.assertLess(asyncio.get_running_loop().time()-started, .3)
+
+    async def test_whole_run_deadline_aborts_while_waiting_manual_input(self):
+        async def waiting(_):
+            await asyncio.Future()
+        link = FakeLink()
+        with self.assertRaisesRegex(ProtocolError, '超时'):
+            await cal.calibrate(link, None, False, lambda _: None, manual=waiting, maximum_seconds=.06)
+        self.assertEqual(link.sent[-1][0], cal.ABORT)
+        self.assertNotIn(cal.RELEASE, [v[0] for v in link.sent])
+
     async def test_adc_usb_and_ble_share_workflow(self):
         for bluetooth in (False, True):
             receiver = FakeReceiver(bluetooth)

@@ -5,6 +5,7 @@ succeeds. RELEASE hands it back to the unchanged HAP3 desktop application.
 """
 import argparse
 import asyncio
+from async_timeout import timeout as deadline
 import binascii
 from contextlib import suppress
 from dataclasses import dataclass
@@ -119,7 +120,7 @@ class FpgaLink:
             raise self.error
         try:
             packet = await asyncio.wait_for(self.queue.get(), timeout)
-        except TimeoutError as error:
+        except asyncio.TimeoutError as error:
             raise ProtocolError("未收到校准状态：请检查串口和校准开关；正常业务固件不提供校准端点") from error
         if self.error:
             raise self.error
@@ -213,7 +214,7 @@ async def checked_receive(link, boot):
 
 
 async def wait_reply(link, boot, kind, predicate=lambda _: True, timeout=3):
-    async with asyncio.timeout(timeout):
+    async with deadline(timeout):
         while True:
             packet = await checked_receive(link, boot)
             if packet.kind == kind and predicate(packet):
@@ -282,7 +283,7 @@ async def calibrate(link, receiver, bluetooth, record, settings=Settings(), manu
         setup = tuple(v & 0xffffffff for v in (*settings.position_um, settings.level, settings.reference))
         await link.send(SETUP, boot, 0, *setup)
         await wait_reply(link, boot, SETUP_ACK, lambda p: p.args == setup)
-        async with asyncio.timeout(3):
+        async with deadline(3):
             while True:
                 packet = await checked_receive(link, boot)
                 if packet.kind == STATUS and packet.status()["configured"]:
@@ -303,7 +304,7 @@ async def calibrate(link, receiver, bluetooth, record, settings=Settings(), manu
         await link.send(READY, boot, 0, source, int(candidate is not None))
         started_at = asyncio.get_running_loop().time()
         has_started = False
-        async with asyncio.timeout(maximum_seconds or (43200 if source == 0 else 900)):
+        async with deadline(maximum_seconds or (43200 if source == 0 else 900)):
             while True:
                 packet = await checked_receive(link, boot)
                 await pulse_health()
@@ -341,16 +342,16 @@ async def calibrate(link, receiver, bluetooth, record, settings=Settings(), manu
                     answer = asyncio.create_task(manual(status))
                     try:
                         await asyncio.sleep(0)
-                        async with asyncio.timeout(120):
+                        async with deadline(120):
                             while not answer.done():
                                 try:
-                                    async with asyncio.timeout(.2):
+                                    async with deadline(.2):
                                         update = await checked_receive(link, boot)
                                         if update.kind == STATUS:
                                             current = update.status()
                                             if current["state"] != 2 or update.token != packet.token:
                                                 raise ProtocolError("板端已取消或超时，本次读数不能提交")
-                                except TimeoutError:
+                                except asyncio.TimeoutError:
                                     await pulse_health()
                         reading = await answer
                     finally:
@@ -393,7 +394,7 @@ async def calibrate(link, receiver, bluetooth, record, settings=Settings(), manu
             released = True
             notify(dict(type="complete", document=result))
             return result
-    except TimeoutError as error:
+    except asyncio.TimeoutError as error:
         raise ProtocolError("通信或人工读数超时，已请求关闭输出；请核对板端状态后重新开始") from error
     finally:
         if beat:

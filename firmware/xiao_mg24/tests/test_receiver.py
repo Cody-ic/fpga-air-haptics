@@ -2,10 +2,12 @@ import asyncio
 import importlib.util
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("receiver_client", ROOT / "receiver_client.py")
@@ -17,9 +19,12 @@ class NativeCoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         compiler = shutil.which("g++")
-        library = Path("D:/ArduinoData/sketchbook/libraries/ArduinoJson-7.4.2/src")
+        library = Path(os.environ.get("ARDUINOJSON_INCLUDE", "D:/ArduinoData/sketchbook/libraries/ArduinoJson-7.4.2/src"))
         if not compiler or not library.exists():
-            raise RuntimeError("Install host g++ and pinned ArduinoJson 7.4.2 before testing")
+            raise RuntimeError("Put host g++ on PATH and set ARDUINOJSON_INCLUDE to pinned ArduinoJson 7.4.2 src")
+        version_header = (library / 'ArduinoJson/version.hpp').read_text(encoding='utf-8')
+        if '#define ARDUINOJSON_VERSION "7.4.2"' not in version_header:
+            raise RuntimeError("Native checks require ArduinoJson 7.4.2")
         build = ROOT / ".runtime" / "tests"
         build.mkdir(parents=True, exist_ok=True)
         cls.binary = build / "core_harness.exe"
@@ -128,6 +133,64 @@ class ProtocolTests(unittest.TestCase):
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_total_deadline_covers_stale_frames_and_releases_lock_for_stop(self):
+        class Fake:
+            def __init__(self):
+                self.commands = []
+                self.reads = 0
+            async def write(self, data):
+                self.current = json.loads(data)
+                self.commands.append(self.current['cmd'])
+            async def read(self):
+                self.reads += 1
+                await asyncio.sleep(.01)
+                reply = dict(proto='MG24_RX1', id=self.current['id'], boot=1,
+                             ok=True, type=self.current['cmd'])
+                if self.current['cmd'] != 'STOP':
+                    reply['id'] -= 1
+                return (json.dumps(reply)+'\n').encode()
+        transport = Fake()
+        receiver = client.ReceiverClient(transport)
+        started = asyncio.get_running_loop().time()
+        with patch.object(client, 'REQUEST_TIMEOUT_S', .06):
+            with self.assertRaises(asyncio.TimeoutError):
+                await receiver.request('CAPTURE')
+            self.assertGreater(transport.reads, 1)
+            self.assertLess(asyncio.get_running_loop().time()-started, .3)
+            self.assertFalse(receiver.lock.locked())
+            self.assertTrue(receiver.can_stop)
+            self.assertEqual((await receiver.request('STOP'))['type'], 'STOP')
+        self.assertEqual(transport.commands, ['CAPTURE', 'STOP'])
+
+    async def test_cancel_during_write_marks_partial_and_releases_lock(self):
+        writing = asyncio.Event()
+        class Fake:
+            async def write(self, _):
+                writing.set()
+                await asyncio.Future()
+        receiver = client.ReceiverClient(Fake())
+        task = asyncio.create_task(receiver.request('CAPTURE'))
+        await asyncio.wait_for(writing.wait(), 1)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertFalse(receiver.can_stop)
+        self.assertFalse(receiver.lock.locked())
+
+    async def test_write_and_read_share_one_timeout(self):
+        class Fake:
+            async def write(self, _):
+                await asyncio.sleep(.04)
+            async def read(self):
+                await asyncio.sleep(.04)
+                return b''
+        receiver = client.ReceiverClient(Fake())
+        with patch.object(client, 'REQUEST_TIMEOUT_S', .06):
+            with self.assertRaises(asyncio.TimeoutError):
+                await receiver.request('CAPTURE')
+        self.assertTrue(receiver.can_stop)
+        self.assertFalse(receiver.lock.locked())
+
     async def test_partial_write_is_not_retried_or_followed_by_stop(self):
         class Fake:
             async def write(self, _):

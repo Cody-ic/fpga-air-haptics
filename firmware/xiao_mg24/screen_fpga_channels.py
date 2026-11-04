@@ -6,6 +6,7 @@ No synthetic powers, phase solving, uploaded offsets, or skipped safety checks.
 """
 import argparse
 import asyncio
+from async_timeout import timeout as deadline
 from contextlib import suppress
 from datetime import datetime, timezone
 import json
@@ -51,7 +52,7 @@ def summarize(samples):
 
 async def stop_and_confirm(link, boot):
     await link.send(ABORT, boot)
-    async with asyncio.timeout(4):
+    async with deadline(4):
         while True:
             packet = await checked_receive(link, boot)
             if packet.kind == STATUS:
@@ -68,7 +69,7 @@ async def screen_one(link, receiver, boot, target, settings, record, beat):
     setup = tuple(v & 0xffffffff for v in setup)
     await link.send(SETUP, boot, 0, *setup)
     await wait_reply(link, boot, SETUP_ACK, lambda p: p.args == setup)
-    async with asyncio.timeout(4):
+    async with deadline(4):
         while True:
             packet = await checked_receive(link, boot)
             if packet.kind == STATUS:
@@ -82,7 +83,7 @@ async def screen_one(link, receiver, boot, target, settings, record, beat):
     started = False
     failure = None
     try:
-        async with asyncio.timeout(25):
+        async with deadline(25):
             while True:
                 packet = await checked_receive(link, boot)
                 if beat.done():

@@ -12,6 +12,7 @@ SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 MAX_FRAME = 2048
+REQUEST_TIMEOUT_S = 5
 
 
 class ProtocolError(RuntimeError):
@@ -166,30 +167,34 @@ class ReceiverClient:
 
     async def request(self, command, **fields):
         async with self.lock:
-            self.next_id = (self.next_id + 1) % 2**32
-            request_id = self.next_id
-            request = dict(cmd=command, id=request_id, **fields)
-            async with asyncio.timeout(5):
-                try:
-                    await self.connection.write((json.dumps(request, separators=(",", ":")) + "\n").encode("ascii"))
-                except BaseException:
-                    self.can_stop = False  # Do not append STOP to a possibly partial command.
-                    raise
-                while True:
-                    if self.replies:
-                        reply = self.replies.pop(0)
-                        if type(reply.get("id")) is not int or reply["id"] != request_id:
-                            continue
-                        if type(reply.get("boot")) is not int or type(reply.get("ok")) is not bool:
-                            raise ProtocolError("Invalid reply identity/status")
-                        if self.boot is not None and reply["boot"] != self.boot:
-                            raise ProtocolError("Receiver reset during this session")
-                        if not reply["ok"]:
-                            raise ProtocolError(str(reply.get("error", "Receiver rejected request")))
-                        if reply.get("type") != command:
-                            raise ProtocolError("Reply does not match command")
-                        return reply
-                    self.replies.extend(self.decoder.feed(await self.connection.read()))
+            # One deadline covers both the write and all reply fragments, not
+            # one fresh timeout per read. wait_for also works on Python 3.10.
+            return await asyncio.wait_for(self._exchange(command, fields), REQUEST_TIMEOUT_S)
+
+    async def _exchange(self, command, fields):
+        self.next_id = (self.next_id + 1) % 2**32
+        request_id = self.next_id
+        request = dict(cmd=command, id=request_id, **fields)
+        try:
+            await self.connection.write((json.dumps(request, separators=(",", ":")) + "\n").encode("ascii"))
+        except BaseException:
+            self.can_stop = False  # Do not append STOP to a possibly partial command.
+            raise
+        while True:
+            if self.replies:
+                reply = self.replies.pop(0)
+                if type(reply.get("id")) is not int or reply["id"] != request_id:
+                    continue
+                if type(reply.get("boot")) is not int or type(reply.get("ok")) is not bool:
+                    raise ProtocolError("Invalid reply identity/status")
+                if self.boot is not None and reply["boot"] != self.boot:
+                    raise ProtocolError("Receiver reset during this session")
+                if not reply["ok"]:
+                    raise ProtocolError(str(reply.get("error", "Receiver rejected request")))
+                if reply.get("type") != command:
+                    raise ProtocolError("Reply does not match command")
+                return reply
+            self.replies.extend(self.decoder.feed(await self.connection.read()))
 
     async def info(self):
         reply = await self.request("INFO")
@@ -264,7 +269,7 @@ def main():
         parser.error("--repeat must be 1..10000 and --interval at least 0.2 seconds")
     try:
         asyncio.run(run(args))
-    except (ProtocolError, OSError, ValueError, TimeoutError) as error:
+    except (ProtocolError, OSError, ValueError, TimeoutError, asyncio.TimeoutError) as error:
         parser.exit(1, f"MG24: {error}\n")
 
 
