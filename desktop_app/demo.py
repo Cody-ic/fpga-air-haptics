@@ -5,6 +5,7 @@ import time
 import uuid
 import math
 import cmath
+import numpy as np
 
 from .model import (ArraySpec, Config, Workspace, SHAPES, MAX_PATH_POINTS,
                     MAX_SCAN_POINTS, MAX_STROKES, focus_phases, trajectory_sample)
@@ -48,14 +49,17 @@ class DemoDevice:
 
     def snapshot(self):
         focus, scan_on, stroke = trajectory_sample(self.config, self._play_time())
-        phases = (focus_phases(self.config, focus, self.array) + self.phase_offsets) % self.config.phase_steps
+        nominal = (np.array(self.config.static_phases(self.array)) if self.config.phase_table != "NONE"
+                   else focus_phases(self.config, focus, self.array))
+        phases = (nominal + self.phase_offsets) % self.config.phase_steps
         self.sample += 1
         fields = dict(boot=self.boot, sample=self.sample,
                       uptime_ms=int((self.clock() - self.birth) * 1000), rev=self.revision,
                       mode=self.mode, state=self.state,
                       output=int(self.state == "RUNNING" and self.config.level > 0 and scan_on),
                       scan_on=int(scan_on), stroke_index=stroke,
-                      simulated=1, reason=self.reason, **self.config.wire(), **self.array.wire(),
+                      simulated=1, reason=self.reason, static_mode=int(self.config.phase_table != "NONE"),
+                      **self.config.wire(), **self.array.wire(),
                       fx_um=round(focus[0] * 1000), fy_um=round(focus[1] * 1000),
                       fz_um=round(focus[2] * 1000), phases=",".join(map(str, phases)),
                       channel_mask=self.channel_mask, phase_offsets=','.join(map(str, self.phase_offsets)))
@@ -74,7 +78,7 @@ class DemoDevice:
                 self.last_ping = self.clock()
                 return [encode("ACK", frame.seq, verb, proto=VERSION, device="DEMO-FPGA",
                                boot=self.boot, simulated=1, hb_ms=3000, adc_capture=1,
-                               caps="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION",
+                               caps="CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,CUSTOM_XY,SCAN_PATHS,GEOMETRY,CALIBRATION,STATIC_PHASE,CAL_READBACK",
                                max_rows=16, max_cols=16, max_channels=256, max_nodes=MAX_PATH_POINTS,
                                max_scan_points=MAX_SCAN_POINTS, max_strokes=MAX_STROKES,
                                **self.array.wire(), **self.workspace.wire()), self.snapshot()]
@@ -144,6 +148,8 @@ class DemoDevice:
                     raise ValueError("BUSY")
                 try:
                     config = Config.from_wire(fields)
+                    if config.phase_table != "NONE":
+                        config.static_phases(self.array)
                 except (ValueError, KeyError):
                     raise ValueError("BAD_CONFIG") from None
                 if self.workspace.incompatibility(config):
@@ -187,7 +193,7 @@ class DemoDevice:
         elif self.mode == "LOCAL":
             if action == "NEXT" and self.state == "IDLE":
                 shapes = [key for key in SHAPES if key != "CUSTOM" or self.config.path_xy_um != "NONE" or self.config.scan_paths != "NONE"]
-                candidate = replace(self.config, shape=shapes[(shapes.index(self.config.shape) + 1) % len(shapes)])
+                candidate = replace(self.config, shape=shapes[(shapes.index(self.config.shape) + 1) % len(shapes)], phase_table="NONE")
                 if self.workspace.incompatibility(candidate):
                     self.reason = "OUT_OF_WORKSPACE"
                     return self.snapshot()

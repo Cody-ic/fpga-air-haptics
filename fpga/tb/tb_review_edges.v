@@ -22,14 +22,15 @@ module tb_review_edges;
         .clk(clk), .ext_rst_n(ext_rst_n), .rst_n(por_n)
     );
     reg board_rst_n = 1'b1;
-    // 使用当前板级默认值：4×4、11 mm 间距。
-    wire [15:0] board_pos;   // board_top 默认 4x4 = 16 路
-    board_top #(.CLK_HZ(1_000_000), .POR_MS(1), .STATE_MS(0)) u_board (
+    // Current R2 board has 64 channels behind shift-register outputs.
+    wire [63:0] board_pos;
+    board_top #(.CLK_HZ(50_000_000), .POR_MS(1), .STATE_MS(0)) u_board (
         .clk(clk), .key_rst_n(board_rst_n), .key0_n(1'b1),
         // 本地“停止”键这一版没有分配引脚（干净脚不够），所以 board_top 里没有
         // key2_n 端口；这里只把三个真实存在的键接上。
-        .key1_n(1'b1), .uart_rx_pin(1'b1), .array_pos(board_pos)
+        .key1_n(1'b1), .uart_rx_pin(1'b1)
     );
+    assign board_pos = u_board.array_pos;
 
     reg parse_start = 1'b0;
     reg [13:0] parse_len;
@@ -124,14 +125,14 @@ module tb_review_edges;
     reg [31:0] boot_before;
     reg [31:0] old_offsets [0:3];
     initial begin
-        check(u_board.HW_PITCH_UM == 11000, "board default matches the 11 mm R5 array");
-        check(u_board.u_top.u_phase.PITCH_UM == 11000, "board pitch reaches the phase solver");
+        check(u_board.HW_PITCH_UM == 10300, "board default matches the 10.3 mm R2 array");
+        check(u_board.u_top.u_phase.PITCH_UM == 10300, "board pitch reaches the phase solver");
         phase_mem[0] = 0; phase_mem[1] = 3;
         phase_mem[2] = 7; phase_mem[3] = 11;
         repeat (4) begin
             @(negedge clk);
             check(por_n === 1'b0, "cold POR remains asserted without a key press");
-            check(board_pos === 16'd0, "cold board outputs are off");
+            check(board_pos === 64'd0, "cold board outputs are off");
         end
         repeat (4) @(negedge clk);
         check(por_n === 1'b1, "cold POR releases after its hold interval");
@@ -232,13 +233,13 @@ module tb_review_edges;
         release u_top.loc_play; release u_top.loc_next; release u_top.loc_shape;
         release u_top.u_cmd.mode;
 
-        repeat (1010) @(negedge clk);
+        repeat (50010) @(negedge clk);
         boot_before = u_board.boot_q;
         check((^boot_before !== 1'bx) && boot_before != 0, "board boot identifier is initialized");
         board_rst_n = 1'b0;
         repeat (5) @(negedge clk);
         board_rst_n = 1'b1;
-        repeat (1010) @(negedge clk);
+        repeat (50010) @(negedge clk);
         check(u_board.boot_q !== boot_before, "board reset changes the boot identifier");
         boot_before = u_board.boot_q;
         repeat (20) @(negedge clk);

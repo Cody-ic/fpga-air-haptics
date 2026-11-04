@@ -24,7 +24,7 @@ import numpy as np
 from .controller import Session
 from .ble_transport import BleProfile, BleScan
 from .ble_settings import BleSettings
-from .model import ArraySpec, ARRAY_PRESETS, Config, SHAPES, array_coordinates, config_from_document, field_slice, focus_phases, trajectory_path, trajectory_point
+from .model import ArraySpec, ARRAY_PRESETS, BUTTON_OUTPUT_SETTINGS, Config, SHAPES, array_coordinates, config_from_document, field_slice, focus_phases, trajectory_path, trajectory_point
 from .sketch_editor import SketchEditor
 from .sketch import Sketch
 from .playback import PlaybackPanel
@@ -33,6 +33,7 @@ from .receiver_panel import ReceiverPanel
 from .calibration_panel import CalibrationPanel
 from .array_geometry import Geometry
 from .transport import available_ports
+from .theme import BG, INK, MUTED, BLUE, TEAL, RED, AMBER, WHITE, FONT, install, wrap_to_width, style_axis, DisplayVar, configure_if_changed
 
 if sys.platform == "win32":
     import ctypes
@@ -41,14 +42,6 @@ if sys.platform == "win32":
     except (AttributeError, OSError):
         pass
 
-BG = "#edf2f7"
-INK = "#172b45"
-MUTED = "#526680"
-BLUE = "#2463c5"
-TEAL = "#087e8b"
-RED = "#b02d40"
-AMBER = "#966414"
-WHITE = "#ffffff"
 BAUD_RATES = (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
               230400, 460800, 500000, 921600, 1000000, 1500000,
               2000000, 3000000)
@@ -94,7 +87,7 @@ class PlotPanel(ttk.Frame):
             axis.set_axis_on()
             axis.tick_params(labelsize=8, colors=MUTED)
             for spine in axis.spines.values():
-                spine.set_color("#ccd5df")
+                spine.set_color("#e5e5ea")
         extent = (horizontal[0], horizontal[-1], vertical[0], vertical[-1])
         image = self.field.imshow(values, extent=extent, origin="lower", cmap="magma",
                                   vmin=0, vmax=max(1.0, float(values.max())), aspect="equal")
@@ -102,7 +95,8 @@ class PlotPanel(ttk.Frame):
         self.field.set_ylabel("y / mm" if plane == "XY" else "z / mm")
         self.field.set_title(f"{plane} 声场切片 · {'输出使能' if enabled else '输出关闭'}", fontsize=10)
         target_y = focus[1] if plane == "XY" else focus[2]
-        self.field.plot(focus[0], target_y, marker="+", ms=11, mew=1.5, color="#68e4dc")
+        if config.phase_table == "NONE":
+            self.field.plot(focus[0], target_y, marker="+", ms=11, mew=1.5, color="#68e4dc")
         self.colorbar = self.figure.colorbar(image, ax=self.field, fraction=0.038, pad=0.03)
         self.colorbar.ax.tick_params(labelsize=8)
         self.colorbar.set_label("相对 |p|（非声压单位）", fontsize=8)
@@ -128,32 +122,48 @@ class PlotPanel(ttk.Frame):
             self.phase.set_xticks(sorted(set([0, array.cols - 1])))
             self.phase.set_yticks(sorted(set([0, array.rows - 1])))
         path = trajectory_path(config)
-        self.path.plot(path[:, 0], path[:, 1], color=BLUE, lw=1.5)
-        self.path.scatter([focus[0]], [focus[1]], color=TEAL, s=35, zorder=3)
+        if config.phase_table == "NONE":
+            self.path.plot(path[:, 0], path[:, 1], color=BLUE, lw=1.5)
+            self.path.scatter([focus[0]], [focus[1]], color=TEAL, s=35, zorder=3)
         self.path.set_aspect("equal", adjustable="box")
         self.path.set_xlabel("x / mm", fontsize=8)
         self.path.set_ylabel("y / mm", fontsize=8)
-        self.path.set_title(f"{SHAPES[config.shape]} · 焦点回读 / 轨迹参考", fontsize=9)
+        self.path.set_title("静态压力分布 · 无移动焦点" if config.phase_table != "NONE" else
+                            f"{SHAPES[config.shape]} · 焦点回读 / 轨迹参考", fontsize=9)
         if np.all(np.ptp(path[:, :2], axis=0) == 0):
             self.path.set_xlim(focus[0]-10, focus[0]+10)
             self.path.set_ylim(focus[1]-10, focus[1]+10)
         self.path.grid(alpha=0.18)
         self.figure.suptitle(title, x=0.05, ha="left", fontsize=11, color=INK)
+        for axis in (self.field, self.phase, self.path):
+            style_axis(axis)
         self.canvas.draw_idle()
 
 
 class App:
     def __init__(self, root):
         self.root = root
-        root.tk.call("tk", "scaling", 4 / 3)
         root.title("触见 · 图形工作台")
-        root.geometry("1380x920")
-        root.minsize(1100, 780)
+        density = float(root.tk.call("tk", "scaling")) / (96 / 72)
+        screen_width, screen_height = root.winfo_screenwidth(), root.winfo_screenheight()
+        work_left, work_top = 0, 0
+        if sys.platform == "win32":
+            from ctypes.wintypes import RECT
+            area = RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(area), 0):
+                work_left, work_top = area.left, area.top
+                screen_width, screen_height = area.right-area.left, area.bottom-area.top
+        margin = round(16*density)
+        available_width = screen_width-2*margin
+        available_height = screen_height-2*margin-round(40*density)
+        root.geometry(f"{min(round(1380*density), available_width)}x{min(round(920*density), available_height)}+{work_left+margin}+{work_top+margin}")
+        root.minsize(min(round(1100*density), available_width), min(round(780*density), available_height))
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", self.close)
         rcParams.update({"font.sans-serif": ["Microsoft YaHei", "SimHei", "DejaVu Sans"],
                          "axes.unicode_minus": False, "font.size": 9})
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="acoustic-model")
+        self.pressure_window = None
         self.session = None
         self.geometry_profile = None
         self.state = None
@@ -183,14 +193,14 @@ class App:
         self.ble_peers = {}
         self.ble_scan = None
         self.connection_layout = None
-        self.connection_hint = tk.StringVar()
+        self.connection_hint = DisplayVar()
         self.port_choice = tk.StringVar()
         self.baud_choice = tk.StringVar(value="115200")
-        self.device_label = tk.StringVar(value="未连接")
-        self.status_line = tk.StringVar(value="点击画布开始绘制。")
-        self.actual_line = tk.StringVar(value="等待板端回读；没有实际输出数据。")
-        self.source_line = tk.StringVar(value="请选择连接方式；没有设备可使用 Demo")
-        self.config_line = tk.StringVar(value="连接设备后可发送图形。")
+        self.device_label = DisplayVar(value="未连接")
+        self.status_line = DisplayVar(value="点击画布开始绘制。")
+        self.actual_line = DisplayVar(value="等待板端回读；没有实际输出数据。")
+        self.source_line = DisplayVar(value="请选择连接方式；没有设备可使用 Demo")
+        self.config_line = DisplayVar(value="连接设备后可发送图形。")
         self.plane = tk.StringVar(value="XY")
         self.mute = tk.BooleanVar(value=False)
         self.show_heartbeat = tk.BooleanVar(value=False)
@@ -199,17 +209,17 @@ class App:
         self.hw_rows = tk.StringVar(value="4")
         self.hw_cols = tk.StringVar(value="4")
         self.hw_pitch = tk.StringVar(value="10")
-        self.hardware_line = tk.StringVar(value="实际阵列尚未由设备确认")
+        self.hardware_line = DisplayVar(value="实际阵列尚未由设备确认")
         self.syncing_geometry = False
         self.vars = {}
         self.current_file = None
         self.saved_signature = None
         self.file_directory = Path.home()
-        self.file_line = tk.StringVar(value="未命名图形")
-        self.size_label = tk.StringVar(value="预设图形半径 / mm")
+        self.file_line = DisplayVar(value="未命名图形")
+        self.size_label = DisplayVar(value="预设图形半径 / mm")
         self._style()
         self._layout()
-        self.set_config(Config())
+        self.set_config(Config(**BUTTON_OUTPUT_SETTINGS))
         self.saved_signature = self.draft_signature()
         for name in ("cx_um", "cy_um"):
             self.vars[name].trace_add("write", lambda *_: self.sync_editor())
@@ -223,35 +233,198 @@ class App:
         self.root.bind("<Control-s>", lambda _: self.save_config())
 
     def _style(self):
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
-        style.configure("TFrame", background=BG)
-        style.configure("Card.TFrame", background=WHITE)
-        style.configure("TLabel", background=BG, foreground=INK, font=("Microsoft YaHei UI", 10))
-        style.configure("Card.TLabel", background=WHITE)
-        style.configure("Muted.TLabel", foreground=MUTED)
-        style.configure("Title.TLabel", font=("Microsoft YaHei UI", 20, "bold"))
-        style.configure("Heading.TLabel", font=("Microsoft YaHei UI", 11, "bold"))
-        style.configure("TButton", font=("Microsoft YaHei UI", 10), padding=(10, 7))
-        style.configure("Primary.TButton", background=BLUE, foreground=WHITE)
-        style.map("Primary.TButton", background=[("active", "#184c9c"), ("disabled", "#bcc9dc")])
-        style.configure("Stop.TButton", background=RED, foreground=WHITE)
-        style.map("Stop.TButton", background=[("active", "#872032"), ("disabled", "#d9bfc5")])
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(15, 8), font=("Microsoft YaHei UI", 10))
-        style.configure("TEntry", padding=4)
-        style.configure("TCombobox", padding=4)
+        install(self.root)
 
     def _layout(self):
-        header = ttk.Frame(self.root, padding=(22, 15, 22, 8))
+        header = ttk.Frame(self.root, padding=(22, 14, 22, 14))
         header.pack(fill="x")
         ttk.Label(header, text="触见", style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text=" /  图形工作台", style="Muted.TLabel").pack(side="left", pady=(7, 0))
-        ttk.Checkbutton(header, text="调试模式", variable=self.debug_mode, command=self.toggle_debug).pack(side="left", padx=24, pady=(7, 0))
+        ttk.Label(header, text="图形工作台", style="Muted.TLabel").pack(side="left", padx=(12, 22))
+        self.file_heading = ttk.Label(header, textvariable=self.file_line, style="Muted.TLabel", width=24)
+        self.file_heading.pack(side="left", fill="x", expand=True)
         self.header_stop = ttk.Button(header, text="停止输出", style="Stop.TButton", command=lambda: self.send("STOP"))
-        self.header_stop.pack(side="right", padx=(14, 0))
-        ttk.Label(header, textvariable=self.device_label, style="Heading.TLabel").pack(side="right")
-        connection = ttk.Frame(self.root, padding=(22, 4, 22, 10))
+        self.header_stop.pack(side="right", padx=(12, 0))
+        self.device_button = ttk.Button(header, textvariable=self.device_label,
+                                        command=lambda: self.navigate("experiment"))
+        self.device_button.pack(side="right")
+        ttk.Separator(self.root).pack(fill="x")
+
+        footer = self.device_footer = ttk.Frame(self.root, padding=(18, 10))
+        footer.pack(side="bottom", fill="x")
+        buttons = ttk.Frame(footer)
+        buttons.pack(side="right")
+        self.apply_button = ttk.Button(buttons, text="发送到设备", style="Primary.TButton", command=self.apply_config)
+        self.start_button = ttk.Button(buttons, text="播放", command=lambda: self.send("START"))
+        self.pause_button = ttk.Button(buttons, text="暂停", command=lambda: self.send("PAUSE"))
+        self.stop_button = ttk.Button(buttons, text="停止", style="Stop.TButton", command=lambda: self.send("STOP"))
+        for button in (self.apply_button, self.start_button, self.pause_button, self.stop_button):
+            button.pack(side="left", padx=(8, 0))
+        feedback = ttk.Frame(footer)
+        feedback.pack(side="left", fill="both", expand=True, padx=(0, 16))
+        self.feedback_label = ttk.Label(feedback, textvariable=self.config_line, style="Heading.TLabel")
+        self.feedback_label.pack(fill="x")
+        wrap_to_width(self.feedback_label)
+        status = ttk.Label(feedback, textvariable=self.status_line, style="Caption.TLabel")
+        status.pack(fill="x", pady=(3, 0))
+        wrap_to_width(status)
+        ttk.Separator(self.root).pack(side="bottom", fill="x")
+
+        body = self.body = ttk.Frame(self.root, style="Shell.TFrame", padding=(12, 12))
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+        nav = ttk.Frame(body, style="Shell.TFrame", padding=(0, 14, 12, 8))
+        nav.grid(row=0, column=0, sticky="ns")
+        ttk.Label(nav, text="工作空间", style="Shell.TLabel").pack(anchor="w", padx=14, pady=(0, 14))
+        self.nav_buttons = {}
+        for key, title in (("replay", "三维回放"), ("drawing", "掌心绘图"), ("playback", "播放查看"), ("experiment", "实验与设备")):
+            button = ttk.Button(nav, text=title, width=11, style="Nav.TButton",
+                                command=lambda page=key: self.navigate(page))
+            button.pack(fill="x", pady=4)
+            self.nav_buttons[key] = button
+        ttk.Label(nav, text="触觉图形工作台\n编辑 · 预览 · 呈现", style="Shell.TLabel").pack(side="bottom", anchor="w", padx=14)
+        file_actions = self.file_actions = ttk.Frame(nav, style="Shell.TFrame")
+        file_actions.pack(side="bottom", fill="x", pady=22)
+        ttk.Button(file_actions, text="导入图形", command=self.load_config).pack(fill="x", pady=4)
+        ttk.Button(file_actions, text="保存图形", command=self.save_config).pack(fill="x", pady=4)
+
+        right = self.workspace_host = ttk.Frame(body, padding=(16, 12))
+        right.grid(row=0, column=1, sticky="nsew")
+        page_header = self.page_header = ttk.Frame(right)
+        page_header.pack(fill="x", pady=(0, 8))
+        self.page_title = tk.StringVar(value="掌心绘图")
+        ttk.Label(page_header, textvariable=self.page_title, style="Page.TLabel").pack(side="left")
+        self.subnav = ttk.Frame(page_header)
+        self.subnav.pack(side="right")
+        self.source_banner = tk.Label(right, textvariable=self.source_line, bg="#f0f4fa", fg=MUTED,
+                                      font=(FONT, 9), anchor="w", padx=10, pady=7)
+        self.source_banner.pack(fill="x", pady=(0, 8))
+        wrap_to_width(self.source_banner, 20)
+        self.hardware_detail = ttk.Label(right, textvariable=self.hardware_line, style="Heading.TLabel")
+        self.actual_detail = ttk.Label(right, textvariable=self.actual_line, style="Muted.TLabel")
+        wrap_to_width(self.hardware_detail)
+        wrap_to_width(self.actual_detail)
+        self.quick_shapes = ttk.Frame(right)
+        self.quick_shapes.pack(fill="x", pady=(0, 8))
+        self.shape_buttons = {}
+        for code, label in SHAPES.items():
+            button = ttk.Button(self.quick_shapes, text="自定义" if code == "CUSTOM" else label,
+                                width=5, padding=(3, 6), command=lambda value=code: self.choose_shape(value))
+            button.pack(side="left", expand=True, fill="x", padx=2)
+            self.shape_buttons[code] = button
+
+        inspector = self.inspector = ttk.Frame(body, width=292, padding=(12, 12))
+        inspector.grid(row=0, column=2, sticky="nsew", padx=(12, 0))
+        inspector.grid_propagate(False)
+        inspector.columnconfigure(0, weight=1)
+        inspector.rowconfigure(1, weight=1)
+        ttk.Label(inspector, text="检查器", style="Heading.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 10))
+        self.inspector_tabs = ttk.Notebook(inspector)
+        self.inspector_tabs.grid(row=1, column=0, sticky="nsew")
+        self.parameters_host = ttk.Frame(self.inspector_tabs)
+        self.object_host = ttk.Frame(self.inspector_tabs)
+        self.inspector_tabs.add(self.parameters_host, text="图形参数")
+        self.inspector_tabs.add(self.object_host, text="对象属性")
+        left_canvas = tk.Canvas(self.parameters_host, bg=WHITE, highlightthickness=0, width=240)
+        left_scroll = ttk.Scrollbar(self.parameters_host, orient="vertical", command=left_canvas.yview)
+        left_scroll.pack(side="right", fill="y")
+        left_canvas.pack(fill="both", expand=True)
+        left_canvas.configure(yscrollcommand=left_scroll.set)
+        left = ttk.Frame(left_canvas, padding=(0, 8, 8, 8))
+        left_window = left_canvas.create_window((0, 0), window=left, anchor="nw")
+        left.bind("<Configure>", lambda _: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+        left_canvas.bind("<Configure>", lambda e: left_canvas.itemconfigure(left_window, width=e.width))
+        def scroll_parameters(event):
+            widget = event.widget
+            while widget is not None:
+                if widget == self.parameters_host:
+                    left_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+                    return "break"
+                widget = getattr(widget, "master", None)
+        self.root.bind_all("<MouseWheel>", scroll_parameters, add="+")
+        left.columnconfigure(0, weight=1)
+        settings = self.settings = ttk.Notebook(left)
+        settings.grid(row=2, column=0, sticky="ew")
+        shape_tab, array_tab = ttk.Frame(settings, padding=4), ttk.Frame(settings, padding=4)
+        self.advanced_tab = array_tab
+        settings.add(shape_tab, text="位置与播放")
+        settings.add(array_tab, text="调试参数")
+        shape_fields = [("shape", "图形", None), ("cx_um", "水平偏移 / mm", 1000),
+                        ("cy_um", "垂直偏移 / mm", 1000), ("z_um", "聚焦高度 / mm", 1000),
+                        ("radius_um", "预设图形半径 / mm", 1000), ("repeat_millihz", "每秒播放次数", 1000)]
+        array_fields = [("carrier_hz", "载波 / Hz", 1),
+                        ("phase_steps", "相位级数", 1), ("mod_hz", "调制 / Hz", 1),
+                        ("level", "输出等级 / %", 1)]
+        self.scales = {}
+        for parent, entries in ((shape_tab, shape_fields), (array_tab, array_fields)):
+            parent.columnconfigure(1, weight=1)
+            for row, (name, title, scale) in enumerate(entries):
+                self.vars[name] = tk.StringVar()
+                self.scales[name] = scale
+                label = ttk.Label(parent, textvariable=self.size_label) if name == "radius_um" else ttk.Label(parent, text=title)
+                label.grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
+                if name == "shape":
+                    widget = ttk.Combobox(parent, textvariable=self.vars[name], values=list(SHAPES.values()),
+                                          state="readonly", width=9)
+                    widget.bind("<<ComboboxSelected>>", self.select_shape)
+                elif name == "phase_steps":
+                    widget = ttk.Combobox(parent, textvariable=self.vars[name], values=[8,16,32,64,128,256],
+                                          state="readonly", width=9)
+                else:
+                    widget = ttk.Entry(parent, textvariable=self.vars[name], width=9)
+                widget.grid(row=row, column=1, sticky="ew")
+        ttk.Label(array_tab, text="等级不是电压或声压；范围仅为协议边界。", style="Muted.TLabel", wraplength=270).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
+        ttk.Button(shape_tab, text="编辑自定义图形", command=lambda: self.choose_shape("CUSTOM")).grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
+        self.button_profile_button = ttk.Button(left, text="套用按键实验参数", command=self.use_button_profile)
+        self.button_profile_button.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        self.copy_button = ttk.Button(left, text="读取设备图形", command=self.copy_actual)
+        self.copy_button.grid(row=4, column=0, sticky="ew", pady=12)
+        ttk.Separator(left).grid(row=6, column=0, sticky="ew", pady=8)
+        ttk.Label(left, text="控制来源", style="Heading.TLabel").grid(row=7, column=0, sticky="w", pady=7)
+        mode_row = ttk.Frame(left)
+        mode_row.grid(row=8, column=0, sticky="ew")
+        mode_row.columnconfigure((0, 1), weight=1)
+        self.local_button = ttk.Button(mode_row, text="设备本地", command=lambda: self.send("MODE", value="LOCAL"))
+        self.local_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.remote_button = ttk.Button(mode_row, text="电脑控制", command=lambda: self.send("MODE", value="REMOTE"))
+        self.remote_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self.demo_box = ttk.LabelFrame(left, text="Demo · 模拟板上操作", padding=8)
+        self.demo_box.grid(row=10, column=0, sticky="ew", pady=5)
+        demo_row = ttk.Frame(self.demo_box)
+        demo_row.pack(fill="x")
+        self.demo_buttons = []
+        for label, action in (("下一图形", "NEXT"), ("播放/暂停", "PLAY"), ("停止", "STOP")):
+            button = ttk.Button(demo_row, text=label, command=lambda a=action: self.send("_BUTTON", action=a))
+            button.pack(side="left", expand=True, fill="x", padx=1)
+            self.demo_buttons.append(button)
+        self.mute_check = ttk.Checkbutton(self.demo_box, text="模拟回传中断（触发超时）", variable=self.mute,
+                                          command=lambda: self.send("_MUTE", value=self.mute.get()))
+        self.mute_check.pack(anchor="w", pady=(6,0))
+
+        self.tabs = ttk.Notebook(right, style="Workspace.TNotebook")
+        self.tabs.pack(fill="both", expand=True)
+        actual_tab, forecast_tab, self.editor_tab, measured_tab, log_tab, device_tab = [ttk.Frame(self.tabs) for _ in range(6)]
+        self.debug_tabs = [actual_tab, forecast_tab, measured_tab, log_tab]
+        self.tabs.add(actual_tab, text="设备回读")
+        self.tabs.add(forecast_tab, text="电脑预测")
+        self.tabs.add(self.editor_tab, text="自定义图形")
+        self.tabs.add(measured_tab, text="实测数据")
+        self.tabs.add(log_tab, text="通信日志")
+        self.tabs.add(device_tab, text="设备设置")
+        self.preset_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.preset_tab, text="图案预览")
+        self.preset_preview = PresetPreview(self.preset_tab, self.apply_config)
+        self.preset_preview.apply_button.pack_forget()
+        self.preset_preview.pack(fill="both", expand=True)
+        self.playback_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.playback_tab, text="播放画面")
+        self.playback = PlaybackPanel(self.playback_tab, lambda: self.send("START"),
+                                      lambda: self.send("PAUSE"), lambda: self.send("STOP"),
+                                      self.select_shape)
+        for button in (self.playback.play_button, self.playback.pause_button, self.playback.stop_button):
+            button.pack_forget()
+        self.playback.pack(fill="both", expand=True)
+        connection = ttk.Frame(device_tab, padding=(18, 16, 18, 10))
         connection.pack(fill="x")
         connection_controls = ttk.Frame(connection)
         connection_controls.pack(fill="x")
@@ -287,149 +460,6 @@ class App:
         ttk.Label(connection_info, textvariable=self.connection_hint, style="Muted.TLabel").pack(side="left")
         self.protocol_label = ttk.Label(connection_info, text="HAP3 草案", style="Muted.TLabel")
         self.protocol_label.pack(side="right")
-        ttk.Label(self.root, textvariable=self.status_line, style="Muted.TLabel", padding=(22,7),
-                  wraplength=1040).pack(side="bottom", fill="x")
-
-        body = ttk.Frame(self.root, padding=(18, 0, 18, 8))
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(1, weight=1)
-        body.rowconfigure(0, weight=1)
-        left_host = ttk.Frame(body, width=350)
-        left_host.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        left_host.grid_propagate(False)
-        left_host.rowconfigure(0, weight=1)
-        left_host.columnconfigure(0, weight=1)
-        left_canvas = tk.Canvas(left_host, bg=BG, highlightthickness=0, width=330)
-        left_canvas.grid(row=0, column=0, sticky="nsew")
-        left_scroll = ttk.Scrollbar(left_host, orient="vertical", command=left_canvas.yview)
-        left_scroll.grid(row=0, column=1, sticky="ns")
-        left_canvas.configure(yscrollcommand=left_scroll.set)
-        left = ttk.Frame(left_canvas, padding=(4, 5, 10, 8))
-        left_window = left_canvas.create_window((0, 0), window=left, anchor="nw")
-        left.bind("<Configure>", lambda _: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
-        left_canvas.bind("<Configure>", lambda e: left_canvas.itemconfigure(left_window, width=e.width))
-        def scroll_left(event):
-            widget = event.widget
-            while widget is not None:
-                if widget == left_host:
-                    left_canvas.yview_scroll(-int(event.delta / 120), "units")
-                    return "break"
-                widget = getattr(widget, "master", None)
-        self.root.bind_all("<MouseWheel>", scroll_left, add="+")
-        left.columnconfigure(0, weight=1)
-        ttk.Label(left, text="图形设置", style="Heading.TLabel").grid(row=1, column=0, sticky="w", pady=(0, 8))
-        settings = self.settings = ttk.Notebook(left)
-        settings.grid(row=2, column=0, sticky="ew")
-        shape_tab, array_tab = ttk.Frame(settings, padding=10), ttk.Frame(settings, padding=10)
-        self.advanced_tab = array_tab
-        settings.add(shape_tab, text="图形")
-        settings.add(array_tab, text="调试参数")
-        shape_fields = [("shape", "图形", None), ("cx_um", "水平偏移 / mm", 1000),
-                        ("cy_um", "垂直偏移 / mm", 1000), ("z_um", "显示高度 / mm", 1000),
-                        ("radius_um", "预设图形半径 / mm", 1000), ("repeat_millihz", "每秒播放次数", 1000)]
-        array_fields = [("carrier_hz", "载波 / Hz", 1),
-                        ("phase_steps", "相位级数", 1), ("mod_hz", "调制 / Hz", 1),
-                        ("level", "输出等级 / %", 1)]
-        self.scales = {}
-        for parent, entries in ((shape_tab, shape_fields), (array_tab, array_fields)):
-            parent.columnconfigure(1, weight=1)
-            for row, (name, title, scale) in enumerate(entries):
-                self.vars[name] = tk.StringVar()
-                self.scales[name] = scale
-                label = ttk.Label(parent, textvariable=self.size_label) if name == "radius_um" else ttk.Label(parent, text=title)
-                label.grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
-                if name == "shape":
-                    widget = ttk.Combobox(parent, textvariable=self.vars[name], values=list(SHAPES.values()),
-                                          state="readonly", width=12)
-                    widget.bind("<<ComboboxSelected>>", self.select_shape)
-                elif name == "phase_steps":
-                    widget = ttk.Combobox(parent, textvariable=self.vars[name], values=[8,16,32,64,128,256],
-                                          state="readonly", width=12)
-                else:
-                    widget = ttk.Entry(parent, textvariable=self.vars[name], width=13)
-                widget.grid(row=row, column=1, sticky="ew")
-        ttk.Label(array_tab, text="等级不是电压或声压；范围仅为协议边界。", style="Muted.TLabel", wraplength=270).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
-        ttk.Button(shape_tab, text="编辑自定义图形", command=lambda: self.choose_shape("CUSTOM")).grid(row=6, column=0, columnspan=2, sticky="ew", pady=5)
-        actions = ttk.Frame(left)
-        actions.grid(row=3, column=0, sticky="ew", pady=10)
-        actions.columnconfigure((0, 1), weight=1)
-        self.apply_button = ttk.Button(actions, text="发送到设备", style="Primary.TButton", command=self.apply_config)
-        self.apply_button.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ttk.Button(actions, text="导入图形", command=self.load_config).grid(row=1, column=0, sticky="ew", pady=5, padx=(0, 4))
-        ttk.Button(actions, text="保存图形", command=self.save_config).grid(row=1, column=1, sticky="ew", pady=5, padx=(4, 0))
-        ttk.Label(actions, textvariable=self.file_line, style="Muted.TLabel", wraplength=290).grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(2, 4))
-        self.copy_button = ttk.Button(left, text="读取设备图形", command=self.copy_actual)
-        self.copy_button.grid(row=4, column=0, sticky="ew")
-        ttk.Label(left, textvariable=self.config_line, wraplength=295, style="Muted.TLabel").grid(row=5, column=0, sticky="w", pady=8)
-        ttk.Separator(left).grid(row=6, column=0, sticky="ew", pady=4)
-        ttk.Label(left, text="播放控制", style="Heading.TLabel").grid(row=7, column=0, sticky="w", pady=7)
-        mode_row = ttk.Frame(left)
-        mode_row.grid(row=8, column=0, sticky="ew")
-        mode_row.columnconfigure((0,1), weight=1)
-        self.local_button = ttk.Button(mode_row, text="设备本地控制", command=lambda: self.send("MODE", value="LOCAL"))
-        self.local_button.grid(row=0, column=0, sticky="ew", padx=(0,4))
-        self.remote_button = ttk.Button(mode_row, text="电脑控制", command=lambda: self.send("MODE", value="REMOTE"))
-        self.remote_button.grid(row=0, column=1, sticky="ew", padx=(4,0))
-        run_row = ttk.Frame(left)
-        run_row.grid(row=9, column=0, sticky="ew", pady=8)
-        run_row.columnconfigure((0,1,2), weight=1)
-        self.start_button = ttk.Button(run_row, text="播放", style="Primary.TButton", command=lambda: self.send("START"))
-        self.pause_button = ttk.Button(run_row, text="暂停", command=lambda: self.send("PAUSE"))
-        self.stop_button = ttk.Button(run_row, text="停止", style="Stop.TButton", command=lambda: self.send("STOP"))
-        for col, button in enumerate((self.start_button, self.pause_button, self.stop_button)):
-            button.grid(row=0, column=col, sticky="ew", padx=2)
-        self.demo_box = ttk.LabelFrame(left, text="Demo · 模拟板上操作", padding=8)
-        self.demo_box.grid(row=10, column=0, sticky="ew", pady=5)
-        demo_row = ttk.Frame(self.demo_box)
-        demo_row.pack(fill="x")
-        self.demo_buttons = []
-        for label, action in (("下一图形", "NEXT"), ("播放/暂停", "PLAY"), ("停止", "STOP")):
-            button = ttk.Button(demo_row, text=label, command=lambda a=action: self.send("_BUTTON", action=a))
-            button.pack(side="left", expand=True, fill="x", padx=1)
-            self.demo_buttons.append(button)
-        self.mute_check = ttk.Checkbutton(self.demo_box, text="模拟回传中断（触发超时）", variable=self.mute,
-                                          command=lambda: self.send("_MUTE", value=self.mute.get()))
-        self.mute_check.pack(anchor="w", pady=(6,0))
-
-        right = ttk.Frame(body)
-        right.grid(row=0, column=1, sticky="nsew")
-        self.source_banner = tk.Label(right, textvariable=self.source_line, bg="#e0e9f6", fg=INK,
-                                      font=("Microsoft YaHei UI", 10), anchor="w", padx=12, pady=9)
-        self.source_banner.pack(fill="x", pady=(0,5))
-        self.hardware_detail = ttk.Label(right, textvariable=self.hardware_line, style="Heading.TLabel", wraplength=900)
-        self.hardware_detail.pack(fill="x", pady=(2, 5))
-        self.actual_detail = ttk.Label(right, textvariable=self.actual_line, wraplength=950, style="Muted.TLabel")
-        self.actual_detail.pack(fill="x", pady=(2,8))
-        quick_shapes = ttk.Frame(right)
-        quick_shapes.pack(fill="x", pady=(3, 8))
-        ttk.Label(quick_shapes, text="图案").pack(side="left", padx=(0, 6))
-        self.shape_buttons = {}
-        for code, label in SHAPES.items():
-            button = ttk.Button(quick_shapes, text="自定义" if code == "CUSTOM" else label,
-                                width=5, padding=(3, 6), command=lambda value=code: self.choose_shape(value))
-            button.pack(side="left", expand=True, fill="x", padx=1)
-            self.shape_buttons[code] = button
-        self.tabs = ttk.Notebook(right)
-        self.tabs.pack(fill="both", expand=True)
-        actual_tab, forecast_tab, self.editor_tab, measured_tab, log_tab, device_tab = [ttk.Frame(self.tabs) for _ in range(6)]
-        self.debug_tabs = [actual_tab, forecast_tab, measured_tab, log_tab]
-        self.tabs.add(actual_tab, text="设备回读")
-        self.tabs.add(forecast_tab, text="电脑预测")
-        self.tabs.add(self.editor_tab, text="自定义图形")
-        self.tabs.add(measured_tab, text="实测数据")
-        self.tabs.add(log_tab, text="通信日志")
-        self.tabs.add(device_tab, text="设备设置")
-        self.preset_tab = ttk.Frame(self.tabs)
-        self.tabs.add(self.preset_tab, text="图案预览")
-        self.preset_preview = PresetPreview(self.preset_tab, self.apply_config)
-        self.preset_preview.pack(fill="both", expand=True)
-        self.playback_tab = ttk.Frame(self.tabs)
-        self.tabs.add(self.playback_tab, text="播放画面")
-        self.playback = PlaybackPanel(self.playback_tab, lambda: self.send("START"),
-                                      lambda: self.send("PAUSE"), lambda: self.send("STOP"),
-                                      self.select_shape)
-        self.playback.pack(fill="both", expand=True)
         self._device_tab(device_tab)
         view_row = ttk.Frame(actual_tab, padding=8)
         view_row.pack(fill="x")
@@ -450,7 +480,8 @@ class App:
         self.forecast_plot = PlotPanel(forecast_tab)
         self.forecast_plot.pack(fill="both", expand=True)
         self.editor = SketchEditor(self.editor_tab, self.preview_sketch, self.apply_custom, self.save_custom, self.load_config,
-                                 on_change=lambda: self.vars["shape"].set(SHAPES["CUSTOM"]))
+                                 on_change=lambda: self.vars["shape"].set(SHAPES["CUSTOM"]),
+                                 inspector_parent=self.object_host)
         self.editor.pack(fill="both", expand=True)
         self._measurement_tab(measured_tab)
         log_controls = ttk.Frame(log_tab, padding=8)
@@ -462,12 +493,118 @@ class App:
         self.log_view.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         self.log_view.pack(fill="both", expand=True)
+        self.device_tab = device_tab
+        from .replay_panel import ReplayPanel
+        self.replay_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.replay_tab, text="三维回放")
+        self.replay = ReplayPanel(self.replay_tab, on_pressure=self.open_pressure)
+        self.replay.pack(fill="both", expand=True)
+        self.page_groups = {
+            "replay": [self.replay_tab],
+            "drawing": [self.editor_tab, self.preset_tab],
+            "playback": [self.playback_tab],
+            "experiment": [device_tab, actual_tab, forecast_tab, measured_tab, log_tab],
+        }
+        self.current_page = None
+        self.workspace_selection = None
+        self.tabs.bind("<<NotebookTabChanged>>", self._workspace_changed)
+        self.root.bind("<Configure>", self._resize_workspace, add="+")
+        self._workspace_changed()
         self.update_controls()
+
+    def navigate(self, page):
+        if page == "drawing":
+            target = self.editor_tab if self.vars["shape"].get() == SHAPES["CUSTOM"] else self.preset_tab
+        else:
+            target = self.page_groups[page][0]
+        self.tabs.select(target)
+        self._workspace_changed()
+
+    def _workspace_changed(self, _event=None):
+        if not hasattr(self, "page_groups"):
+            return
+        selected = self.tabs.select()
+        selection = (selected, self.debug_mode.get())
+        if self.workspace_selection == selection:
+            return
+        self.workspace_selection = selection
+        page = next((key for key, tabs in self.page_groups.items() if selected in map(str, tabs)), "drawing")
+        titles = {"replay": "三维数据回放", "drawing": "掌心绘图", "playback": "播放查看", "experiment": "实验与设备"}
+        self.page_title.set(titles[page])
+        self.replay.set_active(page == "replay")
+        if page == "replay":
+            self.page_header.pack_forget()
+            self.device_footer.pack_forget()
+            self.source_banner.pack_forget()
+            self.file_heading.pack_forget()
+            self.file_actions.pack_forget()
+            self.hardware_detail.pack_forget()
+            self.actual_detail.pack_forget()
+        else:
+            self.page_header.pack(fill="x", pady=(0,8), before=self.tabs)
+            self.device_footer.pack(side="bottom", fill="x", before=self.body)
+            self.source_banner.pack(fill="x", pady=(0,8), before=self.tabs)
+            self.file_heading.pack(side="left", fill="x", expand=True)
+            self.file_actions.pack(side="bottom", fill="x", pady=22)
+            if self.debug_mode.get():
+                self.hardware_detail.pack(fill="x", before=self.tabs)
+                self.actual_detail.pack(fill="x", before=self.tabs)
+        for key, button in self.nav_buttons.items():
+            button.configure(style="Selected.Nav.TButton" if key == page else "Nav.TButton")
+        # The notebook owns selection, including automatic transitions after
+        # CONFIG/START. Navigation never edits a draft or sends device commands.
+        for child in self.subnav.winfo_children():
+            child.destroy()
+        if page == "experiment":
+            ttk.Checkbutton(self.subnav, text="调试模式", variable=self.debug_mode,
+                            command=self.toggle_debug).pack(side="right")
+        elif page == "drawing":
+            for tab, title in ((self.editor_tab, "草图"), (self.preset_tab, "预览")):
+                ttk.Button(self.subnav, text=title, width=5,
+                           style="Primary.TButton" if selected == str(tab) else "TButton",
+                           command=(lambda: self.choose_shape("CUSTOM")) if tab == self.editor_tab
+                           else lambda: self.tabs.select(self.preset_tab)).pack(side="left", padx=3)
+        if hasattr(self, "experiment_links"):
+            self.experiment_links.destroy()
+        self.experiment_links = ttk.Frame(self.workspace_host)
+        if page == "experiment":
+            self.experiment_links.pack(fill="x", pady=(0, 8), before=self.tabs)
+            for tab in self.page_groups[page]:
+                if self.tabs.tab(tab, "state") != "hidden":
+                    ttk.Button(self.experiment_links, text=self.tabs.tab(tab, "text"),
+                               style="Primary.TButton" if selected == str(tab) else "TButton",
+                               command=lambda t=tab: self.tabs.select(t)).pack(side="left", padx=(0, 6))
+            self.inspector.grid_remove()
+            self.quick_shapes.pack_forget()
+        elif page == "replay":
+            self.inspector.grid_remove()
+            self.quick_shapes.pack_forget()
+        else:
+            self.inspector.grid()
+            if selected == str(self.preset_tab):
+                self.quick_shapes.pack(fill="x", pady=(0, 8), before=self.tabs)
+            else:
+                self.quick_shapes.pack_forget()
+        is_editor = selected == str(self.editor_tab)
+        self.inspector_tabs.tab(self.object_host, state="normal" if is_editor else "hidden")
+        if is_editor and self.current_page != selected:
+            self.inspector_tabs.select(self.object_host)
+        self.current_page = selected
+
+    def _resize_workspace(self, event):
+        if event.widget != self.root:
+            return
+        # Leave most width to the canvas; give the inspector extra room when
+        # system text scaling is larger. Its content scrolls vertically.
+        scale = float(self.root.tk.call("tk", "scaling")) / (96 / 72)
+        width = round(292 * max(1, scale))
+        if int(self.inspector.cget("width")) != width:
+            self.inspector.configure(width=width)
 
     def toggle_debug(self):
         enabled = self.debug_mode.get()
         if not enabled and self.tabs.select() in [str(tab) for tab in self.debug_tabs]:
-            self.tabs.select(self.editor_tab)
+            self.tabs.select(self.device_tab)
         for tab in self.debug_tabs:
             self.tabs.tab(tab, state="normal" if enabled else "hidden")
         self.settings.tab(self.advanced_tab, state="normal" if enabled else "hidden")
@@ -482,11 +619,29 @@ class App:
                 widget.pack_forget()
             self.demo_box.grid_remove()
         self.editor.set_debug(enabled)
+        self._workspace_changed()
         self.update_controls()
 
     def _device_tab(self, parent):
-        content = ttk.Frame(parent, padding=18)
-        content.pack(fill="both", expand=True)
+        viewport = ttk.Frame(parent)
+        viewport.pack(fill="both", expand=True)
+        scroll = ttk.Scrollbar(viewport, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        canvas = tk.Canvas(viewport, bg=WHITE, highlightthickness=0, yscrollcommand=scroll.set)
+        canvas.pack(fill="both", expand=True)
+        scroll.configure(command=canvas.yview)
+        content = ttk.Frame(canvas, padding=18)
+        window = canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind("<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        def scroll_device(event):
+            widget = event.widget
+            while widget is not None:
+                if widget == viewport:
+                    canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+                    return "break"
+                widget = getattr(widget, "master", None)
+        self.root.bind_all("<MouseWheel>", scroll_device, add="+")
         ttk.Label(content, text="设备设置", style="Heading.TLabel").pack(anchor="w", pady=(0, 10))
         ttk.Label(content, text="选择演示设备的阵列尺寸。真实设备连接后自动识别。",
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=(0, 18))
@@ -516,7 +671,7 @@ class App:
                   "本程序未模拟 FPGA 的高速更新时序，也未验证触觉效果。",
                   wraplength=650, style="Muted.TLabel").pack(anchor="w", pady=(14, 0))
         ttk.Label(self.device_details, textvariable=self.hardware_line, wraplength=650, style="Heading.TLabel").pack(anchor="w", pady=(24, 8))
-        self.workspace_line = tk.StringVar(value="工作空间：等待设备声明。声明范围不代表已经验证触觉效果。")
+        self.workspace_line = DisplayVar(value="工作空间：等待设备声明。声明范围不代表已经验证触觉效果。")
         ttk.Label(self.device_details, textvariable=self.workspace_line, wraplength=650, style="Muted.TLabel").pack(anchor="w")
 
     def _measurement_tab(self, parent):
@@ -541,6 +696,7 @@ class App:
         self.measurement_figure.subplots_adjust(left=.12,right=.90,bottom=.12,top=.9)
         self.measurement_axis.set_xlabel("x / mm")
         self.measurement_axis.set_ylabel("y / mm")
+        style_axis(self.measurement_axis)
         self.measurement_canvas = FigureCanvasTkAgg(self.measurement_figure, parent)
         self.measurement_canvas.get_tk_widget().pack(fill="both",expand=True)
         self.measurement_colorbar = None
@@ -551,6 +707,8 @@ class App:
 
     def set_config(self, config, document=None):
         config.validate()
+        if config.phase_table != "NONE":
+            raise ValueError("静态压力帧请在数据回放页生成，不能载入轨迹编辑器")
         self.editor.set_config(config, document)
         self.syncing_geometry = True
         for name, variable in self.vars.items():
@@ -652,6 +810,14 @@ class App:
     def save_custom(self):
         self.vars["shape"].set(SHAPES["CUSTOM"])
         self.save_config()
+
+    def use_button_profile(self):
+        """Change the draft only; retain geometry and never send or start."""
+        for name, value in BUTTON_OUTPUT_SETTINGS.items():
+            self.vars[name].set(f"{value / self.scales[name]:g}")
+        self.refresh_pattern_preview()
+        self.update_controls()
+        self.status_line.set("已套用：聚焦高度 50 mm、每秒一圈、等级 100%、不调制。停止后重新发送；尚未改变设备输出。")
 
     def get_config(self):
         values = {}
@@ -810,6 +976,27 @@ class App:
         return bool(self.state and self.confirmed_config ==
                     (self.state.boot, self.state.revision, self.state.config))
 
+    def open_pressure(self, sequence, index):
+        from .pressure_panel import PressureWindow
+        if self.pressure_window is not None and self.pressure_window.winfo_exists():
+            self.pressure_window.destroy()
+        self.pressure_window = PressureWindow(self, sequence, index)
+
+    def pressure_send_issue(self, result):
+        if not self.ready or not self.session:
+            return "尚未连接；可连接模拟设备完成离线发送。"
+        if "STATIC_PHASE" not in self.capabilities:
+            return "当前设备固件不支持压力单帧，不能发送。"
+        if result.array != self.hardware:
+            return "连接的阵列与生成时不同，请重新生成。"
+        if not self.state or time.monotonic()-self.received >= 1.6:
+            return "等待最新设备状态。"
+        if self.busy or self.await_revision is not None or self.calibration_panel.busy:
+            return "上一操作尚未完成。"
+        if self.state.mode != "REMOTE" or self.state.state != "IDLE":
+            return "请先停止播放并切换到电脑控制。"
+        return self.workspace.incompatibility(result.config) if self.workspace else "缺少设备工作范围。"
+
     def can_play(self):
         if self.calibration_panel.busy:
             return False
@@ -818,6 +1005,8 @@ class App:
                 and self.state.mode == "REMOTE" and self.state.state in ("IDLE", "PAUSED")):
             return False
         try:
+            if self.state.config.phase_table != "NONE":
+                return "STATIC_PHASE" in self.capabilities
             return self.get_config() == self.state.config
         except (ValueError, OverflowError):
             return False
@@ -1038,20 +1227,23 @@ class App:
         scanning = self.ble_scan is not None
         for button, enabled in ((self.connect_button,not alive and not scanning), (self.disconnect_button,alive),
                                 (self.apply_button,remote and idle and free), (self.local_button,idle and free),
-                                (self.remote_button,fresh and free and (idle or self.state.mode == "LOCAL")), (self.copy_button,fresh),
+                                (self.remote_button,fresh and free and (idle or self.state.mode == "LOCAL")),
+                                (self.copy_button,fresh and self.state.config.phase_table == "NONE"),
                                 (self.start_button,self.can_play()),
                                 (self.pause_button,remote and free and self.state.state == "RUNNING" if fresh else False),
                                 (self.stop_button,self.ready), (self.header_stop,self.ready),
                                 (self.snap_button,self.ready), (self.export_button,self.state is not None)):
-            button.configure(state="normal" if enabled else "disabled")
+            configure_if_changed(button, state="normal" if enabled else "disabled")
         for target, source in ((self.playback.play_button, self.start_button),
                                (self.playback.pause_button, self.pause_button),
                                (self.playback.stop_button, self.stop_button)):
-            target.configure(state=source["state"])
+            configure_if_changed(target, state=source["state"])
         play_label = "继续播放" if fresh and self.state.state == "PAUSED" else "播放"
-        self.start_button.configure(text=play_label)
-        self.playback.play_button.configure(text=play_label)
-        self.connection_picker.configure(state="disabled" if alive or scanning else "readonly")
+        static_frame = fresh and self.state.config.phase_table != "NONE"
+        configure_if_changed(self.apply_button, text="改发绘图草稿" if static_frame else "发送到设备")
+        configure_if_changed(self.start_button, text=play_label)
+        configure_if_changed(self.playback.play_button, text=play_label)
+        configure_if_changed(self.connection_picker, state="disabled" if alive or scanning else "readonly")
         serial_selected = self.mode_choice.get() == "真实串口"
         ble_selected = self.mode_choice.get() == "BLE 蓝牙"
         demo_selected = self.mode_choice.get().startswith("Demo")
@@ -1059,37 +1251,38 @@ class App:
             self.serial_options.grid_remove()
             self.ble_options.grid_remove()
             if ble_selected:
-                self.ble_options.grid(row=0, column=1, sticky="ew")
+                self.ble_options.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(10, 0))
             elif serial_selected:
-                self.serial_options.grid(row=0, column=1, sticky="w")
+                self.serial_options.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(10, 0))
             self.connection_layout = self.mode_choice.get()
         self.connection_hint.set("先扫描并选择你们的蓝牙模块；连接后需由设备确认。" if ble_selected else
                                  "波特率可输入，需与板端一致。" if serial_selected else
                                  "无硬件演示：连接后先发送图形，再播放。")
-        self.protocol_label.configure(text="HAP3 草案 · BLE GATT" if ble_selected else
+        configure_if_changed(self.protocol_label, text="HAP3 草案 · BLE GATT" if ble_selected else
                                       "HAP3 草案 · 串口 8N1" if serial_selected else "HAP3 草案 · 内存模拟")
-        self.port_picker.configure(state="normal" if not alive and serial_selected else "disabled")
-        self.baud_picker.configure(state="normal" if not alive and serial_selected else "disabled")
-        self.refresh_button.configure(state="normal" if not alive else "disabled")
-        self.ble_picker.configure(state="readonly" if not alive and not scanning else "disabled")
-        self.scan_button.configure(state="disabled" if alive else "normal",
+        configure_if_changed(self.port_picker, state="normal" if not alive and serial_selected else "disabled")
+        configure_if_changed(self.baud_picker, state="normal" if not alive and serial_selected else "disabled")
+        configure_if_changed(self.refresh_button, state="normal" if not alive else "disabled")
+        configure_if_changed(self.ble_picker, state="readonly" if not alive and not scanning else "disabled")
+        configure_if_changed(self.scan_button, state="disabled" if alive else "normal",
                                    text="取消扫描" if scanning else "扫描设备")
-        self.ble_settings_button.configure(state="disabled" if alive or scanning else "normal")
-        self.demo_array_picker.configure(state="readonly" if not alive and demo_selected else "disabled")
-        self.geometry_load_button.configure(state='disabled' if alive else 'normal')
+        configure_if_changed(self.ble_settings_button, state="disabled" if alive or scanning else "normal")
+        configure_if_changed(self.demo_array_picker, state="readonly" if not alive and demo_selected else "disabled")
+        configure_if_changed(self.geometry_load_button, state='disabled' if alive else 'normal')
         for entry in self.hw_entries:
-            entry.configure(state="normal" if not alive and demo_selected and self.geometry_profile is None else "disabled")
-        self.editor.apply_button.configure(state="normal" if remote and idle and free and "SCAN_PATHS" in self.capabilities else "disabled")
+            configure_if_changed(entry, state="normal" if not alive and demo_selected and self.geometry_profile is None else "disabled")
+        configure_if_changed(self.editor.apply_button, state="normal" if remote and idle and free and "SCAN_PATHS" in self.capabilities else "disabled")
         demo_live = self.ready and self.session and self.session.is_demo
         for button in self.demo_buttons:
-            button.configure(state="normal" if demo_live and not calibrating else "disabled")
-        self.mute_check.configure(state="normal" if demo_live and not calibrating else "disabled")
+            configure_if_changed(button, state="normal" if demo_live and not calibrating else "disabled")
+        configure_if_changed(self.mute_check, state="normal" if demo_live and not calibrating else "disabled")
         if self.state:
             age = time.monotonic()-self.received
             state = self.state
             status = {"IDLE":"待机","RUNNING":"运行","PAUSED":"暂停","FAULT":"故障"}[state.state]
-            self.actual_line.set(f"{state.mode} · {status} · 输出{'启用' if state.output else '关闭'} · "
-                                 f"焦点 ({state.focus_mm[0]:.1f}, {state.focus_mm[1]:.1f}, {state.focus_mm[2]:.1f}) mm · "
+            position = ("静态压力相位表 · 无移动焦点" if state.config.phase_table != "NONE" else
+                        f"焦点 ({state.focus_mm[0]:.1f}, {state.focus_mm[1]:.1f}, {state.focus_mm[2]:.1f}) mm")
+            self.actual_line.set(f"{state.mode} · {status} · 输出{'启用' if state.output else '关闭'} · {position} · "
                                  f"配置 v{state.revision} · 快照 #{state.sample} · {age:.1f} s 前 · {state.reason}")
             if fresh:
                 if self.debug_mode.get():
@@ -1098,13 +1291,14 @@ class App:
                 else:
                     mode = "设备本地控制" if state.mode == "LOCAL" else "电脑控制"
                     self.source_line.set(f"{'Demo 路径演示' if state.simulated else '设备已连接'} · {status} · {mode}")
-                self.source_banner.configure(bg="#fff0d5" if state.simulated else "#dff2ed", fg=AMBER if state.simulated else TEAL)
+                configure_if_changed(self.source_banner, bg="#fff0d5" if state.simulated else "#dff2ed", fg=AMBER if state.simulated else TEAL)
             elif self.ready:
                 self.source_line.set("设备暂未响应 · 当前状态未知")
-                self.source_banner.configure(bg="#fbe9e9", fg=RED)
+                configure_if_changed(self.source_banner, bg="#fbe9e9", fg=RED)
             try:
                 config = self.get_config()
-                same = config == state.config
+                static = state.config.phase_table != "NONE"
+                same = static or config == state.config
                 message = "图形发送成功，可以播放。" if same and self.config_confirmed() else (
                     "请先发送图形，确认后才能播放。" if same else "图形有更改，请重新发送后播放。")
                 if same and self.config_confirmed() and state.state == "RUNNING":
@@ -1114,12 +1308,14 @@ class App:
                 mismatch = self.workspace.incompatibility(config) if self.workspace else ""
                 if mismatch:
                     message = "图形超出设备范围，请调整位置、尺寸或高度。"
-                    self.apply_button.configure(state="disabled")
-                    self.editor.apply_button.configure(state="disabled")
+                    configure_if_changed(self.apply_button, state="disabled")
+                    configure_if_changed(self.editor.apply_button, state="disabled")
                 if self.await_revision is not None:
                     message = "正在确认设备状态…"
                 if not fresh:
                     message = "设备未连接或暂未响应。"
+                elif static and self.config_confirmed() and not self.busy:
+                    message = "压力单帧已确认；点“播放”输出此帧。“改发绘图草稿”会替换此帧。"
                 self.config_line.set(message)
             except (ValueError, OverflowError):
                 self.config_line.set("请完成图形并检查输入的数值。")
@@ -1134,7 +1330,7 @@ class App:
             feedback = "设备按键控制中；电脑显示设备返回的播放状态。"
         self.playback.update_state(self.state, fresh, feedback,
                                    self.session.connection_label if self.session else "")
-        self.preset_preview.apply_button.configure(state=self.apply_button["state"])
+        configure_if_changed(self.preset_preview.apply_button, state=self.apply_button["state"])
 
     def draft_signature(self):
         # Include invalid/incomplete edits so they cannot be discarded silently.
@@ -1282,6 +1478,7 @@ class App:
             scatter=self.measurement_axis.scatter(points[:,0],points[:,1],c=points[:,2],cmap="viridis",s=22)
             self.measurement_axis.set(xlabel="x / mm",ylabel="y / mm",title="导入扫描值 · 单位与校准由数据提供者确认")
             self.measurement_axis.set_aspect("equal",adjustable="datalim")
+            style_axis(self.measurement_axis)
             self.measurement_colorbar=self.measurement_figure.colorbar(scatter,ax=self.measurement_axis)
             self.measurement_colorbar.set_label("原始相对幅值")
             self.measurement_label.set(f"{Path(filename).name} · {len(points)} 个点 · 导入数据，软件未验证采集来源")
@@ -1302,6 +1499,8 @@ class App:
         if self.session:
             self.session.close()
         self.executor.shutdown(wait=False,cancel_futures=True)
+        if self.pressure_window is not None and self.pressure_window.winfo_exists():
+            self.pressure_window.destroy()
         deadline=time.monotonic()+4.5
         def finish():
             working = (self.session and self.session.is_alive()) or (self.ble_scan and self.ble_scan.is_alive())
@@ -1319,6 +1518,7 @@ def main():
     args=parser.parse_args()
     root=tk.Tk()
     app=App(root)
+    app.navigate("replay")
     if args.demo:
         root.after(300,app.connect)
     root.mainloop()

@@ -145,9 +145,12 @@ module hap2_out #(
     /* verilator lint_off UNUSEDSIGNAL */
     reg [7:0]          code [0:CHANNELS-1];   // 锁进来的相位码，只为了看波形
     /* verilator lint_on UNUSEDSIGNAL */
-    reg [ACC_BITS-1:0] off  [0:CHANNELS-1];
+    // Every lane reads simultaneously and commit copies the entire bank.
+    // Force registers: at 64 channels Gowin otherwise replicates block RAM
+    // per read port (256 extra blocks across calibration + normal outputs).
+    reg [ACC_BITS-1:0] off  [0:CHANNELS-1] /* synthesis syn_ramstyle = "registers" */;
     reg [7:0] next_code [0:CHANNELS-1];
-    reg [ACC_BITS-1:0] next_off [0:CHANNELS-1];
+    reg [ACC_BITS-1:0] next_off [0:CHANNELS-1] /* synthesis syn_ramstyle = "registers" */;
     reg [ACC_BITS-1:0] acc;
     reg [7:0]          load_i;
     reg                loading, load_wait;

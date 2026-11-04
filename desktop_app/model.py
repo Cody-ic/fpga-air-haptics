@@ -19,6 +19,11 @@ from .array_geometry import Geometry, grid_geometry
 
 MAX_SCAN_POINTS = 256
 MAX_STROKES = 32
+DEFAULT_OUTPUT_LEVEL = 100
+# Match the user's 2026-10-29 button-circle experiment. Protocol decoding and
+# imported configurations keep their explicit values.
+BUTTON_OUTPUT_SETTINGS = dict(carrier_hz=40000, phase_steps=64, z_um=50000,
+                              repeat_millihz=1000, mod_hz=0, level=100)
 
 SHAPES = {"POINT": "固定点", "LINE_X": "水平线", "LINE_Y": "竖直线",
           "CIRCLE": "圆", "SQUARE": "正方形", "TRIANGLE": "三角形", "ARROW": "箭头", "CUSTOM": "自定义图形"}
@@ -134,12 +139,13 @@ class Config:
     radius_um: int = 20000
     repeat_millihz: int = 500
     mod_hz: int = 200
-    level: int = 30
+    level: int = DEFAULT_OUTPUT_LEVEL
     shape: str = "CIRCLE"
     path_xy_um: str = "NONE"
     path_closed: int = 1
     scan_paths: str = "NONE"
     blank_us: int = 2000
+    phase_table: str = "NONE"
 
     def validate(self):
         limits = {"carrier_hz": (20000, 80000), "phase_steps": (8, 256),
@@ -157,6 +163,11 @@ class Config:
             raise ValueError("未知图形")
         points = self.points_um()
         strokes = self.strokes_um()
+        if self.phase_table != "NONE":
+            if (not isinstance(self.phase_table, str) or not re.fullmatch(r"(?:[0-3][0-9A-F]){1,256}", self.phase_table)
+                    or self.shape != "POINT" or self.carrier_hz != 40000 or self.phase_steps != 64
+                    or points or strokes):
+                raise ValueError("静态压力须使用完整的 64 级相位表、40 kHz 固定点配置，不能包含扫描路径")
         if points and strokes:
             raise ValueError("不能同时指定旧路径和多段草图")
         if self.shape == "CUSTOM" and not (points or strokes):
@@ -192,10 +203,12 @@ class Config:
     def from_wire(cls, fields):
         values = {}
         for name in cls.__dataclass_fields__:
+            if name == "phase_table" and name not in fields:
+                continue
             if name not in fields:
                 raise ValueError(f"缺少配置字段 {name}")
             value = fields[name]
-            if name not in ("shape", "path_xy_um", "scan_paths"):
+            if name not in ("shape", "path_xy_um", "scan_paths", "phase_table"):
                 # JSON booleans/floats must not silently become valid integers.
                 if not (type(value) is int or isinstance(value, str) and value.lstrip("-+").isdigit()):
                     raise ValueError(f"{name} 必须是整数")
@@ -205,7 +218,19 @@ class Config:
 
     def wire(self):
         self.validate()
-        return asdict(self)
+        fields = asdict(self)
+        if self.phase_table == "NONE":
+            del fields["phase_table"]
+        return fields
+
+    def static_phases(self, array):
+        self.validate()
+        if self.phase_table == "NONE":
+            raise ValueError("没有静态相位表")
+        phases = tuple(bytes.fromhex(self.phase_table))
+        if len(phases) != array.count or array.mapping != "ROW_MAJOR_XY":
+            raise ValueError("静态相位表与阵列通道数或排列不一致")
+        return phases
 
 
 def encode_points(points):
@@ -381,6 +406,8 @@ def trajectory_bounds(config):
 
 def focus_phases(config, focus_mm, array):
     """Quantized modulo-period delay codes for the documented phasor convention."""
+    if config.phase_table != "NONE":
+        return np.array(config.static_phases(array))
     r = np.linalg.norm(array_coordinates(array) - np.asarray(focus_mm), axis=1) / 1000
     cycles = np.remainder(-r * config.carrier_hz / (array.resolved_geometry().sound_speed_mm_s/1000), 1.0)
     return (np.floor(cycles * config.phase_steps + 0.5).astype(int) % config.phase_steps)

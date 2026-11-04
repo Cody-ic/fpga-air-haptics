@@ -1,6 +1,14 @@
 # 触见图形工作台
 
-桌面上位机，提供轻量草图编辑、图形保存、手掌预览、无硬件 Demo、双向串口和 BLE 适配。默认界面用于绘图和播放，勾选“调试模式”后可查看相位、理论声场、设备参数和通信日志。HAP3 是上位机侧草案，尚未与 FPGA 端共同定稿；蓝牙模块未选型，实体板卡联调尚未完成。
+2026-10-30 新增“发送当前帧压力…”：从三维回放选中一帧，离线生成、比较原始压力/简化目标/模拟声场，再发送静态相位表并等待回读。可用模拟设备完整体验；发送不自动播放，未进行硬件联调。详见[压力单帧说明](PRESSURE_SINGLE_FRAME.md)。
+
+按用户调试要求，普通绘图、压力单帧和相位向量导出的默认输出等级统一为 100%；相位校准原本即使用 100%。手动填写或导入配置中的显式等级仍按原值使用。此修改不自动发送或播放，也不改变板端上电默认值。
+
+2026-10-31：新建绘图与相位向量导出默认对齐按键实验：40 kHz、64 级相位、聚焦高度 50 mm、每秒一圈、等级 100%、调制 0。检查器的“套用按键实验参数”可更新已有草稿的上述参数，保留形状、尺寸与平面位置；仍需停止、发送确认后单独播放。“聚焦高度”是真实目标平面，不是画面缩放。压力单帧默认不调制，并提高目标声场峰值；详见[强度对齐记录](OUTPUT_STRENGTH_2026-10-31.md)。
+
+2026-10-29 界面升级：默认进入“三维回放”，内置 EgoPressure 真实手部顶点与接触压力样本，支持旋转、缩放、平移、播放与逐帧查看。左侧另保留“掌心绘图 / 播放查看 / 实验与设备”。设备页连接设置和调试模式入口保持独立。详见[三维回放说明](EGOPRESSURE_REPLAY.md)及[页面对应与验证说明](UI_UPGRADE_2026-10-29.md)。当前手部显示为顶点与关节，未包含完整手部表面模型。
+
+桌面上位机，提供离线三维回放、轻量草图编辑、图形保存、手掌预览、无硬件 Demo、双向串口和 BLE 适配。绘图和设备播放保留独立入口，勾选“调试模式”后可查看相位、理论声场、设备参数和通信日志。HAP3 是上位机侧草案，尚未与 FPGA 端共同定稿；蓝牙模块未选型，实体板卡联调尚未完成。
 
 界面示例：[草图编辑](docs/sketch.png)、[掌面与缩小视图](docs/palm-zoom.png)、[手掌预览](docs/sketch-preview.png)、[播放反馈](docs/playback.png)、[基本图案预览](docs/presets.png)。
 
@@ -10,7 +18,7 @@
 
 新增[阵列参数与接收反馈校准](ARRAY_CALIBRATION.md)：支持平面、球冠和任意三维阵元坐标；调试模式下可导入预测/Demo 阵列，真实设备自动回传几何。固定接收器逐路校准入口在“实测数据 → 相位校准”，完成后保持停止。当前为软件验证阶段，球冠文件不代表已设计或验证球冠打印件。
 
-Windows 64 位便携版：双击 `desktop_app/dist/触见图形工作台.exe`，无需安装 Python。给队友分发时使用同目录的 `TouchSee-Windows-x64.zip`，内含程序、使用说明、构建信息与依赖许可。首次启动需要解包运行库，请稍等；程序不需要管理员权限。构建产物保留在本地，不提交到 Git。
+Windows 64 位便携版：双击 `desktop_app/dist/触见图形工作台.exe`，无需安装 Python。给队友分发时使用同目录的 `TouchSee-Windows-x64.zip`，内含程序、使用说明、构建信息与依赖许可。完整解压并保留旁边的 `_internal` 文件夹，不要只复制 EXE。文件夹便携版无需启动时解包到系统临时目录，不需要管理员权限。构建产物保留在本地，不提交到 Git。
 
 使用 Python 3.10+（含 Tk），在仓库根目录执行：
 
@@ -19,7 +27,7 @@ python -m pip install -r desktop_app/requirements.txt
 python -m desktop_app --demo
 ```
 
-本机桌面快捷方式 `触见调试台.lnk` 指向已打包的 `.exe`，带 `--demo` 参数，自动连接模拟设备但不播放。直接双击 `.exe` 或省略 `--demo` 则先离线编辑。源码仍可使用 `D:\python\python.exe` 运行。
+本机桌面快捷方式 `触见调试台.lnk` 指向已打包的 `.exe`，带 `--demo` 参数，自动连接模拟设备但不播放。新版入口均先进入暂停的三维回放；直接双击 `.exe` 或省略 `--demo` 不连接任何设备。运行源码前请在对应 Python 环境安装更新后的依赖。
 
 ### 构建 Windows 可执行程序
 
@@ -31,7 +39,7 @@ desktop_app/.runtime/build-venv/Scripts/python.exe -m pip install -r desktop_app
 powershell -NoProfile -ExecutionPolicy Bypass -File desktop_app/build_windows.ps1 -Python desktop_app/.runtime/build-venv/Scripts/python.exe
 ```
 
-脚本使用 PyInstaller 生成单文件窗口程序，同时生成便携 ZIP 与 `build-info.json`（记录实际依赖版本及 EXE 的 SHA-256）。只打包 TkAgg 绘图后端；输出目录 `dist/` 和构建缓存 `build/` 均被 Git 忽略。打包版启动错误写入 `%LOCALAPPDATA%\TouchSee\logs\startup-error.log`，不写入临时解包目录。
+脚本使用 PyInstaller 生成文件夹便携程序，同时生成 ZIP 与 `build-info.json`（记录实际依赖版本及 EXE 的 SHA-256）。`dist/TouchSee/` 是完整运行目录；构建脚本同时在 `dist/` 保留可执行文件和依赖，兼容既有桌面快捷方式。只打包 TkAgg 图表后端；输出目录 `dist/` 和构建缓存 `build/` 均被 Git 忽略。打包版启动错误尝试写入 `%LOCALAPPDATA%\TouchSee\logs\startup-error.log`。
 
 打包后可执行以下自检，运行可见 Demo 流程并自动关闭，不连接真实串口：
 
@@ -40,7 +48,7 @@ Start-Process -FilePath 'desktop_app/dist/触见图形工作台.exe' -ArgumentLi
 Get-Content desktop_app/.runtime/frozen-check/gui-smoke.json
 ```
 
-自检覆盖绘图、尺寸与关系、保存导入、发送确认、播放、阵列切换和回传超时。报告中 `passed` 应为 `true`；截图写入指定目录。已在本机从仅含 EXE 的独立目录、移除 Python 环境路径后通过此检查；真实板卡联调仍待硬件。修改源码后需要重新构建，桌面快捷方式才会运行新版。
+自检覆盖绘图、尺寸与关系、保存导入、发送确认、播放、阵列切换和回传超时。报告中 `passed` 应为 `true`；截图写入指定目录。便携版验证使用 EXE 与 `_internal` 构成的独立目录，并从环境中移除开发用 Python 路径。真实板卡联调仍待硬件。修改源码后需要重新构建，桌面快捷方式才会运行新版。
 
 ## 绘制与保存图形
 

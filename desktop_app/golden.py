@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 
 from . import __version__
-from .model import (ArraySpec, Config, SHAPES, config_from_document,
+from .model import (ArraySpec, BUTTON_OUTPUT_SETTINGS, Config, DEFAULT_OUTPUT_LEVEL, SHAPES, config_from_document,
                     focus_phases, trajectory_point)
 
 MAX_FRAMES = 200000
@@ -171,12 +171,12 @@ def main(argv=None):
     parser.add_argument("--path-closed", type=int, choices=(0, 1), default=1, help="1 闭合，0 往返")
     parser.add_argument("--cx-um", type=int, default=0, help="图形中心 x，单位微米")
     parser.add_argument("--cy-um", type=int, default=0, help="图形中心 y，单位微米")
-    parser.add_argument("--z-um", type=int, default=150000, help="焦点平面高度，单位微米")
+    parser.add_argument("--z-um", type=int, default=BUTTON_OUTPUT_SETTINGS['z_um'], help="焦点平面高度，单位微米")
     parser.add_argument("--carrier-hz", type=int, default=40000, help="载波频率，Hz")
     parser.add_argument("--phase-steps", type=int, default=64, help="相位档数")
-    parser.add_argument("--repeat-millihz", type=int, default=500, help="轨迹重复率乘 1000")
-    parser.add_argument("--mod-hz", type=int, default=200, help="调制频率，Hz")
-    parser.add_argument("--level", type=int, default=30, help="归一化驱动等级 0～100")
+    parser.add_argument("--repeat-millihz", type=int, default=BUTTON_OUTPUT_SETTINGS['repeat_millihz'], help="轨迹重复率乘 1000")
+    parser.add_argument("--mod-hz", type=int, default=BUTTON_OUTPUT_SETTINGS['mod_hz'], help="调制频率，Hz；默认不调制")
+    parser.add_argument("--level", type=int, default=DEFAULT_OUTPUT_LEVEL, help="归一化驱动等级 0～100，默认 100")
     parser.add_argument("--rate-hz", type=float, default=1000.0, help="相位更新率，默认 1000 Hz")
     parser.add_argument("--frames", type=int, help="导出帧数，默认为完整一圈")
     parser.add_argument("--out", help="输出目录，默认 desktop_app/exports/golden-行x列-图形")

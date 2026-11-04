@@ -1,0 +1,667 @@
+{
+  "source_project": "Haptics_8x8_R2_10p3mm_checked.epro2",
+  "source_sha256": "b36760dca47a7697b3a980386de4d648fc3ddd5fa24f5ec0fef5ea73369ac2a1",
+  "rows": 8,
+  "cols": 8,
+  "pitch_um": 10300,
+  "mapping": "ROW_MAJOR_XY",
+  "view": "PCB top/emitter side: X right, Y up; channel 0 bottom-left, DATA0 top row",
+  "connectivity_check": {
+    "components": 324,
+    "component_pads": 970,
+    "connected_pads": 896,
+    "effective_nets": 214,
+    "differing_connectivity_groups": 0,
+    "schematic_alias_notices": [
+      {
+        "page": "042841ef44e21c39",
+        "aliases": [
+          "12v",
+          "VCC"
+        ]
+      }
+    ]
+  },
+  "channels": [
+    {
+      "channel": 0,
+      "emitter": "U99",
+      "array_x_um": -36050,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 0,
+      "shift_register": "U94",
+      "driver": "U95"
+    },
+    {
+      "channel": 1,
+      "emitter": "U100",
+      "array_x_um": -25750,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 1,
+      "shift_register": "U94",
+      "driver": "U95"
+    },
+    {
+      "channel": 2,
+      "emitter": "U101",
+      "array_x_um": -15450,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 2,
+      "shift_register": "U94",
+      "driver": "U96"
+    },
+    {
+      "channel": 3,
+      "emitter": "U102",
+      "array_x_um": -5150,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 3,
+      "shift_register": "U94",
+      "driver": "U96"
+    },
+    {
+      "channel": 4,
+      "emitter": "U103",
+      "array_x_um": 5150,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 4,
+      "shift_register": "U94",
+      "driver": "U97"
+    },
+    {
+      "channel": 5,
+      "emitter": "U104",
+      "array_x_um": 15450,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 5,
+      "shift_register": "U94",
+      "driver": "U97"
+    },
+    {
+      "channel": 6,
+      "emitter": "U105",
+      "array_x_um": 25750,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 6,
+      "shift_register": "U94",
+      "driver": "U98"
+    },
+    {
+      "channel": 7,
+      "emitter": "U106",
+      "array_x_um": 36050,
+      "array_y_um": -36050,
+      "data_lane": "DATA7",
+      "output_bit": 7,
+      "shift_register": "U94",
+      "driver": "U98"
+    },
+    {
+      "channel": 8,
+      "emitter": "U86",
+      "array_x_um": -36050,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 0,
+      "shift_register": "U81",
+      "driver": "U82"
+    },
+    {
+      "channel": 9,
+      "emitter": "U87",
+      "array_x_um": -25750,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 1,
+      "shift_register": "U81",
+      "driver": "U82"
+    },
+    {
+      "channel": 10,
+      "emitter": "U88",
+      "array_x_um": -15450,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 2,
+      "shift_register": "U81",
+      "driver": "U83"
+    },
+    {
+      "channel": 11,
+      "emitter": "U89",
+      "array_x_um": -5150,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 3,
+      "shift_register": "U81",
+      "driver": "U83"
+    },
+    {
+      "channel": 12,
+      "emitter": "U90",
+      "array_x_um": 5150,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 4,
+      "shift_register": "U81",
+      "driver": "U84"
+    },
+    {
+      "channel": 13,
+      "emitter": "U91",
+      "array_x_um": 15450,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 5,
+      "shift_register": "U81",
+      "driver": "U84"
+    },
+    {
+      "channel": 14,
+      "emitter": "U92",
+      "array_x_um": 25750,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 6,
+      "shift_register": "U81",
+      "driver": "U85"
+    },
+    {
+      "channel": 15,
+      "emitter": "U93",
+      "array_x_um": 36050,
+      "array_y_um": -25750,
+      "data_lane": "DATA6",
+      "output_bit": 7,
+      "shift_register": "U81",
+      "driver": "U85"
+    },
+    {
+      "channel": 16,
+      "emitter": "U73",
+      "array_x_um": -36050,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 0,
+      "shift_register": "U68",
+      "driver": "U69"
+    },
+    {
+      "channel": 17,
+      "emitter": "U74",
+      "array_x_um": -25750,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 1,
+      "shift_register": "U68",
+      "driver": "U69"
+    },
+    {
+      "channel": 18,
+      "emitter": "U75",
+      "array_x_um": -15450,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 2,
+      "shift_register": "U68",
+      "driver": "U70"
+    },
+    {
+      "channel": 19,
+      "emitter": "U76",
+      "array_x_um": -5150,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 3,
+      "shift_register": "U68",
+      "driver": "U70"
+    },
+    {
+      "channel": 20,
+      "emitter": "U77",
+      "array_x_um": 5150,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 4,
+      "shift_register": "U68",
+      "driver": "U71"
+    },
+    {
+      "channel": 21,
+      "emitter": "U78",
+      "array_x_um": 15450,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 5,
+      "shift_register": "U68",
+      "driver": "U71"
+    },
+    {
+      "channel": 22,
+      "emitter": "U79",
+      "array_x_um": 25750,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 6,
+      "shift_register": "U68",
+      "driver": "U72"
+    },
+    {
+      "channel": 23,
+      "emitter": "U80",
+      "array_x_um": 36050,
+      "array_y_um": -15450,
+      "data_lane": "DATA5",
+      "output_bit": 7,
+      "shift_register": "U68",
+      "driver": "U72"
+    },
+    {
+      "channel": 24,
+      "emitter": "U60",
+      "array_x_um": -36050,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 0,
+      "shift_register": "U55",
+      "driver": "U56"
+    },
+    {
+      "channel": 25,
+      "emitter": "U61",
+      "array_x_um": -25750,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 1,
+      "shift_register": "U55",
+      "driver": "U56"
+    },
+    {
+      "channel": 26,
+      "emitter": "U62",
+      "array_x_um": -15450,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 2,
+      "shift_register": "U55",
+      "driver": "U57"
+    },
+    {
+      "channel": 27,
+      "emitter": "U63",
+      "array_x_um": -5150,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 3,
+      "shift_register": "U55",
+      "driver": "U57"
+    },
+    {
+      "channel": 28,
+      "emitter": "U64",
+      "array_x_um": 5150,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 4,
+      "shift_register": "U55",
+      "driver": "U58"
+    },
+    {
+      "channel": 29,
+      "emitter": "U65",
+      "array_x_um": 15450,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 5,
+      "shift_register": "U55",
+      "driver": "U58"
+    },
+    {
+      "channel": 30,
+      "emitter": "U66",
+      "array_x_um": 25750,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 6,
+      "shift_register": "U55",
+      "driver": "U59"
+    },
+    {
+      "channel": 31,
+      "emitter": "U67",
+      "array_x_um": 36050,
+      "array_y_um": -5150,
+      "data_lane": "DATA4",
+      "output_bit": 7,
+      "shift_register": "U55",
+      "driver": "U59"
+    },
+    {
+      "channel": 32,
+      "emitter": "U47",
+      "array_x_um": -36050,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 0,
+      "shift_register": "U42",
+      "driver": "U43"
+    },
+    {
+      "channel": 33,
+      "emitter": "U48",
+      "array_x_um": -25750,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 1,
+      "shift_register": "U42",
+      "driver": "U43"
+    },
+    {
+      "channel": 34,
+      "emitter": "U49",
+      "array_x_um": -15450,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 2,
+      "shift_register": "U42",
+      "driver": "U44"
+    },
+    {
+      "channel": 35,
+      "emitter": "U50",
+      "array_x_um": -5150,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 3,
+      "shift_register": "U42",
+      "driver": "U44"
+    },
+    {
+      "channel": 36,
+      "emitter": "U51",
+      "array_x_um": 5150,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 4,
+      "shift_register": "U42",
+      "driver": "U45"
+    },
+    {
+      "channel": 37,
+      "emitter": "U52",
+      "array_x_um": 15450,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 5,
+      "shift_register": "U42",
+      "driver": "U45"
+    },
+    {
+      "channel": 38,
+      "emitter": "U53",
+      "array_x_um": 25750,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 6,
+      "shift_register": "U42",
+      "driver": "U46"
+    },
+    {
+      "channel": 39,
+      "emitter": "U54",
+      "array_x_um": 36050,
+      "array_y_um": 5150,
+      "data_lane": "DATA3",
+      "output_bit": 7,
+      "shift_register": "U42",
+      "driver": "U46"
+    },
+    {
+      "channel": 40,
+      "emitter": "U34",
+      "array_x_um": -36050,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 0,
+      "shift_register": "U29",
+      "driver": "U30"
+    },
+    {
+      "channel": 41,
+      "emitter": "U35",
+      "array_x_um": -25750,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 1,
+      "shift_register": "U29",
+      "driver": "U30"
+    },
+    {
+      "channel": 42,
+      "emitter": "U36",
+      "array_x_um": -15450,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 2,
+      "shift_register": "U29",
+      "driver": "U31"
+    },
+    {
+      "channel": 43,
+      "emitter": "U37",
+      "array_x_um": -5150,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 3,
+      "shift_register": "U29",
+      "driver": "U31"
+    },
+    {
+      "channel": 44,
+      "emitter": "U38",
+      "array_x_um": 5150,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 4,
+      "shift_register": "U29",
+      "driver": "U32"
+    },
+    {
+      "channel": 45,
+      "emitter": "U39",
+      "array_x_um": 15450,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 5,
+      "shift_register": "U29",
+      "driver": "U32"
+    },
+    {
+      "channel": 46,
+      "emitter": "U40",
+      "array_x_um": 25750,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 6,
+      "shift_register": "U29",
+      "driver": "U33"
+    },
+    {
+      "channel": 47,
+      "emitter": "U41",
+      "array_x_um": 36050,
+      "array_y_um": 15450,
+      "data_lane": "DATA2",
+      "output_bit": 7,
+      "shift_register": "U29",
+      "driver": "U33"
+    },
+    {
+      "channel": 48,
+      "emitter": "U19",
+      "array_x_um": -36050,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 0,
+      "shift_register": "U14",
+      "driver": "U15"
+    },
+    {
+      "channel": 49,
+      "emitter": "U20",
+      "array_x_um": -25750,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 1,
+      "shift_register": "U14",
+      "driver": "U15"
+    },
+    {
+      "channel": 50,
+      "emitter": "U21",
+      "array_x_um": -15450,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 2,
+      "shift_register": "U14",
+      "driver": "U16"
+    },
+    {
+      "channel": 51,
+      "emitter": "U22",
+      "array_x_um": -5150,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 3,
+      "shift_register": "U14",
+      "driver": "U16"
+    },
+    {
+      "channel": 52,
+      "emitter": "U23",
+      "array_x_um": 5150,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 4,
+      "shift_register": "U14",
+      "driver": "U17"
+    },
+    {
+      "channel": 53,
+      "emitter": "U24",
+      "array_x_um": 15450,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 5,
+      "shift_register": "U14",
+      "driver": "U17"
+    },
+    {
+      "channel": 54,
+      "emitter": "U25",
+      "array_x_um": 25750,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 6,
+      "shift_register": "U14",
+      "driver": "U18"
+    },
+    {
+      "channel": 55,
+      "emitter": "U26",
+      "array_x_um": 36050,
+      "array_y_um": 25750,
+      "data_lane": "DATA1",
+      "output_bit": 7,
+      "shift_register": "U14",
+      "driver": "U18"
+    },
+    {
+      "channel": 56,
+      "emitter": "U6",
+      "array_x_um": -36050,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 0,
+      "shift_register": "U1",
+      "driver": "U2"
+    },
+    {
+      "channel": 57,
+      "emitter": "U7",
+      "array_x_um": -25750,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 1,
+      "shift_register": "U1",
+      "driver": "U2"
+    },
+    {
+      "channel": 58,
+      "emitter": "U8",
+      "array_x_um": -15450,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 2,
+      "shift_register": "U1",
+      "driver": "U3"
+    },
+    {
+      "channel": 59,
+      "emitter": "U9",
+      "array_x_um": -5150,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 3,
+      "shift_register": "U1",
+      "driver": "U3"
+    },
+    {
+      "channel": 60,
+      "emitter": "U10",
+      "array_x_um": 5150,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 4,
+      "shift_register": "U1",
+      "driver": "U4"
+    },
+    {
+      "channel": 61,
+      "emitter": "U11",
+      "array_x_um": 15450,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 5,
+      "shift_register": "U1",
+      "driver": "U4"
+    },
+    {
+      "channel": 62,
+      "emitter": "U12",
+      "array_x_um": 25750,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 6,
+      "shift_register": "U1",
+      "driver": "U5"
+    },
+    {
+      "channel": 63,
+      "emitter": "U13",
+      "array_x_um": 36050,
+      "array_y_um": 36050,
+      "data_lane": "DATA0",
+      "output_bit": 7,
+      "shift_register": "U1",
+      "driver": "U5"
+    }
+  ]
+}

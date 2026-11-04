@@ -27,6 +27,11 @@ class SerialTransport:
         self.port.port = port
         try:
             self.port.open()
+            # The Tang MEGA FTDI bridge can drop an immediate first write.
+            # On the real board HELLO timed out at 0 ms but worked after
+            # 300 ms. Settle before the handshake, then discard queued old
+            # telemetry; never retry START/CONFIG to work around this.
+            time.sleep(0.3)
             self.port.reset_input_buffer()
         except Exception:
             self.port.close()
