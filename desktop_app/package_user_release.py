@@ -1,6 +1,7 @@
 """Package the user workspace separately from existing engineering releases."""
 
 from datetime import datetime, timezone
+import argparse
 from hashlib import sha256
 from importlib import metadata
 import json
@@ -16,8 +17,12 @@ def main():
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from desktop_app import __version__
     app = Path(__file__).resolve().parent
-    dist = app/'dist'/'user'
-    portable = dist/'TouchSee-User'
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output-dir', type=Path, help='Package in a fresh directory while an older executable is open')
+    args = parser.parse_args()
+    dist = args.output_dir.resolve() if args.output_dir else app/'dist'/'user'
+    dist.mkdir(parents=True, exist_ok=True)
+    portable = app/'dist'/'user'/'TouchSee-User'
     shutil.copytree(portable/'_internal', dist/'_internal', dirs_exist_ok=True)
     shutil.copy2(portable/'触见体验台.exe', dist/'触见体验台.exe')
     exe = dist/'触见体验台.exe'

@@ -102,6 +102,9 @@ def main(argv=None):
     label = 'Restored' if selected == 'restore' else 'StartupCalibration'
     name = f"TouchSee_8x8_{label}_Display_{profile['version']}.fs"
     firmware = bundle/name
+    if firmware.exists():
+        # Gowin marks its generated FS read-only, and copy2 preserves that bit.
+        firmware.chmod(0o666)
     shutil.copy2(manifest['output'], firmware)
     if calibration is not None:
         shutil.copy2(calibration, bundle/calibration.name)
