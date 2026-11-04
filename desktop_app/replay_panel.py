@@ -21,6 +21,8 @@ class ReplayPanel(ttk.Frame):
         self.playing = False
         self.active = False
         self.loading = None
+        self.loading_path = None
+        self.analysis_future = None
         self.on_pressure = on_pressure
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dataset-loader")
         self.title = DisplayVar(value="掌心轻压 · 右手")
@@ -45,7 +47,8 @@ class ReplayPanel(ttk.Frame):
 
         bottom = ttk.Frame(self, padding=(4, 14, 4, 6))
         bottom.pack(side="bottom", fill="x")
-        source = ttk.Label(bottom, text="EgoPressure 公开采集数据 · 手部拟合顶点 / 接触压力实测 · 离线回放", style="Caption.TLabel")
+        self.source_text = DisplayVar(value="EgoPressure 公开采集数据 · 手部拟合顶点 / 接触压力实测 · 离线回放")
+        source = ttk.Label(bottom, textvariable=self.source_text, style="Caption.TLabel")
         source.pack(side="bottom", fill="x", pady=(12,0))
         wrap_to_width(source)
         controls = ttk.Frame(bottom)
@@ -56,6 +59,8 @@ class ReplayPanel(ttk.Frame):
         self.previous_button.pack(side="left", padx=(8,4))
         self.next_button = ttk.Button(controls, text="下一帧", command=lambda: self.step(1))
         self.next_button.pack(side="left")
+        self.analysis_button = ttk.Button(controls, text="导出动作分析…", command=self.export_analysis, state="disabled")
+        self.analysis_button.pack(side="left", padx=8)
         ttk.Label(controls, textvariable=self.time_text, style="Heading.TLabel").pack(side="left", padx=20)
         self.speed_picker = ttk.Combobox(controls, textvariable=self.speed, values=("0.25×","0.5×","1×","2×"), width=5, state="readonly")
         self.speed_picker.pack(side="right")
@@ -129,7 +134,8 @@ class ReplayPanel(ttk.Frame):
         ttk.Label(metrics, textvariable=self.peak_text, style="Page.TLabel").grid(row=1,column=1,sticky="w",padx=(12,0),pady=6)
         ttk.Separator(inspector).pack(fill="x",pady=(0,10))
         ttk.Label(inspector, text="手部表示", style="Heading.TLabel").pack(anchor="w")
-        ttk.Label(inspector, text="778 个原始顶点\n未加载手部表面模型", style="Caption.TLabel").pack(anchor="w",pady=8)
+        self.hand_model_text = DisplayVar(value="778 个原始顶点\n未加载手部表面模型")
+        ttk.Label(inspector, textvariable=self.hand_model_text, style="Caption.TLabel").pack(anchor="w",pady=8)
         self.joints_toggle = ttk.Checkbutton(inspector,text="显示关节连线",variable=self.joints,command=self.toggle_joints)
         self.joints_toggle.pack(anchor="w")
         self.frame_label = ttk.Label(inspector,textvariable=self.frame_text,style="Caption.TLabel")
@@ -142,13 +148,52 @@ class ReplayPanel(ttk.Frame):
         self.load(sample_path())
         self.tick_id = self.after(25, self.tick)
 
-    def load(self, path):
+    def load(self, path, *, side=None):
         if self.loading is not None:
             return
         self.pause()
         self.status.set("正在读取序列…")
-        self.loading = self.executor.submit(load_sequence, path)
+        self.loading_path = Path(path)
+        if side is None:
+            self.loading = self.executor.submit(load_sequence, path)
+        else:
+            from .hand_datasets import load_contactpose
+            self.loading = self.executor.submit(load_contactpose, path, side=side)
         self.pressure_button.configure(state="disabled")
+        self.analysis_button.configure(state="disabled")
+
+    def choose_hand(self, path):
+        dialog = tk.Toplevel(self)
+        dialog.title("选择手部")
+        dialog.transient(self.winfo_toplevel())
+        body = ttk.Frame(dialog, padding=24)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="此抓握标注包含双手，请选择要查看的手部。", style="Heading.TLabel").pack(pady=(0, 16))
+        buttons = ttk.Frame(body)
+        buttons.pack()
+        def select(side):
+            dialog.destroy()
+            self.load(path, side=side)
+        for side, label in (("left", "查看左手"), ("right", "查看右手")):
+            ttk.Button(buttons, text=label, command=lambda value=side: select(value)).pack(side="left", padx=6)
+        ttk.Button(buttons, text="取消", command=dialog.destroy).pack(side="left", padx=6)
+        dialog.grab_set()
+
+    def export_analysis(self):
+        if self.sequence is None or self.loading is not None or self.analysis_future is not None:
+            return
+        filename = filedialog.asksaveasfilename(parent=self, title="导出手部动作分析",
+                                               defaultextension=".json", filetypes=[("JSON 数据", "*.json")])
+        if not filename:
+            return
+        from .pressure_sequence import sequence_summary, save_analysis
+        sequence = self.sequence
+        def work():
+            save_analysis(sequence_summary(sequence), filename)
+            return filename
+        self.analysis_future = self.executor.submit(work)
+        self.analysis_button.configure(state="disabled")
+        self.status.set("正在分析关节与数据完整性…")
 
     def open_pressure(self):
         if self.sequence is None or self.loading is not None or self.on_pressure is None:
@@ -157,8 +202,8 @@ class ReplayPanel(ttk.Frame):
         self.on_pressure(self.sequence, self.index)
 
     def import_sequence(self):
-        filename = filedialog.askopenfilename(parent=self, title="导入 EgoPressure 序列",
-            filetypes=[("EgoPressure 数据", "*.npz *.parquet"), ("所有文件", "*.*")])
+        filename = filedialog.askopenfilename(parent=self, title="导入手部公开数据",
+            filetypes=[("手部公开数据", "*.npz *.parquet *.json"), ("所有文件", "*.*")])
         if filename:
             self.load(Path(filename))
 
@@ -203,7 +248,7 @@ class ReplayPanel(ttk.Frame):
             self.scene.show_joints = self.joints.get()
             self.scene.render()
 
-    def show_frame(self, index):
+    def show_frame(self, index, *, fit_view=False):
         seq = self.sequence
         if seq is None:
             return
@@ -212,14 +257,16 @@ class ReplayPanel(ttk.Frame):
         hand, pressure = bool(seq.hand_valid[i]), bool(seq.pressure_valid[i])
         self.pressure_button.configure(state="normal" if pressure and self.on_pressure and self.loading is None else "disabled")
         if self.scene:
-            self.scene.set_frame(seq.vertices[i] if hand else None, seq.joints[i] if hand else None,
-                                 seq.force[i] if pressure else None)
-        self.frame_text.set(f"帧 {seq.frames[i]} / {seq.frames[-1]} · 30 帧/秒")
-        self.time_text.set(f"{seq.seconds[i]:05.2f} / {seq.seconds[-1]:05.2f} s")
+            self.scene.set_frame(seq.vertices[i] if hand and seq.vertices_available else None, seq.joints[i] if hand else None,
+                                 seq.force[i] if pressure else None,
+                                 show_pad=seq.source_dataset != 'ContactPose', fit_view=fit_view)
+        self.frame_text.set(f"帧 {seq.frames[i]} / {seq.frames[-1]} · 30 帧/秒" if seq.source_dataset == 'EgoPressure' else "静态抓握关节标注")
+        self.time_text.set(f"{seq.seconds[i]:05.2f} / {seq.seconds[-1]:05.2f} s" if seq.source_dataset == 'EgoPressure' else "静态姿态")
         self.timeline_value.set(float(seq.seconds[i]))
         self.force_text.set(f"{seq.total_force_n[i]:.2f}" if pressure else "—")
         self.peak_text.set(f"{counts_to_kpa(seq.force[i]).max():.2f}" if pressure else "—")
-        self.status.set(" · ".join(text for ok,text in ((hand,"此帧无手部标注"),(pressure,"此帧压力缺失")) if not ok))
+        self.status.set("该数据不含压力测量；仅查看关节姿态。" if seq.source_dataset == 'ContactPose' else
+                        " · ".join(text for ok,text in ((hand,"此帧无手部标注"),(pressure,"此帧压力缺失")) if not ok))
         pixels = pressure_rgb(seq.force[i]) if pressure else np.full((105,185,3),150,np.uint8)
         self.heat_image = ImageTk.PhotoImage(Image.fromarray(pixels).resize((self.image_width,round(self.image_width*105/185)),Image.Resampling.BILINEAR))
         self.heatmap.configure(image=self.heat_image)
@@ -231,6 +278,9 @@ class ReplayPanel(ttk.Frame):
             return
         w,h = self.curve.winfo_width(),self.curve.winfo_height()
         seq = self.sequence
+        if not np.any(seq.pressure_valid):
+            self.curve.create_text(4, 0, text="此数据不含压力测量", anchor="nw", fill=MUTED, font=(FONT, 8))
+            return
         values = seq.total_force_n
         peak = max(1.,float(np.nanmax(values))) if np.isfinite(values).any() else 1.
         xs = seq.seconds/max(.001,seq.seconds[-1])*w
@@ -252,6 +302,13 @@ class ReplayPanel(ttk.Frame):
             self.curve.create_line(x,0,x,self.curve.winfo_height(),fill=INK,width=2,tags="cursor")
 
     def tick(self):
+        if self.analysis_future is not None and self.analysis_future.done():
+            future, self.analysis_future = self.analysis_future, None
+            try:
+                self.status.set(f"已导出动作分析：{future.result()}")
+            except Exception as error:
+                self.status.set(f"导出失败：{error}")
+            self.analysis_button.configure(state='normal' if self.sequence is not None and self.loading is None else 'disabled')
         if self.loading is not None and self.loading.done():
             future, self.loading = self.loading, None
             try:
@@ -260,14 +317,32 @@ class ReplayPanel(ttk.Frame):
                 sample = seq.name == "p_001_press_palm_low_x5_right"
                 self.title.set("掌心轻压 · 右手" if sample else "手部动作回放")
                 self.subtitle.set("EgoPressure / P001" if sample else seq.name)
+                self.source_text.set("ContactPose 公开抓握关节 · 无压力测量 · 离线查看" if seq.source_dataset == 'ContactPose'
+                                     else "EgoPressure 公开采集数据 · 手部拟合顶点 / 接触压力实测 · 离线回放")
+                self.hand_model_text.set("778 个原始顶点\n未加载手部表面模型" if seq.vertices_available else "21 个关节\n此数据没有手部网格")
+                self.pressure_note.configure(text="此数据没有压力测量。" if seq.source_dataset == 'ContactPose' else "压力来自接触传感器，\n不是超声声压或触觉强度。")
+                for button in (self.play_button, self.previous_button, self.next_button):
+                    button.configure(state='normal' if len(seq.frames)>1 else 'disabled')
+                if seq.source_dataset == 'ContactPose':
+                    self.joints.set(True)
+                    if self.scene:
+                        self.scene.show_joints = True
                 self.timeline.configure(to=max(.001,seq.seconds[-1]))
                 # Open on an informative measured contact frame, paused.
                 values = seq.total_force_n
                 index = int(np.nanargmax(values)) if np.isfinite(values).any() else 0
-                self.show_frame(index)
+                self.show_frame(index, fit_view=True)
                 self.draw_curve()
             except Exception as error:
-                self.status.set(f"读取失败：{error}")
+                from .hand_datasets import ContactPoseHandSelectionRequired
+                if self.sequence is not None:
+                    self.show_frame(self.index)
+                if isinstance(error, ContactPoseHandSelectionRequired):
+                    self.status.set("请选择要查看的左手或右手。")
+                    self.choose_hand(self.loading_path)
+                else:
+                    self.status.set(f"读取失败：{error}")
+            self.analysis_button.configure(state='normal' if self.sequence is not None and self.analysis_future is None else 'disabled')
         if self.playing and self.active and self.sequence:
             seconds = self.start_offset + (time.monotonic()-self.start_time)*float(self.speed.get().rstrip("×"))
             index = self.sequence.index_at(seconds)

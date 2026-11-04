@@ -2,7 +2,9 @@
 
 import tkinter as tk
 import time
-from tkinter import ttk
+from tkinter import ttk, filedialog
+
+import numpy as np
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -10,6 +12,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from .egopressure import counts_to_kpa
 from .model import ArraySpec, BUTTON_OUTPUT_SETTINGS, DEFAULT_OUTPUT_LEVEL
 from .pressure import compile_pressure
+from .pressure_sequence import (compile_sequence_frame, compile_sequence_plan,
+                                fit_sequence_mapping, hand_features, save_analysis, sequence_summary)
 from .theme import DisplayVar, configure_if_changed
 
 
@@ -24,11 +28,17 @@ class PressureWindow(tk.Toplevel):
         self.result = None
         self.submitted = False
         self.future = None
+        self.generation = 0
+        self.future_generation = 0
+        self.export_future = None
         self.closed = False
         # Copy now: replay can seek or load another sequence while solving.
         self.raw = counts_to_kpa(sequence.force[index]).copy()
         self.frame_id = int(sequence.frames[index])
         self.source_name = sequence.name
+        self.sequence = sequence
+        self.index = index
+        self.fixed_mapping = tk.BooleanVar(value=True)
         self.status = DisplayVar(value="")
         self.connection = DisplayVar(value="")
         self.z = tk.StringVar(value="50")
@@ -55,12 +65,29 @@ class PressureWindow(tk.Toplevel):
             variable.trace_add("write", self.invalidate)
         self.generate_button = ttk.Button(settings, text="重新生成", command=self.generate)
         self.generate_button.pack(side="left")
+        sequence_tools = ttk.Frame(body)
+        sequence_tools.pack(fill="x", pady=(8, 0))
+        self.mapping_toggle = ttk.Checkbutton(sequence_tools, text="保持整段动作的位置与大小", variable=self.fixed_mapping,
+                                             command=self.invalidate)
+        self.mapping_toggle.pack(side="left")
+        self.analysis_button = ttk.Button(sequence_tools, text="导出手姿与压力分析…", command=self.export_analysis)
+        self.analysis_button.pack(side="left", padx=8)
+        self.plan_button = ttk.Button(sequence_tools, text="导出动作相位计划…", command=self.export_plan)
+        self.plan_button.pack(side="left")
+        features = hand_features(sequence, index)
+        if features['valid']:
+            palm = features['palm']
+            caption = f"关节标注：掌宽 {palm['width_mm']:.1f} mm · 掌长参考 {palm['length_mm']:.1f} mm · 来自数据集，非实时检测"
+        else:
+            caption = "此帧没有有效手姿标注；压力数据独立处理。"
+        ttk.Label(body, text=caption, style="Caption.TLabel").pack(anchor="w", pady=(5, 0))
         self.figure = Figure(figsize=(10,3.5), dpi=100, layout="constrained")
         self.canvas = FigureCanvasTkAgg(self.figure, master=body)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True, pady=12)
-        ttk.Label(body, textvariable=self.status, wraplength=1000).pack(anchor="w", fill="x")
-        ttk.Label(body, textvariable=self.connection, wraplength=1000).pack(anchor="w", fill="x", pady=8)
-        controls = ttk.Frame(body)
+        feedback = ttk.Frame(body)
+        feedback.pack(side="bottom", fill="x")
+        ttk.Label(feedback, textvariable=self.status, wraplength=1000).pack(anchor="w", fill="x")
+        ttk.Label(feedback, textvariable=self.connection, wraplength=1000).pack(anchor="w", fill="x", pady=8)
+        controls = ttk.Frame(feedback)
         controls.pack(fill="x")
         self.demo_button = ttk.Button(controls, text="连接模拟设备", command=self.connect_demo)
         self.demo_button.pack(side="left")
@@ -68,11 +95,13 @@ class PressureWindow(tk.Toplevel):
         self.send_button.pack(side="left", padx=8)
         ttk.Button(controls, text="查看播放控制", command=lambda: (app.navigate("playback"), self.destroy())).pack(side="left")
         ttk.Button(controls, text="关闭", command=self.destroy).pack(side="right")
+        self.canvas.get_tk_widget().pack(fill="both", expand=True, pady=12)
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.generate()
         self.tick_id = self.after(100, self.tick)
 
     def invalidate(self, *_):
+        self.generation += 1
         self.result = None
         self.submitted = False
         self.status.set("参数已变更，请重新生成。")
@@ -85,17 +114,61 @@ class PressureWindow(tk.Toplevel):
         self.submitted = False
         try:
             self.array = self.app.hardware if self.app.ready else ArraySpec(8,8,10300)
+            self.generation += 1
+            self.future_generation = self.generation
             options = dict(z_mm=float(self.z.get()), span_mm=float(self.span.get()),
                            level=DEFAULT_OUTPUT_LEVEL if self.consumer else int(self.level.get()),
                            mod_hz=BUTTON_OUTPUT_SETTINGS['mod_hz'] if self.consumer else int(self.mod.get()))
-            self.future = self.app.executor.submit(compile_pressure, self.raw, self.array, **options)
+            if self.fixed_mapping.get():
+                self.future = self.app.executor.submit(compile_sequence_frame, self.sequence, self.index,
+                                                       self.array, **options)
+            else:
+                self.future = self.app.executor.submit(compile_pressure, self.raw, self.array, **options)
             self.status.set(f"正在生成第 {self.frame_id} 帧 · {self.array.rows}×{self.array.cols} · 间距 {self.array.pitch_um/1000:g} mm…")
             for entry in self.entries:
                 entry.configure(state="disabled")
             self.generate_button.configure(state="disabled")
+            self.mapping_toggle.configure(state="disabled")
             self.send_button.configure(state="disabled")
         except (ValueError, OverflowError) as error:
             self.status.set(f"无法生成：{error}")
+
+    def _export(self, plan):
+        if self.export_future is not None:
+            return
+        filename = filedialog.asksaveasfilename(parent=self, title="导出离线动作相位计划" if plan else "导出手姿与压力分析",
+                                               defaultextension=".json", filetypes=[("JSON 数据", "*.json")])
+        if not filename:
+            return
+        try:
+            span, z = float(self.span.get()), float(self.z.get())
+            options = dict(z_mm=z, span_mm=span,
+                           level=DEFAULT_OUTPUT_LEVEL if self.consumer else int(self.level.get()),
+                           mod_hz=BUTTON_OUTPUT_SETTINGS['mod_hz'] if self.consumer else int(self.mod.get()))
+            array = self.app.hardware if self.app.ready else ArraySpec(8, 8, 10300)
+            def work():
+                mapping = fit_sequence_mapping(self.sequence, span_mm=span)
+                if plan:
+                    candidates = np.flatnonzero(self.sequence.pressure_valid)
+                    indices = candidates[np.linspace(0, len(candidates)-1, min(12, len(candidates))).astype(int)].tolist()
+                    document = compile_sequence_plan(self.sequence, indices, array, mapping=mapping,
+                                                     **options, starts=2, maxiter=150)
+                else:
+                    document = sequence_summary(self.sequence, mapping)
+                save_analysis(document, filename)
+                return filename
+            self.export_future = self.app.executor.submit(work)
+            self.analysis_button.configure(state="disabled")
+            self.plan_button.configure(state="disabled")
+            self.status.set("正在生成离线动作计划，不会发送或启动设备。" if plan else "正在分析整段动作…")
+        except (ValueError, OverflowError) as error:
+            self.status.set(f"无法导出：{error}")
+
+    def export_analysis(self):
+        self._export(False)
+
+    def export_plan(self):
+        self._export(True)
 
     def connect_demo(self):
         app = self.app
@@ -144,17 +217,31 @@ class PressureWindow(tk.Toplevel):
                         + (" 求解未收敛，当前为近似解。" if not result.metrics['converged'] else ""))
 
     def tick(self):
+        if self.export_future is not None and self.export_future.done():
+            future, self.export_future = self.export_future, None
+            try:
+                self.status.set(f"已导出：{future.result()}。离线相位计划不会自动发送或播放。")
+            except Exception as error:
+                self.status.set(f"导出失败：{error}")
+            self.analysis_button.configure(state="normal")
+            self.plan_button.configure(state="normal")
         if self.future is not None and self.future.done():
             future, self.future = self.future, None
             try:
-                self.result = future.result()
-                self.render()
+                result = future.result()
+                if self.future_generation == self.generation:
+                    self.result = result
+                    self.render()
+                else:
+                    self.result = None
+                    self.status.set("选项已变更，请重新生成。")
             except Exception as error:
                 self.result = None
                 self.status.set(f"生成失败，未发送：{error}")
             for entry in self.entries:
                 entry.configure(state="normal")
             self.generate_button.configure(state="normal")
+            self.mapping_toggle.configure(state="normal")
         app = self.app
         issue = app.pressure_send_issue(self.result) if self.result else "请先生成有效压力帧。"
         configure_if_changed(self.send_button, state="disabled" if issue else "normal")

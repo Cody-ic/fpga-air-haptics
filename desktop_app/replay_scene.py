@@ -13,6 +13,7 @@ class ReplayScene(OpenGLFrame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
         self.vertices = self.joints = self.force = None
+        self.show_pad = True
         self.show_joints = True
         self.texture = None
         self.texture_dirty = True
@@ -28,6 +29,13 @@ class ReplayScene(OpenGLFrame):
     def reset_camera(self, top=False):
         self.yaw, self.elevation, self.distance = (-math.pi/2, math.radians(89.5), .48) if top else (-1.08, .92, .48)
         self.target = np.array([0., .025, .02])
+        if not self.show_pad and self.joints is not None:
+            low, high = self.joints.min(0), self.joints.max(0)
+            self.target = (low+high)/2
+            radius = float(np.linalg.norm(self.joints-self.target, axis=1).max())
+            aspect = max(.1, min(1., self.winfo_width()/max(1, self.winfo_height())))
+            half_fov = math.atan(math.tan(math.radians(17.5))*aspect)
+            self.distance = max(.12, radius/math.sin(half_fov)*1.3)
         self.render()
 
     def _press(self, event):
@@ -54,12 +62,17 @@ class ReplayScene(OpenGLFrame):
         self.render()
         return "break"
 
-    def set_frame(self, vertices, joints, force):
+    def set_frame(self, vertices, joints, force, *, show_pad=True, fit_view=False):
+        changed_source = self.show_pad != bool(show_pad)
+        self.show_pad = bool(show_pad)
         self.vertices = None if vertices is None else np.ascontiguousarray(display_points(vertices))
         self.joints = None if joints is None else np.ascontiguousarray(display_points(joints))
         self.force = force
         self.texture_dirty = True
-        self.render()
+        if changed_source or fit_view:
+            self.reset_camera()
+        else:
+            self.render()
 
     def initgl(self):
         GL.glClearColor(.957, .965, .977, 1)
@@ -106,7 +119,30 @@ class ReplayScene(OpenGLFrame):
             math.cos(self.elevation)*math.cos(self.yaw), math.cos(self.elevation)*math.sin(self.yaw), math.sin(self.elevation)])
         gluLookAt(*eye, *self.target, 0, 0, 1)
 
-        # Subtle studio grid, with a calibrated pad sitting above it.
+        if self.show_pad:
+            self._draw_pad()
+
+        density = float(self.tk.call("tk", "scaling"))/(96/72)
+        if self.joints is not None and self.show_joints:
+            GL.glLineWidth(2*density)
+            GL.glColor4f(.16, .40, .69, .65)
+            GL.glBegin(GL.GL_LINES)
+            for start in (1,5,9,13,17):
+                chain = [0, *range(start,start+4)]
+                for a,b in zip(chain,chain[1:]):
+                    GL.glVertex3fv(self.joints[a]); GL.glVertex3fv(self.joints[b])
+            GL.glEnd()
+        if self.vertices is not None:
+            GL.glPointSize(float(np.clip(3.2*density*.48/self.distance, 2, 13)))
+            GL.glColor4f(.12,.44,.80,.92)
+            GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
+            GL.glVertexPointer(3, GL.GL_FLOAT, 0, self.vertices)
+            GL.glDrawArrays(GL.GL_POINTS, 0, len(self.vertices))
+            GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
+
+    def _draw_pad(self):
+        # This pad belongs to EgoPressure. Never show it as a ContactPose
+        # registration surface: the latter's joints use object coordinates.
         GL.glColor4f(.73, .77, .83, .24)
         GL.glLineWidth(1)
         GL.glBegin(GL.GL_LINES)
@@ -139,24 +175,6 @@ class ReplayScene(OpenGLFrame):
             GL.glTexCoord2f(*uv); GL.glVertex3f(*position)
         GL.glEnd()
         GL.glDisable(GL.GL_TEXTURE_2D)
-
-        density = float(self.tk.call("tk", "scaling"))/(96/72)
-        if self.joints is not None and self.show_joints:
-            GL.glLineWidth(2*density)
-            GL.glColor4f(.16, .40, .69, .65)
-            GL.glBegin(GL.GL_LINES)
-            for start in (1,5,9,13,17):
-                chain = [0, *range(start,start+4)]
-                for a,b in zip(chain,chain[1:]):
-                    GL.glVertex3fv(self.joints[a]); GL.glVertex3fv(self.joints[b])
-            GL.glEnd()
-        if self.vertices is not None:
-            GL.glPointSize(float(np.clip(3.2*density*.48/self.distance, 2, 13)))
-            GL.glColor4f(.12,.44,.80,.92)
-            GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
-            GL.glVertexPointer(3, GL.GL_FLOAT, 0, self.vertices)
-            GL.glDrawArrays(GL.GL_POINTS, 0, len(self.vertices))
-            GL.glDisableClientState(GL.GL_VERTEX_ARRAY)
 
     def destroy(self):
         if self.context_created and self.winfo_ismapped():

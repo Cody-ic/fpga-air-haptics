@@ -44,6 +44,8 @@ class ReplaySequence:
     hand_valid: np.ndarray
     pressure_valid: np.ndarray
     hand_side: str = "right"
+    source_dataset: str = "EgoPressure"
+    vertices_available: bool = True
 
     def __post_init__(self):
         n = len(self.frames)
@@ -62,6 +64,10 @@ class ReplaySequence:
             raise ValueError("压力值必须是有限非负数")
         if self.hand_side not in ("left", "right"):
             raise ValueError("未知的左右手标记")
+        if self.source_dataset not in ('EgoPressure', 'ContactPose') or type(self.vertices_available) is not bool:
+            raise ValueError('不支持的数据源或网格可用标记')
+        if self.source_dataset == 'ContactPose' and self.pressure_valid.any():
+            raise ValueError('ContactPose没有压力测量，不能声明压力有效')
 
     @property
     def seconds(self):
@@ -76,7 +82,8 @@ class ReplaySequence:
 
     def save(self, path):
         metadata = json.dumps({"format": "touchsee-egopressure-1", "name": self.name,
-                               "hand_side": self.hand_side, "fps": FPS})
+                               "hand_side": self.hand_side, "fps": FPS,
+                               "source_dataset": self.source_dataset, "vertices_available": self.vertices_available})
         np.savez_compressed(path, metadata=metadata, frames=self.frames, vertices=self.vertices,
                             joints=self.joints, force=self.force, hand_valid=self.hand_valid,
                             pressure_valid=self.pressure_valid)
@@ -84,6 +91,12 @@ class ReplaySequence:
 
 def load_sequence(path):
     path = Path(path)
+    if path.is_dir() and (path / 'annotations.json').is_file():
+        from .hand_datasets import load_contactpose
+        return load_contactpose(path)
+    if path.suffix.lower() == '.json':
+        from .hand_datasets import load_contactpose
+        return load_contactpose(path)
     if path.is_dir() or path.suffix == ".parquet":
         return load_parquet(path if path.is_dir() else path.parent)
     with np.load(path, allow_pickle=False) as data:
@@ -93,7 +106,8 @@ def load_sequence(path):
         return ReplaySequence(metadata["name"], data["frames"].astype(np.int64),
                               data["vertices"].astype(np.float32), data["joints"].astype(np.float32),
                               data["force"].astype(np.float32), data["hand_valid"].astype(bool),
-                              data["pressure_valid"].astype(bool), metadata["hand_side"])
+                              data["pressure_valid"].astype(bool), metadata["hand_side"],
+                              metadata.get('source_dataset', 'EgoPressure'), metadata.get('vertices_available', True))
 
 
 def load_parquet(directory):
