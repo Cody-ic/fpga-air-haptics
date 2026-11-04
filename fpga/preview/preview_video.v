@@ -8,6 +8,8 @@ module preview_video(
     input wire signed [20:0] focus_x,focus_y,
     input wire [31:0] z_um,field_cycles,frame_number,
     input wire [1:0] run_state,
+    input wire static_mode,marker_visible,output_enabled,local_mode,
+    input wire [31:0] level,repeat_millihz,mod_hz,carrier_hz,
     output wire frame_boundary,
     output wire [11:0] field_addr,
     output reg [7:0] red,green,blue,
@@ -73,9 +75,13 @@ module preview_video(
         end
     endfunction
     // Metadata changes once per completed field; divide constants outside pixel color path.
-    wire [11:0] z_decimal,ms_decimal;
-    preview_number #(.SCALE(1000)) z_text(.clk(clk),.rst_n(rst_n),.value(z_um),.decimal(z_decimal));
-    preview_number #(.SCALE(49000)) ms_text(.clk(clk),.rst_n(rst_n),.value(field_cycles),.decimal(ms_decimal));
+    wire [23:0] z_decimal,ms_decimal,level_decimal,repeat_decimal,mod_decimal,carrier_decimal;
+    preview_number #(.SCALE(1000),.DIGITS(6)) z_text(.clk(clk),.rst_n(rst_n),.value(z_um),.decimal(z_decimal));
+    preview_number #(.SCALE(49000),.DIGITS(6)) ms_text(.clk(clk),.rst_n(rst_n),.value(field_cycles),.decimal(ms_decimal));
+    preview_number #(.SCALE(1),.DIGITS(6)) level_text(.clk(clk),.rst_n(rst_n),.value(level),.decimal(level_decimal));
+    preview_number #(.SCALE(1),.DIGITS(6)) repeat_text(.clk(clk),.rst_n(rst_n),.value(repeat_millihz),.decimal(repeat_decimal));
+    preview_number #(.SCALE(1),.DIGITS(6)) mod_text(.clk(clk),.rst_n(rst_n),.value(mod_hz),.decimal(mod_decimal));
+    preview_number #(.SCALE(1),.DIGITS(6)) carrier_text(.clk(clk),.rst_n(rst_n),.value(carrier_hz),.decimal(carrier_decimal));
     wire [19:0] x_positive=$signed(focus_x)+21'sd189000;
     wire [19:0] y_positive=$signed(focus_y)+21'sd189000;
     reg marker_start;
@@ -98,12 +104,15 @@ module preview_video(
     reg [23:0] color;
     reg [34:0] glyph;
     reg [2:0] nx,ny;
-    reg [1:0] slot;
+    reg [2:0] slot;
+    reg [23:0] number;
+    reg numeric_row,frequency_row,show_digit;
     reg [5:0] digit_x;
     reg [4:0] digit_y;
     wire [7:0] legend_value=x_d-590;
     always @* begin
         color=24'h0b1424;glyph=0;nx=0;ny=0;slot=0;digit_x=0;digit_y=0;
+        number=0;numeric_row=0;frequency_row=0;show_digit=0;
         if(map_d) begin
             color=field_valid?palette(field_value):24'h081024;
             // Axes are reference lines, not an assumed peak.
@@ -113,20 +122,42 @@ module preview_video(
             color=palette(legend_value);
         if((x_d==31 || x_d==544) && y_d>=55 && y_d<=568) color=24'h456078;
         if((y_d==55 || y_d==568) && x_d>=31 && x_d<=544) color=24'h456078;
-        if(x_d>=590 && x_d<610 && y_d>=122 && y_d<142)
+        // Independent status: playback can be paused while an old theoretical frame is visible.
+        if(x_d>=590 && x_d<606 && y_d>=26 && y_d<42)
+            color=output_enabled?24'hff704d:24'h66758a;
+        if(x_d>=590 && x_d<606 && y_d>=112 && y_d<128)
             color=run_state==1?24'h40dda5:run_state==2?24'hf4bc54:24'h66758a;
-        if(x_d>=790 && x_d<844 && ((y_d>=202 && y_d<223)||(y_d>=274 && y_d<295))) begin
-            slot=x_d>=826?2:x_d>=808?1:0;
-            digit_x=x_d-(slot==2?826:slot==1?808:790);
-            digit_y=y_d>=274?y_d-274:y_d-202;
+        if(x_d>=790 && x_d<806 && y_d>=112 && y_d<128)
+            color=field_valid?24'h40dda5:24'h66758a;
+        if(x_d>=590 && x_d<606 && y_d>=148 && y_d<164)
+            color=!static_mode?24'h40dda5:24'h66758a;
+        if(x_d>=790 && x_d<806 && y_d>=148 && y_d<164)
+            color=static_mode?24'h40dda5:24'h66758a;
+        if(x_d>=830 && x_d<846 && y_d>=26 && y_d<42)
+            color=local_mode?24'hf4bc54:24'h66758a;
+        if(y_d>=182 && y_d<203) begin numeric_row=1;digit_y=y_d-182;number=z_decimal;end
+        if(y_d>=218 && y_d<239) begin numeric_row=1;digit_y=y_d-218;number=level_decimal;end
+        if(y_d>=254 && y_d<275) begin numeric_row=1;digit_y=y_d-254;number=repeat_decimal;frequency_row=1;end
+        if(y_d>=290 && y_d<311) begin numeric_row=1;digit_y=y_d-290;number=mod_decimal;end
+        if(y_d>=326 && y_d<347) begin numeric_row=1;digit_y=y_d-326;number=carrier_decimal;end
+        if(y_d>=362 && y_d<383) begin numeric_row=1;digit_y=y_d-362;number=ms_decimal;end
+        if(numeric_row && x_d>=780 && x_d<894) begin
+            // Six decimal digits support 200.000 Hz and 1000 Hz modulation without saturation.
+            slot=x_d>=876?5:x_d>=858?4:x_d>=840?3:x_d>=816?2:x_d>=798?1:0;
+            digit_x=x_d-(slot==5?876:slot==4?858:slot==3?840:slot==2?816:slot==1?798:780);
             nx=digit_x>=15?5:digit_x>=12?4:digit_x>=9?3:digit_x>=6?2:digit_x>=3?1:0;
             ny=digit_y>=18?6:digit_y>=15?5:digit_y>=12?4:digit_y>=9?3:digit_y>=6?2:digit_y>=3?1:0;
-            if(y_d>=274) glyph=digit(slot==0?ms_decimal[11:8]:slot==1?ms_decimal[7:4]:ms_decimal[3:0]);
-            else glyph=digit(slot==0?z_decimal[11:8]:slot==1?z_decimal[7:4]:z_decimal[3:0]);
-            if(nx<5 && glyph[34-ny*5-nx]) color=24'h62e4c7;
+            show_digit=(number >> (4*(5-slot)))!=0 || slot==5 || (frequency_row && slot>=2);
+            if(frequency_row && static_mode) begin
+                if(x_d>=825 && x_d<855 && digit_y>=9 && digit_y<12) color=24'h90a9bd;
+            end else begin
+                glyph=digit(number[4*(5-slot) +:4]);
+                if(nx<5 && show_digit && glyph[34-ny*5-nx]) color=24'h62e4c7;
+                if(frequency_row && x_d>=833 && x_d<836 && digit_y>=18) color=24'h62e4c7;
+            end
         end
         if(text_word[text_bit]) color=24'hd9e6f5;
-        if(map_d && field_valid &&
+        if(map_d && field_valid && marker_visible &&
            ((x_d==marker_x && y_d>=marker_y-5 && y_d<=marker_y+5) ||
             (y_d==marker_y && x_d>=marker_x-5 && x_d<=marker_x+5))) color=24'hffffff;
     end

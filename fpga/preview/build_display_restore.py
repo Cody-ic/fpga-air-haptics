@@ -16,7 +16,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from fpga.board.build_calibration import load_restore
 
-def make_top(packed,z_mm):
+def make_top(packed,z_mm,calibration_level=30):
     text=(ROOT/'fpga/preview/theory_preview_top.v').read_text(encoding='utf-8')
     def replace(old,new):
         nonlocal text
@@ -25,9 +25,9 @@ def make_top(packed,z_mm):
     replace('module theory_preview_top(', 'module calibration_display_top(')
     replace('// Standalone PREVIEW image. Shift-register outputs are constant-disabled at the pads.',
             '// Transmitter stays on 50 MHz; display observes atomic snapshots on 49 MHz.')
-    replace('    wire boundary,valid;',f'''    wire [188:0] source_snapshot,display_snapshot;
+    replace('    wire boundary,valid;',f'''    wire [767:0] source_snapshot,display_snapshot;
     wire source_reset_n;
-    board_top #(.CAL_RESTORE_ENABLE(1),.CAL_Z_UM({z_mm*1000}),
+    board_top #(.CAL_RESTORE_ENABLE(1),.CAL_Z_UM({z_mm*1000}),.CAL_LEVEL({calibration_level}),
         .CAL_RESTORE_OFFSETS(512'h{packed:0128x})) transmitter(
         .clk(clk),.key_rst_n(key_rst_n),.key0_n(key0_n),.key1_n(key1_n),
         .uart_rx_pin(uart_rx_pin),.uart_tx_pin(uart_tx_pin),
@@ -51,9 +51,11 @@ def main():
     p.add_argument('--calibration-z-mm',type=int,choices=(50,70,100),required=True)
     p.add_argument('--gowin',default='D:/Gowin/Gowin_V1.9.12.04_x64/IDE/bin/gw_sh.exe')
     p.add_argument('--prepare-only',action='store_true')
+    p.add_argument('--calibration-level',type=int,default=30)
+    p.add_argument('--output-dir',type=Path,help='Separate build directory; preserve earlier measured images')
     args=p.parse_args()
-    packed,info=load_restore(args.calibration_file,args.calibration_z_mm)
-    folder=ROOT/'.runtime/display-restore'/f'z{args.calibration_z_mm}'
+    packed,info=load_restore(args.calibration_file,args.calibration_z_mm,calibration_level=args.calibration_level)
+    folder=args.output_dir.resolve() if args.output_dir else ROOT/'.runtime/display-restore'/f'z{args.calibration_z_mm}'
     src=folder/'src';src.mkdir(parents=True,exist_ok=True)
     for path in [*(ROOT/'fpga/rtl').glob('*.v'),*(ROOT/'fpga/preview').glob('*.v')]:
         shutil.copy2(path,src/path.name)
@@ -61,7 +63,7 @@ def main():
     text,n=re.subn(r'(`define FPGA_CALIBRATION_ENABLE )0',r'\g<1>1',board.read_text(encoding='utf-8'))
     if n!=1:raise ValueError('Calibration macro missing')
     board.write_text(text,encoding='utf-8')
-    (src/'calibration_display_top.v').write_text(make_top(packed,args.calibration_z_mm),encoding='utf-8')
+    (src/'calibration_display_top.v').write_text(make_top(packed,args.calibration_z_mm,args.calibration_level),encoding='utf-8')
     generate(src)
     cst=(ROOT/'fpga/board/tang_mega_138k_pro.cst').read_text(encoding='utf-8')
     for name,pair in [('tmds_data_p[0]','AB24,AC24'),('tmds_data_p[1]','V24,W24'),

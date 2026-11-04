@@ -90,7 +90,9 @@ module hap2_top #(
     output wire [31:0] view_z_um, view_carrier_hz, view_phase_steps, view_level,
     output wire [15:0] view_revision,
     output wire [1:0] view_run_state,
-    output wire view_active
+    output wire view_active, view_static,
+    output wire [511:0] view_phase_table,
+    output wire [31:0] view_repeat_millihz, view_mod_hz
 );
 
     // Calibration is an isolated startup endpoint. With CAL_ENABLE=0 this
@@ -444,10 +446,14 @@ module hap2_top #(
     assign view_z_um = cfg_z_um;
     assign view_carrier_hz = cfg_carrier_hz;
     assign view_phase_steps = cfg_phase_steps;
-    assign view_level = cfg_static ? 0 : cfg_level; // Observer only supports a moving focus.
+    assign view_level = cfg_level;
+    assign view_static = cfg_static;
+    assign view_phase_table = cfg_phase_table; // Nominal phases, without measured correction.
+    assign view_repeat_millihz = cfg_repeat_millihz;
+    assign view_mod_hz = cfg_mod_hz;
     assign view_revision = cmd_rev;
     assign view_run_state = cmd_run;
-    assign view_active = normal_output_on && !cfg_static;
+    assign view_active = normal_output_on;
 
     // ---------------- 相位计算 ----------------
     // 每拍更新一次：把焦点坐标变成每一路的相位码。载波换了要重算常数。

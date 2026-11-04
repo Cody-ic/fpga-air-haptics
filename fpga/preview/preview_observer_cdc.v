@@ -2,7 +2,7 @@
 // Request/acknowledge bundled-data transfer. Source holds the entire snapshot
 // until a new request has crossed two source clocks. Destination copies only
 // after the matching acknowledgement has crossed two destination clocks.
-module preview_observer_cdc # (parameter WIDTH=189)(
+module preview_observer_cdc # (parameter WIDTH=768)(
     input wire source_clk,source_rst_n,dest_clk,dest_rst_n,
     input wire [WIDTH-1:0] source_data,
     output reg [WIDTH-1:0] dest_data

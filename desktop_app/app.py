@@ -1239,6 +1239,8 @@ class App:
                                (self.playback.stop_button, self.stop_button)):
             configure_if_changed(target, state=source["state"])
         play_label = "继续播放" if fresh and self.state.state == "PAUSED" else "播放"
+        static_frame = fresh and self.state.config.phase_table != "NONE"
+        configure_if_changed(self.apply_button, text="改发绘图草稿" if static_frame else "发送到设备")
         configure_if_changed(self.start_button, text=play_label)
         configure_if_changed(self.playback.play_button, text=play_label)
         configure_if_changed(self.connection_picker, state="disabled" if alive or scanning else "readonly")
@@ -1313,7 +1315,7 @@ class App:
                 if not fresh:
                     message = "设备未连接或暂未响应。"
                 elif static and self.config_confirmed() and not self.busy:
-                    message = "压力单帧已确认；播放输出固定相位分布，绘图草稿保持原样。"
+                    message = "压力单帧已确认；点“播放”输出此帧。“改发绘图草稿”会替换此帧。"
                 self.config_line.set(message)
             except (ValueError, OverflowError):
                 self.config_line.set("请完成图形并检查输入的数值。")

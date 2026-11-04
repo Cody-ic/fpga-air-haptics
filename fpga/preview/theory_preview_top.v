@@ -23,6 +23,8 @@ module theory_preview_top(
         .SSCMDSEL(7'd0),.SSCMDSEL_FRAC(3'd0),.ICPSEL(6'd0),.LPFRES(3'd0),.LPFCAP(2'd0));
     por_reset #(.CLK_HZ(49000000)) por(.clk(pixel_clk),.ext_rst_n(key_rst_n && locked),.rst_n(rst_n));
     wire boundary,valid;
+    wire displayed_static,status_static,status_output,status_local;
+    wire [31:0] status_level,status_repeat,status_mod,status_carrier;
     wire [11:0] address;
     wire [7:0] value,r,g,b;
     wire signed [20:0] fx,fy;
@@ -33,10 +35,15 @@ module theory_preview_top(
         .uart_rx_pin(uart_rx_pin),.uart_tx_pin(uart_tx_pin),.frame_boundary(boundary),
         .field_read_addr(address),.field_read_value(value),.field_valid(valid),
         .displayed_x(fx),.displayed_y(fy),.displayed_z(z),.field_cycles(cycles),
-        .frame_number(frames),.run_state(run_state));
+        .frame_number(frames),.run_state(run_state),.displayed_static(displayed_static),
+        .status_static(status_static),.status_output(status_output),.status_local(status_local),
+        .status_level(status_level),.status_repeat(status_repeat),.status_mod(status_mod),.status_carrier(status_carrier));
     preview_video video(.clk(pixel_clk),.rst_n(rst_n),.field_value(value),.field_valid(valid),
         .focus_x(fx),.focus_y(fy),.z_um(z),.field_cycles(cycles),.frame_number(frames),
-        .run_state(run_state),.frame_boundary(boundary),.field_addr(address),
+        .run_state(run_state),.static_mode(status_static),.marker_visible(!displayed_static),
+        .output_enabled(status_output),.local_mode(status_local),
+        .level(status_level),.repeat_millihz(status_repeat),.mod_hz(status_mod),.carrier_hz(status_carrier),
+        .frame_boundary(boundary),.field_addr(address),
         .red(r),.green(g),.blue(b),.de(de),.hs(hs),.vs(vs));
     wire [9:0] symbols[0:3];
     tmds_encoder enc_b(.clk(pixel_clk),.rst_n(rst_n),.de(de),.c0(hs),.c1(vs),.data(b),.symbol(symbols[0]));

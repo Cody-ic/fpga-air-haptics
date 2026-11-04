@@ -73,7 +73,7 @@ module board_top #(
     // 本地模式、串口状态在状态帧里都看得到）
     output wire [2:0] led,
     // Read-only display observation; no feedback into the transmitter.
-    output wire [188:0] view_snapshot,
+    output wire [767:0] view_snapshot,
     output wire view_reset_n
 );
 
@@ -134,9 +134,11 @@ module board_top #(
     wire [31:0] view_z,view_carrier,view_steps,view_level;
     wire [15:0] view_revision;
     wire [1:0] view_run;
-    wire view_active;
+    wire view_active,view_static;
+    wire [511:0] view_phase_table;
+    wire [31:0] view_repeat,view_mod;
     assign view_reset_n=rst_n;
-    assign view_snapshot={focus_x,focus_y,view_z,view_carrier,view_steps,view_level,
+    assign view_snapshot={view_phase_table,view_static,output_on,mode_local,view_repeat,view_mod,focus_x,focus_y,view_z,view_carrier,view_steps,view_level,
                           view_revision,view_run,view_active};
     /* verilator lint_on UNUSEDSIGNAL */
 
@@ -191,6 +193,8 @@ module board_top #(
         .view_z_um(view_z),.view_carrier_hz(view_carrier),.view_phase_steps(view_steps),
         .view_level(view_level),.view_revision(view_revision),
         .view_run_state(view_run),.view_active(view_active),
+        .view_static(view_static),.view_phase_table(view_phase_table),
+        .view_repeat_millihz(view_repeat),.view_mod_hz(view_mod),
         .array_pos   (array_pos),
         /* verilator lint_off PINCONNECTEMPTY */
         .array_neg   ()          // 单端驱动不用；要半桥就照上面的说明把端口引出来

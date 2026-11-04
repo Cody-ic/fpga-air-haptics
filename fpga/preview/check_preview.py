@@ -191,7 +191,9 @@ wire [7:0] r,g,b;wire de,hs,vs,boundary;
 integer out,n,lines,active_count;
 preview_video dut(.clk(clk),.rst_n(rst_n),.field_value(value),.field_valid(1'b1),
  .focus_x(21'sd0),.focus_y(21'sd0),.z_um(32'd70000),.field_cycles(32'd2035818),
- .frame_number(32'd1),.run_state(2'd1),.frame_boundary(boundary),.field_addr(addr),
+ .frame_number(32'd1),.run_state(2'd1),.static_mode(1'b0),.marker_visible(1'b1),
+ .output_enabled(1'b0),.local_mode(1'b0),.level(32'd100),.repeat_millihz(32'd1000),
+ .mod_hz(32'd0),.carrier_hz(32'd40000),.frame_boundary(boundary),.field_addr(addr),
  .red(r),.green(g),.blue(b),.de(de),.hs(hs),.vs(vs));
 always @(posedge clk) value<=mem[addr];
 initial begin

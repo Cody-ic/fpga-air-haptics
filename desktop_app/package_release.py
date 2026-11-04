@@ -75,6 +75,7 @@ def main(dist_directory=None):
         bundle.write(app_dir/'UI_UPGRADE_2026-10-29.md', '界面与验证说明.md')
         bundle.write(app_dir/'EGOPRESSURE_REPLAY.md', '三维回放说明.md')
         bundle.write(app_dir/'PRESSURE_SINGLE_FRAME.md', '压力单帧说明.md')
+        bundle.write(app_dir/'PRESSURE_FOCUS_2026-11-02.md', '双点增强说明.md')
         bundle.write(app_dir/'OUTPUT_STRENGTH_2026-10-31.md', 'OUTPUT_STRENGTH_2026-10-31.md')
         bundle.write(app_dir/'CONNECTION_DIAGNOSIS_2026-10-31.md', 'CONNECTION_DIAGNOSIS_2026-10-31.md')
         for path in (app_dir/'assets/egopressure').iterdir():

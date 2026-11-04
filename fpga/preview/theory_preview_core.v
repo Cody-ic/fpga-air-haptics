@@ -19,12 +19,18 @@ module theory_preview_core #(
     output wire [1:0] run_state,
     output wire physical_output,
     output wire [63:0] physical_array,
-    input wire [188:0] external_snapshot
+    output reg displayed_static,
+    output wire status_static,status_output,status_local,
+    output wire [31:0] status_level,status_repeat,status_mod,status_carrier,
+    input wire [767:0] external_snapshot
 );
     wire signed [20:0] fx,fy;
     wire [31:0] z,carrier,steps,level;
     wire [15:0] revision;
     wire active;
+    wire [511:0] static_table;
+    assign status_level=level;
+    assign status_carrier=carrier;
     reg [31:0] boot_counter=0;
     reg [31:0] boot_id=0;
     reg was_reset=1;
@@ -34,7 +40,8 @@ module theory_preview_core #(
         if(rst_n && was_reset) boot_id<=boot_counter;
     end
     generate if(EXTERNAL_CONTROL) begin:observer
-        assign {fx,fy,z,carrier,steps,level,revision,run_state,active}=external_snapshot;
+        assign {static_table,status_static,status_output,status_local,status_repeat,status_mod,
+                fx,fy,z,carrier,steps,level,revision,run_state,active}=external_snapshot;
         assign uart_tx_pin=1'b1;
         assign physical_output=0;
         assign physical_array=0;
@@ -49,13 +56,17 @@ module theory_preview_core #(
         .focus_x(fx),.focus_y(fy),.view_z_um(z),.view_carrier_hz(carrier),
         .view_phase_steps(steps),.view_level(level),.view_revision(revision),
         .view_run_state(run_state),.view_active(active),
+        .view_static(status_static),.view_phase_table(static_table),
+        .view_repeat_millihz(status_repeat),.view_mod_hz(status_mod),.mode_local(status_local),
         .output_on(physical_output),.array_pos(physical_array));
+    assign status_output=physical_output;
     end endgenerate
 
     reg signed [20:0] fx_q,fy_q;
     reg [31:0] z_q,carrier_q,steps_q;
     reg [15:0] revision_q;
-    reg active_q;
+    reg active_q,static_q;
+    reg [511:0] static_table_q;
     reg phase_start;
     wire phase_done;
     reg [7:0] phase_addr;
@@ -99,7 +110,7 @@ module theory_preview_core #(
         if(!rst_n) begin
             state<=0;front<=0;field_valid<=0;phase_start<=0;engine_start<=0;
             fx_q<=0;fy_q<=0;z_q<=70000;carrier_q<=40000;steps_q<=64;revision_q<=0;
-            active_q<=0;phase_addr<=0;phases<=0;displayed_x<=0;displayed_y<=0;
+            active_q<=0;static_q<=0;static_table_q<=0;displayed_static<=0;phase_addr<=0;phases<=0;displayed_x<=0;displayed_y<=0;
             displayed_z<=70000;field_cycles<=0;frame_number<=0;cycles<=0;
         end else begin
             phase_start<=0;engine_start<=0;
@@ -110,25 +121,27 @@ module theory_preview_core #(
                 active_q<=0;
                 // No valid field is shown while stopped; label the current
                 // configured plane rather than the reset/default frame height.
-                displayed_x<=fx;displayed_y<=fy;displayed_z<=z;
+                displayed_x<=fx;displayed_y<=fy;displayed_z<=z;displayed_static<=status_static;
             end
             case(state)
                 0: if(revision!=0 && run_state==1) begin
                     fx_q<=fx;fy_q<=fy;z_q<=z;carrier_q<=carrier;steps_q<=steps;
                     revision_q<=revision;active_q<=active;cycles<=0;state<=1;
+                    static_q<=status_static;static_table_q<=static_table;
                 end
-                1: begin phase_start<=1;state<=2;end
+                1: if(static_q) begin phase_addr<=0;state<=4;end
+                   else begin phase_start<=1;state<=2;end
                 2: if(phase_done) begin phase_addr<=0;state<=3;end
                 3: state<=4;
                 4: begin
-                    phases[10*phase_addr +:10]<=phase1024(phase_data,steps_q);
+                    phases[10*phase_addr +:10]<=phase1024(static_q ? static_table_q[8*phase_addr +:8] : phase_data,steps_q);
                     if(phase_addr==63) begin state<=5;engine_start<=1;end
                     else begin phase_addr<=phase_addr+1'b1;state<=3;end
                 end
                 5: if(engine_done) begin field_cycles<=cycles;state<=6;end
                 6: if(frame_boundary) begin
                     front<=~front;field_valid<=active_q && revision==revision_q && run_state!=0;
-                    displayed_x<=fx_q;displayed_y<=fy_q;displayed_z<=z_q;
+                    displayed_x<=fx_q;displayed_y<=fy_q;displayed_z<=z_q;displayed_static<=static_q;
                     frame_number<=frame_number+1'b1;state<=0;
                 end
                 default:state<=0;

@@ -12,13 +12,13 @@ from desktop_app.app import App
 from desktop_app.model import ArraySpec
 
 
-def main(output=None):
+def main(output=None, density=1):
     output=Path(output or '.runtime/pressure-ui')
     output.mkdir(parents=True,exist_ok=True)
     with patch('desktop_app.controller.SerialTransport',side_effect=AssertionError('No hardware')), \
          patch('desktop_app.controller.BleTransport',side_effect=AssertionError('No hardware')):
         root=tk.Tk()
-        root.tk.call('tk','scaling',96/72)
+        root.tk.call('tk','scaling',density*96/72)
         errors=[]
         root.report_callback_exception=lambda kind,error,tb: errors.append(str(error))
         app=App(root)
@@ -43,6 +43,8 @@ def main(output=None):
             app.replay.show_frame(300)
             until(lambda:panel.future is None)
             assert panel.result is not None,panel.status.get()
+            assert panel.result.mapping['centre_spacing_mm']==35
+            assert panel.result.metrics['mode']=='focus'
             np.testing.assert_array_equal(panel.result.raw_kpa,frozen)
             assert str(panel.send_button['state'])=='disabled'
             assert app.session is None
@@ -58,14 +60,30 @@ def main(output=None):
             assert app.state.config==panel.result.config
             assert app.state.state=='IDLE' and not app.state.output
             assert app.draft_signature()==draft
-            for button in (panel.generate_button,panel.send_button,panel.demo_button):
-                assert button.winfo_ismapped()
-                assert button.winfo_rootx()+button.winfo_width() <= panel.winfo_rootx()+panel.winfo_width()
+            assert app.apply_button['text']=='改发绘图草稿'
+            def fits(widget):
+                assert widget.winfo_ismapped(),str(widget)
+                assert widget.winfo_rootx() >= panel.winfo_rootx(),str(widget)
+                assert widget.winfo_rooty() >= panel.winfo_rooty(),str(widget)
+                assert widget.winfo_rootx()+widget.winfo_width() <= panel.winfo_rootx()+panel.winfo_width(),str(widget)
+                assert widget.winfo_rooty()+widget.winfo_height() <= panel.winfo_rooty()+panel.winfo_height(),str(widget)
+            for widget in (panel.generate_button,panel.original_button,panel.send_button,panel.demo_button,
+                           panel.playback_button,panel.mode_picker,panel.status_label,panel.connection_label,*panel.entries):
+                fits(widget)
             panel.figure.savefig(output/'comparison.png',dpi=140)
             panel.lift();pump()
             ImageGrab.grab(bbox=(panel.winfo_rootx(),panel.winfo_rooty(),
                                 panel.winfo_rootx()+panel.winfo_width(),panel.winfo_rooty()+panel.winfo_height())).save(output/'pressure-window.png')
             (output/'config.json').write_text(json.dumps(dict(panel.result.config.wire(),**panel.result.array.wire())),encoding='utf-8')
+            panel.mode.set('区域还原（原算法）')
+            assert panel.result is None and str(panel.send_button['state'])=='disabled'
+            panel.original_button.invoke()
+            assert panel.result is None and str(panel.send_button['state'])=='disabled'
+            panel.generate_button.invoke()
+            until(lambda:panel.future is None)
+            assert abs(panel.result.mapping['centre_spacing_mm']-26.487056)<1e-5
+            assert panel.result.metrics['mode']=='regions'
+            assert app.state.config != panel.result.config  # Regeneration must not upload.
             panel.destroy()
             assert app.can_play()
             app.send('START');until(lambda:not app.busy and app.state.state=='RUNNING')
@@ -76,6 +94,7 @@ def main(output=None):
             app.send('START');until(lambda:not app.busy and app.state.state=='RUNNING')
             app.send('STOP');until(lambda:not app.busy and app.state.state=='IDLE')
             app.apply_config();until(lambda:not app.busy and app.config_confirmed() and app.state.config.phase_table=='NONE')
+            assert app.apply_button['text']=='发送到设备'
             assert app.draft_signature()==draft
             app.navigate('replay');app.replay.show_frame(0)
             app.replay.pressure_button.invoke();panel=app.pressure_window
@@ -84,7 +103,9 @@ def main(output=None):
             panel.destroy()
             (output/'result.json').write_text(json.dumps(dict(passed=True,frame=325,channels=64,
                 frozen_selection=True,legacy_device_blocked=True,automatic_start=False,
-                start_pause_resume_stop=True,drawing_preserved=True,hardware_connected=False),indent=2))
+                start_pause_resume_stop=True,drawing_preserved=True,hardware_connected=False,
+                density=density,footer_visible=True,spacing_reset_without_upload=True,
+                focus_mode_switch_without_upload=True),indent=2))
             print('PASS pressure GUI',output)
             return 0
         finally:
