@@ -1,59 +1,40 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Project Structure & Release Scope
 
-This repository prepares the 2026 FPGA haptic graphics project. `README.md` is the entry point; `设计思路.md` records current architecture; `FPGA赛道选题建议(1).md` preserves historical research. `CLAUDE.md` provides project context.
+`README.md` is the entry point. `docs/REPOSITORY_MAP.md` classifies directories; `docs/SOFTWARE_RELEASE.md` and `release/software.json` define candidate `1.0.0rc1`.
 
-`desktop_app/` contains the Python UI, sketch compiler, model, serial/BLE transports, Demo and tests. `golden.py` exports phase vectors; wire semantics belong in `desktop_app/PROTOCOL.md`, and BLE mapping in `desktop_app/BLE.md`.
-
-`fpga/rtl/` implements HAP3 control, trajectories, phases and outputs; `fpga/tb/` contains simulation checks, and `fpga/board/` holds the Tang MEGA 138K Pro build and pin constraints. The 4×4 / 11 mm configuration has passed temporary download and serial readback; acoustic performance remains unverified.
-
-`firmware/nucleo_f411re/` and `firmware/stm32f103c8_cube/` hold MCU prototypes. `hardware/` holds PCB releases and `hardware/mechanical/` contains printable fixtures. Hardware validation limits belong in their README files.
+`desktop_app/` contains the Python user workspace, sketch compiler, pressure solver, transports, and `tests/`. `fpga/rtl/`, `fpga/tb/`, `fpga/board/`, and `fpga/preview/` hold control logic, simulation, board constraints, and video. `firmware/xiao_mg24/` supplies independent receiver acquisition and calibration tools. `hardware/` holds PCB and mechanical sources. STM32 firmware, `mobile_app/`, and `experiments/` remain auxiliary.
 
 ## Build, Test, and Development Commands
 
-`mobile_app/` is the Flutter Android companion. `lib/` holds touch sketches, models, protocol, BLE/Demo sessions and the library; `test/` holds Dart checks and Python reference vectors. See `mobile_app/README.md` for Android setup and known limits.
+Run from the repository root:
 
-Run from the repository root with Python 3.10+ and Tk:
+- `python -m pip install -r desktop_app/requirements.txt`: install desktop/replay dependencies.
+- `python -m desktop_app`: open the disconnected user workspace.
+- `python -m desktop_app --demo`: simulate an idle device.
+- `python -m desktop_app --developer`: open engineering tools.
+- `python -m unittest discover -s desktop_app/tests -v`: test desktop/numerical behavior.
+- `python -m unittest discover -s firmware/xiao_mg24/tests -v`: test acquisition.
+- `python -m desktop_app.tests.user_gui_smoke`: check visible interactions offline.
+- `python tools/build_final_software.py --help`: inspect build options.
 
-- `python -m pip install -r desktop_app/requirements.txt`: install dependencies.
-- `python -m desktop_app --demo`: connect a simulated device, initially idle.
-- `python -m unittest discover -s desktop_app/tests -v`: run automated checks.
-- `python -m desktop_app.tests.gui_smoke`: exercise the visible interface; Pillow enables screenshots.
-- `python -m desktop_app.tests.receiver_gui_smoke`: check the debug ADC waveform panel, Demo source labels and CSV export; `receiver.py` analyzes voltage windows and `receiver_panel.py` owns this UI.
-- `powershell -File desktop_app/build_windows.ps1 -Python <python.exe>`: build the Windows EXE and portable ZIP after installing `requirements-build.txt`.
-- `rg --files --hidden`: inspect workspace files.
-- `python firmware/nucleo_f411re/build.py`: compile MCU ELF/HEX/BIN with Arm GNU; never flashes automatically.
-- `python firmware/nucleo_f411re/tests/test_firmware.py`: native C/Python cross-checks using a host GCC compiler.
-- `python firmware/stm32f103c8_cube/tests/test_f103.py`: test F103 firmware modes and waveform buffers without flashing.
-- In `fpga/`: `bash tb/run_verilator.sh` runs 12 simulation benches; commercial Gowin builds use `board/build.tcl`.
-- In `mobile_app/`: `flutter pub get`, `flutter analyze`, `flutter test`; `dart format lib test` formats Dart.
-- `powershell -File mobile_app/build_android.ps1`: build the internal-test APK using an ASCII staging directory on Windows.
-
-Quote PowerShell paths containing spaces or parentheses. Keep `dist/`, `build/` and `.runtime/` ignored. The desktop shortcut targets the EXE; rebuild after desktop runtime edits. Mobile releases currently use local debug signing. Gowin build paths should use ASCII characters on Windows.
+Use ASCII build paths. Keep `.runtime/`, `build/`, and `dist/` ignored. Rebuild executables after runtime edits.
 
 ## Coding Style & Naming Conventions
 
-Use four-space Python indentation, `snake_case`, and explicit unit suffixes such as `_um` and `_millihz`. Keep Tk operations on the UI thread and serial/BLE I/O in workers. Normal interface text should explain user actions; engineering details belong in debug mode or advanced connection settings.
-
-Use standard Dart formatting, two-space indentation and `flutter_lints` for mobile. Keep protocol semantics aligned with Python; changing either requires cross-language fixture checks. Mobile imports preserve compiled desktop paths, not desktop CAD constraints.
-
-Write research in Chinese and Markdown in UTF-8. Preserve filenames, numbered sections, and technical abbreviations. Use ATX headings, hyphen bullets, and blank lines. Use absolute dates. Cite new external technical claims in section 9; distinguish vendor publication years and historical rules from confirmed current information.
-
-## Communication
-
-The project owner is a student new to FPGA engineering. Explain every English acronym or abbreviation on first use in each reply, in the form `RTL（Register Transfer Level，寄存器传输级）`. Prefer concrete numbers and everyday comparisons, and keep measured results clearly separate from theory and simulation.
+Use four-space Python indentation, `snake_case`, and explicit units such as `_um` and `_millihz`. Keep Tk operations on its UI thread and I/O in workers. User interfaces describe actions; engineering details belong in developer mode. Keep protocol semantics aligned across implementations. Write Chinese UTF-8 Markdown; preserve filenames.
 
 ## Testing Guidelines
 
-Use `unittest` files named `test_*.py`; no coverage threshold exists. Test coordinate preservation, frame corruption, atomic configuration, readback, and failure recovery. Run GUI checks after interaction changes. Verify Markdown links, tables, units, and source claims. Screenshots and exports belong in ignored runtime directories.
+Use `unittest` files named `test_*.py`; no coverage threshold exists. Verify atomic configuration, failure recovery, coordinate preservation, quantized-phase objectives, and measured-data provenance. Run GUI checks after interaction changes. Check Markdown links and units. Label simulation, digital readback, theory, receiver voltage, and human observations separately.
 
 ## Commit & Pull Request Guidelines
 
-Use focused imperative messages, consistent with `docs: add system design plan`. PRs should explain behavior, rationale, interface changes, validation, and relevant issues; include screenshots for UI changes. Exclude personal files, credentials, and runtime outputs.
+Use focused imperative messages such as `docs: clarify release profiles`. Explain behavior, rationale, validation, and interface changes; include UI screenshots. Exclude credentials, personal files, and runtime artifacts. Compare parallel branches before integrating; do not overwrite newer code with older PR snapshots.
 
 ## Project Constraints
 
-Receiver hardware targets the final FPGA system; the F411 is a temporary validation platform. Preserve its divider and analog front end, adapting firmware and host software first. Do not redesign hardware merely to fill the MCU ADC range; justify any circuit change against measured problems and the final FPGA acquisition interface. Keep assembly and labeling checks separate from circuit redesign.
+Target Tang with an 8×8, 10.3 mm array. Release firmware requires matching measured compensation; zero-compensation and video-link tests are diagnostics. Apply compensation exactly once. MG24 uses independent `MG24_RX1`; transmitter control uses HAP3. Do not imply the main GUI already owns a second MG24 connection or that touchscreen support exists.
 
-Tang MEGA 138K Pro is selected; the current 4×4 R5 array uses 11 mm pitch, then expands to 8×8. Drawings use arbitrary coordinates, never emitter-grid indices. Current software compiles sketches to at most 32 strokes and 256 coordinates, with one moving focus. Preserve legacy 64-point imports. Keep shared-edge subtraction and output-off transfers explicit; save original geometry, relations and dimensions separately from the wire plan. FPGA owns eventual high-speed scanning; Demo is a slow path demonstration. Preserve all coordinates when switching arrays. Distinguish simulated states, digital readback, theory, and measurements; prioritize single-focus validation before extensions.
+Drawings use physical coordinates, not emitter-grid indices. Preserve 32-stroke/256-coordinate paths, legacy 64-point imports, output-off jumps, original geometry, and dimensions. Preserve receiver analog hardware; adapt software first. Build scripts must not flash or start emission automatically.

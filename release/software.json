@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "version": "1.0.0rc1",
+  "status": "candidate_requires_hardware_calibration",
+  "source_baseline": "b732414166ed25a274b2b4b8c727f7fb9d6bfd2c",
+  "hardware": {"board": "Tang MEGA 138K Pro", "device": "GW5AST-138B", "rows": 8, "cols": 8, "pitch_um": 10300},
+  "transmitter": {
+    "builder": "fpga/preview/build_display_restore.py",
+    "calibration_required": true,
+    "default_calibration_mode": "startup",
+    "startup_source": "adc",
+    "auto_start": false,
+    "carrier_hz": 40000,
+    "phase_steps": 64,
+    "expected_fw_id": "HAP3_STATIC_1",
+    "expected_cal_profile": 1,
+    "expected_preview_only": 0
+  },
+  "calibration": {
+    "file": "release/calibration/8x8_50mm_16v_calibration_20261029_1652.json",
+    "sha256": "7342adeb964ebe3a63b5dc309a39604d3f284f60783054faf95f6de80e930d42",
+    "reference_height_mm": 50,
+    "reference_channel": 0,
+    "measurement_level": 20,
+    "recorded_drive_v": 16,
+    "source_record": "fpga/50mm_16V校准与按键圆形_2026-10-29.md",
+    "data_status": "not_found_in_committed_repository"
+  },
+  "desktop": {"entry": "python -m desktop_app", "developer_entry": "python -m desktop_app --developer", "builder": "desktop_app/build_user_windows.ps1"},
+  "receiver": {"source": "firmware/xiao_mg24/receiver/receiver.ino", "protocol": "MG24_RX1", "bluetooth": false, "sample_hz": 400000, "window_samples": 200, "tool": "firmware/xiao_mg24/fpga_calibration_gui.py"},
+  "excluded_from_default_delivery": ["4x4 prototypes", "STM32 prototypes", "standalone preview", "video link test", "unmeasured zero compensation", "unimplemented touchscreen navigation"]
+}

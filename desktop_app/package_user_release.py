@@ -7,11 +7,14 @@ import json
 from pathlib import Path
 import platform
 import shutil
+import subprocess
 import sys
 import zipfile
 
 
 def main():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from desktop_app import __version__
     app = Path(__file__).resolve().parent
     dist = app/'dist'/'user'
     portable = dist/'TouchSee-User'
@@ -20,9 +23,20 @@ def main():
     exe = dist/'触见体验台.exe'
     if not exe.is_file():
         raise FileNotFoundError(exe)
-    info = {'built_at':datetime.now(timezone.utc).isoformat(), 'edition':'user',
+    info = {'built_at':datetime.now(timezone.utc).isoformat(), 'edition':'user', 'version':__version__,
             'executable':exe.name, 'sha256':sha256(exe.read_bytes()).hexdigest(),
             'python':platform.python_version(), 'packages':{d.metadata['Name']:d.version for d in metadata.distributions()}}
+    root = app.parent
+    try:
+        git = ['git', '-c', 'safe.directory='+root.as_posix(), '-C', str(root)]
+        info['source_revision'] = subprocess.check_output(git+['rev-parse', 'HEAD'], text=True).strip()
+        info['source_dirty'] = bool(subprocess.check_output(git+['status', '--porcelain'], text=True).strip())
+    except (OSError, subprocess.CalledProcessError):
+        info['source_revision'] = None
+        info['source_dirty'] = None
+    info['desktop_sources_sha256'] = {
+        path.relative_to(root).as_posix():sha256(path.read_bytes()).hexdigest()
+        for path in sorted(app.glob('*.py'))}
     (dist/'build-info.json').write_text(json.dumps(info,ensure_ascii=False,indent=2),encoding='utf-8')
     guide = dist/'使用说明.md'
     guide.write_bytes((app/'USER_GUIDE.md').read_bytes())

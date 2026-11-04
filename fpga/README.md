@@ -1,4 +1,42 @@
-# FPGA 工程：串口接收通路
+# FPGA控制与显示工程
+
+## 当前入口（2026-11-04）
+
+正式候选 `1.0.0rc1` 面向 Tang 的 **8×8、10.3 mm** 阵列。默认构建保留完整板内启动校准：先在CAL2等待真实测量，四步求解和复测通过达到DONE，再接受RELEASE切入HAP3。普通发射控制、轨迹、相位及移位输出位于 `rtl/`；合并视频观察器位于 `preview/`，发射控制与显示分别运行，显示不反向暂停或启动发射。
+
+| 入口 | 用途 | 是否属于正式整机 |
+| --- | --- | --- |
+| [统一候选构建](../tools/build_final_software.py)及[版本配置](../release/software.json) | 默认`--calibration-mode startup`；恢复旧表另选`restore` | 默认不要求旧表，构建后仍须完成本轮实测校准与整机验收 |
+| [build_display_restore.py](preview/build_display_restore.py)配`--startup-calibration adc` | 完整四步启动校准、8×8控制与理论显示 | 默认50 mm、等级20、参考通道0由统一入口传入；先CAL2，DONE＋RELEASE后HAP3 |
+| 同一构建器配`--calibration-file` | 8×8控制、嵌入旧实测修正、理论显示 | restore严格核对原文件和条件；只恢复数据，不执行新校准 |
+| 同一构建器 `--uncalibrated` | 零补偿控制与显示，排查数字链路 | 不包含启动校准求解，不能把它描述为仅缺修正表的完整版本 |
+| [build_preview.py](preview/build_preview.py) | 独立理论显示；`--link-test`为静态视频链路图 | 物理发射恒关闭；不是整机业务固件 |
+| [board/build.tcl](board/build.tcl) | 仅`board_top`控制，无合并视频，默认不恢复补偿 | 开发构建 |
+| [build_calibration.py](board/build_calibration.py) | 人工／自动校准、补偿恢复及专用通道测试 | 测量工具；默认`all`会产生多种镜像，须明确选用途 |
+
+正常业务标识为 `HAP3_STATIC_1`。startup校准完成并释放后为`cal_profile=1`；restore为`cal_profile=2`，uncalibrated为`cal_profile=0`。校准型候选还须核对8×8、间距10300 µm、`preview_only=0`及64项修正来源和回读。标识不能代替源码提交和位流校验值，算法在板也不能代替真实测量。目前旧文件缺失只阻止restore路径；模式、构建与验收见[软件发行说明](../docs/SOFTWARE_RELEASE.md)。
+
+底层启动校准构建示例：
+
+```powershell
+python fpga/preview/build_display_restore.py --startup-calibration adc --calibration-z-mm 50 --calibration-level 20 --prepare-only
+```
+
+该命令准备含完整校准算法的源码，不发射、不下载。实际CAL2测量由MG24独立工具转发接收窗口，完成DONE＋RELEASE后再连接普通HAP3上位机。
+
+### 现行文档导航
+
+- [8×8移位输出与接线](8x8移位输出与接线_2026-10-22.md)、[板级约束和构建](board/README.md)。
+- [逐通道校准](CALIBRATION.md)、[校准协议](CALIBRATION_PROTOCOL.md)、[静态相位联调](HOST_ALIGNMENT_2026-10-30.md)。
+- [控制协议](../desktop_app/PROTOCOL.md)、[理论声场模型与视频](preview/README.md)。
+- `python fpga/tb/run_tests.py --iverilog <路径> --bench <测试台>`运行所选硬件逻辑仿真；视频复位模型检查使用`python fpga/preview/check_preview.py --part reset --primlib <高云原语文件>`。
+
+MG24当前经电脑独立采集与校准，不是Tang内置40 kHz波形采集器。屏幕触摸、翻页及接收端直连仍未实现。理论声场、相位回读和真实接收值分别标明来源。
+
+## 历史说明（保留原始记录）
+
+以下为早期接收通路、4×4及后续增补的历史记录。其旧默认值、器件和下载结论均受原日期及构建条件限制；当前构建以本页顶部和版本配置为准。文件名`hap2_`继续保留，线上协议是HAP3。
+
 
 > **2026-10-22 后续变更：现行代码已转为 8×8 R2 / 10.3 mm 移位输出，校准默认距离 70 mm。连续 X4 排针接线、通道编号、构建与后续操作以[8×8 专项说明](8x8移位输出与接线_2026-10-22.md)为准。下面的 4×4 下载和回读是历史记录，不能作为新 8×8 已上板的证据。**
 
