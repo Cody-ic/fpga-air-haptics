@@ -14,6 +14,7 @@ def available_ports():
 
 class SerialTransport:
     simulated = False
+    startup_delay_s = 0.2
 
     def __init__(self, port, baudrate):
         # Avoid flow-control toggling where supported; some drivers can glitch

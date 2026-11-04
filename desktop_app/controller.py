@@ -30,6 +30,9 @@ class RemoteTakeover:
 
 
 class Session(threading.Thread):
+    HELLO_TIMEOUT_S = 2.0
+    HELLO_MAX_ATTEMPTS = 3
+
     def __init__(self, demo=True, port="", baudrate=115200, factory=None, demo_array=None,
                  ble_device=None, ble_profile=None, record_root=None):
         super().__init__(daemon=True, name="haptics-io")
@@ -160,6 +163,13 @@ class Session(threading.Thread):
                 if frame.verb == 'GEOMETRY' and not self.ready:
                     raise RuntimeError('无法读取设备阵列坐标')
                 return
+            if frame.verb == 'PING':
+                # A newer, matched heartbeat ACK proves current liveness even
+                # if an earlier heartbeat reply was lost. Never retire control
+                # requests this way: CONFIG/START still need their own ACK.
+                for seq, pending in list(self.pending.items()):
+                    if pending.verb == 'PING' and pending.sent <= request.sent:
+                        del self.pending[seq]
             if frame.verb == "HELLO":
                 if frame.fields.get("proto") != str(VERSION) or not frame.fields.get("boot"):
                     raise RuntimeError("设备协议版本不匹配")
@@ -281,14 +291,36 @@ class Session(threading.Thread):
             opened = time.monotonic()
             next_ping = opened + 0.8
             self.emit("opening", text=f"{self.connection_label} 已接通，等待设备确认")
-            self._write(transport, "HELLO")
+            hello_due = opened + getattr(transport, 'startup_delay_s', 0.)
+            hello_attempts = 0
             while not self.closing.is_set():
                 now = time.monotonic()
-                if self.boot and now >= next_ping:
+                if self.boot is None and now >= hello_due:
+                    for seq in [seq for seq, p in self.pending.items() if p.verb == 'HELLO']:
+                        del self.pending[seq]
+                    if hello_attempts >= self.HELLO_MAX_ATTEMPTS:
+                        raise RuntimeError('设备握手未回应，请检查串口、波特率和接线')
+                    self._write(transport, 'HELLO')
+                    hello_attempts += 1
+                    hello_due = now + self.HELLO_TIMEOUT_S
+                    if hello_attempts > 1:
+                        self.emit('opening', text=f'设备未回应，正在重试连接（{hello_attempts}/{self.HELLO_MAX_ATTEMPTS}）')
+                if (self.boot and now >= next_ping and not any(
+                        p.verb in ('CONFIG', 'MODE', 'START', 'PAUSE', 'STOP', 'CALIBRATION')
+                        for p in self.pending.values())):
                     self._write(transport, "PING")
                     next_ping = now + 0.8
                 try:
-                    _, _, verb, fields = self.commands.get_nowait()
+                    # Peek instead of removing/reinserting: a concurrent STOP
+                    # must be able to discard the waiting control permanently.
+                    with self.commands.mutex:
+                        defer_control = bool(self.commands.queue and
+                            self.commands.queue[0][2] in ('CONFIG', 'MODE', 'START', 'PAUSE', 'CALIBRATION') and
+                            any(p.verb == 'PING' for p in self.pending.values()))
+                    if defer_control:
+                        verb, fields = None, {}
+                    else:
+                        _, _, verb, fields = self.commands.get_nowait()
                 except queue.Empty:
                     verb, fields = None, {}
                 if verb:
@@ -327,6 +359,15 @@ class Session(threading.Thread):
                                     raise ValueError("上一采样请求尚未完成")
                             if verb == "CONFIG":
                                 config = Config.from_wire(fields)
+                                if config.phase_table != "NONE":
+                                    if "STATIC_PHASE" not in self.capabilities:
+                                        raise ValueError("设备固件不支持压力单帧，未发送")
+                                    config.static_phases(self.array)
+                                    if ArraySpec.from_wire(fields) != self.array:
+                                        raise ValueError("生成压力帧后阵列已改变，请重新生成")
+                                    if (not self.last_state or now-self.state_received >= 1.6
+                                            or self.last_state.mode != "REMOTE" or self.last_state.state != "IDLE"):
+                                        raise ValueError("请等待设备停止并切换电脑控制后发送压力帧")
                                 mismatch = self.workspace.incompatibility(config)
                                 if mismatch:
                                     raise ValueError(mismatch)
@@ -342,13 +383,15 @@ class Session(threading.Thread):
                         except ValueError as error:
                             self.emit("rejected", verb=verb, text=str(error))
                 frames, errors = decoder.feed(transport.read())
+                if not hello_attempts:
+                    continue
                 for error in errors:
                     self.emit("warning", text=error)
                 for frame, raw in frames:
                     self._receive(frame, raw, time.monotonic())
                 now = time.monotonic()
                 self._advance_takeover(transport, now)
-                expired = [(seq, p) for seq, p in self.pending.items() if now - p.sent > 2]
+                expired = [(seq, p) for seq, p in self.pending.items() if p.verb != 'HELLO' and now - p.sent > 2]
                 if expired:
                     names = ",".join(p.verb for _, p in expired)
                     raise RuntimeError(f"命令应答超时：{names}；实际输出状态未知")

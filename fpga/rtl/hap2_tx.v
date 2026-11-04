@@ -18,6 +18,10 @@
 // 校验码边走边算：每发一个正文字节就喂给 CRC 模块，遇到星号停止累加，
 // 星号后面四位就是把算出来的值写成十六进制。
 module hap2_tx #(
+    parameter integer CHANNELS = 16,
+    parameter integer CAL_PROFILE = 0,
+    parameter integer PREVIEW_ONLY = 0,
+    parameter integer HB_MS = 3000,
     parameter integer CLK_HZ = 50_000_000,
     parameter integer BAUD   = 115200,
     parameter integer DIGITS = 10,           // 十进制最多几位
@@ -60,6 +64,8 @@ module hap2_tx #(
     input  wire [7:0]  hw_rows,
     input  wire [7:0]  hw_cols,
     input  wire [31:0] hw_pitch_um,
+    input wire cfg_static,
+    input wire [8*CHANNELS-1:0] static_table, offset_table,
     input  wire [31:0] cfg_carrier_hz,
     input  wire [31:0] cfg_phase_steps,
     input  wire [31:0] cfg_cx_um,
@@ -92,15 +98,14 @@ module hap2_tx #(
     // ---------------- 报文明细 ----------------
     // 字符串宽度必须和字符数完全相等：Verilog 里字符串是右对齐的，
     // 宽度写错会整体错位。这里每个模板都以换行结尾，发到换行就算一帧结束。
-    localparam [8*325-1:0] T_HELLO =
-        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
+    localparam [8*430-1:0] T_HELLO =
+        "HAP3 ACK @ HELLO proto=3 device=FPGA boot=+ simulated=0 hb_ms=@ caps=CONFIG,MODE,START,PAUSE,STOP,STATE,PHASE,SCAN_PATHS,STATIC_PHASE,CAL_READBACK fw_id=HAP3_STATIC_1 cal_profile=@ preview_only=@ carrier_fixed=@ steps_fixed=@ max_rows=@ max_cols=@ max_channels=@ max_nodes=@ max_scan_points=@ max_strokes=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY x_min_um=@ x_max_um=@ y_min_um=@ y_max_um=@ z_min_um=@ z_max_um=@*#\n";
     localparam [8*31-1:0]  T_ACK   = "HAP3 ACK @ ~ applied=1 rev=@*#\n";
     localparam [8*22-1:0]  T_ERR   = "HAP3 ERR @ ~ code=^*#\n";
-    localparam [8*369-1:0] T_STATE =
-        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ phases=|*#\n";
+    localparam [8*413-1:0] T_STATE =
+        "HAP3 TEL 0 STATE boot=+ sample=@ uptime_ms=@ rev=@ mode=% state=& output=@ scan_on=@ stroke_index=@ simulated=0 reason=! carrier_hz=@ phase_steps=@ cx_um=@ cy_um=@ z_um=@ radius_um=@ repeat_millihz=@ mod_hz=@ level=@ shape=$ path_xy_um=NONE path_closed=@ scan_paths=? blank_us=@ hw_rows=@ hw_cols=@ hw_pitch_um=@ mapping=ROW_MAJOR_XY fx_um=@ fy_um=@ fz_um=@ static_mode=@ phase_table=; phase_offsets=: phases=|*#\n";
 
     // 设备声明的固定能力（这些目前是定值，将来由板级配置决定）
-    localparam [31:0] HB_MS         = 32'd3000;
     localparam [31:0] MAX_ROWS      = 32'd16;
     localparam [31:0] MAX_COLS      = 32'd16;
     localparam [31:0] MAX_CHANNELS  = 32'd256;
@@ -134,6 +139,7 @@ module hap2_tx #(
     // 但电脑按名字匹配就会对不上）。OUT_OF_WORKSPACE 是 16 个字符。
     localparam [8*16-1:0] C_OOWSP   = "OUT_OF_WORKSPACE";
     localparam [8*18-1:0] C_HANDSH  = "HANDSHAKE_REQUIRED";
+    localparam [8*23-1:0] C_CALCFG  = "CAL_REQUIRES_40K_64STEP";
     localparam [8*17-1:0] C_HWMIS   = "HARDWARE_MISMATCH";
     localparam [8*11-1:0] C_NOTRUN  = "NOT_RUNNING";
     localparam [8*8-1:0]  C_BADMODE = "BAD_MODE";
@@ -205,10 +211,10 @@ module hap2_tx #(
             // 字符串在向量里靠高位存放：第 0 个字符在最高字节，
             // 所以要从最高位往下数，用「-:」而不是「+:」。
             case (sel)
-                F_HELLO: tmpl_byte = T_HELLO[8*325-1 - 8*pos -: 8];
+                F_HELLO: tmpl_byte = T_HELLO[8*430-1 - 8*pos -: 8];
                 F_ACK:   tmpl_byte = T_ACK  [8*31 -1 - 8*pos -: 8];
                 F_ERR:   tmpl_byte = T_ERR  [8*22 -1 - 8*pos -: 8];
-                default: tmpl_byte = T_STATE[8*369-1 - 8*pos -: 8];
+                default: tmpl_byte = T_STATE[8*413-1 - 8*pos -: 8];
             endcase
         end
     endfunction
@@ -229,20 +235,24 @@ module hap2_tx #(
                     case (idx)
                         5'd0:  value_at = {16'h0, seq_lat};
                         5'd1:  value_at = HB_MS;
-                        5'd2:  value_at = MAX_ROWS;
-                        5'd3:  value_at = MAX_COLS;
-                        5'd4:  value_at = MAX_CHANNELS;
-                        5'd5:  value_at = MAX_NODES;
-                        5'd6:  value_at = MAX_SCAN_PTS;     // HAP3 新增：草图点数上限
-                        5'd7:  value_at = MAX_STROKES;      // HAP3 新增：段数上限
-                        5'd8:  value_at = {24'h0, hw_rows};
-                        5'd9:  value_at = {24'h0, hw_cols};
-                        5'd10: value_at = hw_pitch_um;
-                        5'd11: value_at = WS_X_MIN;
-                        5'd12: value_at = WS_X_MAX;
-                        5'd13: value_at = WS_Y_MIN;
-                        5'd14: value_at = WS_Y_MAX;
-                        5'd15: value_at = WS_Z_MIN;
+                        5'd2: value_at = CAL_PROFILE;
+                        5'd3: value_at = PREVIEW_ONLY;
+                        5'd4: value_at = CAL_PROFILE ? 40000 : 0;
+                        5'd5: value_at = CAL_PROFILE ? 64 : 0;
+                        5'd6:  value_at = MAX_ROWS;
+                        5'd7:  value_at = MAX_COLS;
+                        5'd8:  value_at = MAX_CHANNELS;
+                        5'd9:  value_at = MAX_NODES;
+                        5'd10:  value_at = MAX_SCAN_PTS;     // HAP3 新增：草图点数上限
+                        5'd11:  value_at = MAX_STROKES;      // HAP3 新增：段数上限
+                        5'd12:  value_at = {24'h0, hw_rows};
+                        5'd13:  value_at = {24'h0, hw_cols};
+                        5'd14: value_at = hw_pitch_um;
+                        5'd15: value_at = WS_X_MIN;
+                        5'd16: value_at = WS_X_MAX;
+                        5'd17: value_at = WS_Y_MIN;
+                        5'd18: value_at = WS_Y_MAX;
+                        5'd19: value_at = WS_Z_MIN;
                         default: value_at = WS_Z_MAX;
                     endcase
                 end
@@ -270,7 +280,8 @@ module hap2_tx #(
                         5'd19: value_at = hw_pitch_um;
                         5'd20: value_at = fx_um;
                         5'd21: value_at = fy_um;
-                        default: value_at = fz_um;
+                        5'd22: value_at = fz_um;
+                        default: value_at = (cfg_static === 1'b1) ? 1 : 0;
                     endcase
                 end
                 F_ACK: begin
@@ -310,6 +321,7 @@ module hap2_tx #(
                     4'd6: name_char = (pos < 11) ? {1'b0, C_NOTRUN [8*11-1 - 8*pos -: 8]} : 9'h100;
                     4'd7: name_char = (pos <  8) ? {1'b0, C_BADMODE[8*8 -1 - 8*pos -: 8]} : 9'h100;
                     4'd8: name_char = (pos < 15) ? {1'b0, C_UNKNOWN[8*15-1 - 8*pos -: 8]} : 9'h100;
+                    4'd10: name_char = (pos < 23) ? {1'b0, C_CALCFG[8*23-1 - 8*pos -: 8]} : 9'h100;
                     default: name_char = (pos < 18) ? {1'b0, C_HANDSH[8*18-1 - 8*pos -: 8]} : 9'h100;
                 endcase
                 3'd2: case (id)
@@ -348,6 +360,10 @@ module hap2_tx #(
     endfunction
 
     // ---------------- 内部信号 ----------------
+    localparam [3:0] S_TABLE = 4'd14, S_TABLE_AFTER = 4'd15;
+    reg [10:0] table_idx;
+    reg table_offsets;
+    wire [3:0] table_nibble = table_offsets ? offset_table[8*(table_idx>>1)+(table_idx[0]?0:4) +: 4] : static_table[8*(table_idx>>1)+(table_idx[0]?0:4) +: 4];
     reg [3:0]  state;
     reg [1:0]  frame_sel;
     // ---------------- 待发队列 ----------------
@@ -621,6 +637,11 @@ module hap2_tx #(
                             name_grp <= 3'd5; name_id <= {2'h0, reason};
                             name_pos <= 5'd0; name_ret <= S_NEXT; state <= S_NAME;
                         end
+                        8'h3B, 8'h3A: begin // ';' nominal table, ':' calibration table
+                            table_idx <= 0;
+                            table_offsets <= (c == 8'h3A);
+                            state <= S_TABLE;
+                        end
                         P_PHASE: begin
                             ph_idx <= 9'd0;
                             stream_txt <= 1'b0;
@@ -639,6 +660,30 @@ module hap2_tx #(
                     endcase
                 end
 
+                S_TABLE: begin
+                    if (table_offsets) begin
+                        dec_value <= CAL_PROFILE == 0 ? 32'd0 : {24'd0,offset_table[8*table_idx +: 8]};
+                        dec_start <= 1'b1;
+                        table_idx <= table_idx+1'b1;
+                        num_after <= S_TABLE_AFTER;
+                        state <= S_NUM_WAIT;
+                    end else if (cfg_static !== 1'b1) begin
+                        // Reuse the NONE name, preserving old CONFIG semantics.
+                        name_grp <= 3'd5; name_id <= 0; name_pos <= 0;
+                        name_ret <= S_NEXT; state <= S_NAME;
+                    end else if (table_idx == 2*CHANNELS) state <= S_NEXT;
+                    else begin
+                        lit <= table_nibble < 10 ? 8'h30+table_nibble : 8'h41+table_nibble-10;
+                        table_idx <= table_idx+1'b1;
+                        ret_state <= S_TABLE; state <= S_LIT;
+                    end
+                end
+                S_TABLE_AFTER: begin
+                    if (table_idx == CHANNELS) state <= S_NEXT;
+                    else begin
+                        lit <= ","; ret_state <= S_TABLE; state <= S_LIT;
+                    end
+                end
                 // -------- 发一个字节 --------
                 S_LIT: begin
                     tx_data  <= lit;

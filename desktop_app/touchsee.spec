@@ -1,4 +1,4 @@
-# Windows single-file build. Run via build_windows.ps1 from any directory.
+# Windows portable-folder build. No extraction into the system temp directory.
 from pathlib import Path
 
 app_dir = Path(SPECPATH)
@@ -8,7 +8,7 @@ a = Analysis(
     [str(app_dir / 'launch.pyw')],
     pathex=[str(repo_dir)],
     binaries=[],
-    datas=[],
+    datas=[(str(app_dir / 'assets' / 'egopressure'), 'desktop_app/assets/egopressure')],
     hiddenimports=['desktop_app.tests.gui_smoke', 'bleak.backends.winrt.client', 'bleak.backends.winrt.scanner'],
     hookspath=[],
     hooksconfig={'matplotlib': {'backends': ['TkAgg']}},
@@ -18,7 +18,8 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 exe = EXE(
-    pyz, a.scripts, a.binaries, a.datas, [],
+    pyz, a.scripts, [],
+    exclude_binaries=True,
     name='触见图形工作台',
     debug=False,
     bootloader_ignore_signals=False,
@@ -27,3 +28,4 @@ exe = EXE(
     console=False,
     icon=str(app_dir / 'assets' / 'touchsee.ico'),
 )
+collect = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='TouchSee')

@@ -17,6 +17,26 @@ def fields(**changes):
 
 
 class CaptureTests(unittest.TestCase):
+    def test_optional_direct_probe_and_legacy_windows(self):
+        self.assertIsNone(Capture.parse(fields()).probe)
+        extra = dict(probe_ok='1', direct_n='8', direct_min='598', direct_max='610',
+                     direct_mean='604', vrefint_raw='1490')
+        capture = Capture.parse(fields(**extra))
+        self.assertTrue(capture.probe.valid)
+        self.assertEqual(capture.probe.mean, 604)
+        self.assertEqual(capture.probe.vrefint, 1490)
+        # Metadata does not recalibrate or replace measured DMA samples.
+        self.assertEqual(capture.raw, Capture.parse(fields()).raw)
+        self.assertEqual(capture.analyze(), Capture.parse(fields()).analyze())
+        self.assertFalse(Capture.parse(fields(**dict(extra, probe_ok='0', direct_min='4095',
+                                                     direct_max='0', direct_mean='0'))).probe.valid)
+        for change in ({'direct_n':'1'}, {'vrefint_raw':'4096'}, {'direct_mean':'-1'},
+                       {'direct_mean':'611'}, {'probe_ok':'2'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                Capture.parse(fields(**dict(extra, **change)))
+        with self.assertRaises(ValueError):
+            Capture.parse(fields(probe_ok='1'))
+
     def test_voltage_dc_and_coherent_noise_rejection(self):
         raw = tuple(round(602+200*math.cos(2*math.pi*i/10)+40*math.sin(2*math.pi*i/20))
                     for i in range(200))

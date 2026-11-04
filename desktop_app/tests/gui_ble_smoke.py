@@ -25,6 +25,7 @@ def main(runtime_path=None):
     runtime = Path(runtime_path) if runtime_path else Path(__file__).resolve().parents[1] / ".runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()
+    root.tk.call('tk', 'scaling', 96 / 72)
     app = App(root)
     root.title("触见 · BLE 自动化测试（无真实硬件）")
     root.geometry("1380x920+25+25")
@@ -68,6 +69,7 @@ def main(runtime_path=None):
         root.geometry("1100x780+25+25")
         app.mode_choice.set("BLE 蓝牙")
         app.update_controls()
+        app.navigate('experiment')
         root.update_idletasks()
         check(not app.baud_picker.winfo_ismapped(), "BLE must not expose UART baud as link speed")
         check(str(app.demo_array_picker["state"]) == "disabled", "BLE array must come from HELLO")

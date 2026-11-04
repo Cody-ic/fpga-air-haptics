@@ -1,16 +1,78 @@
-# 触见图形工作台
+# 触见桌面整合版
 
-桌面上位机，提供轻量草图编辑、图形保存、手掌预览、无硬件 Demo、双向串口和 BLE 适配。默认界面用于绘图和播放，勾选“调试模式”后可查看相位、理论声场、设备参数和通信日志。HAP3 是上位机侧草案，尚未与 FPGA 端共同定稿；蓝牙模块未选型，实体板卡联调尚未完成。
+## 正式候选入口（2026-11-04）
+
+候选版本为 **1.0.0rc1**，基于`b732414`整合版继续维护。版本与组件清单以[软件发行说明](../docs/SOFTWARE_RELEASE.md)和[release/software.json](../release/software.json)为准。默认Tang镜像包含完整板内启动校准，待真实测量通过后进入业务；旧表缺失只阻止`restore`路径，不阻止`startup`算法构建。候选尚待本轮声学校准与整机验收，桌面可独立离线运行和测试。
+
+- `python -m desktop_app`：默认使用者界面，不连接设备。
+- `python -m desktop_app --developer`：开发者工作台。
+- `python -m desktop_app --demo`：使用模拟设备，不自动呈现。
+- `powershell -File desktop_app/build_user_windows.ps1 -Python <python.exe>`：当前桌面便携包入口，产物为`dist/user/触见体验台.exe`及同目录便携ZIP。
+
+正式Tang控制使用HAP3，静态相位发送要求设备声明`STATIC_PHASE`，校准表回读要求`CAL_READBACK`。MG24接收固件使用独立`MG24_RX1`协议；当前MG24有线采集／逐通道校准使用[独立工具](../firmware/xiao_mg24/README.md)，主界面尚无第二个MG24串口会话。主界面的采样控件依据当前控制设备是否声明`adc_capture=1`开放，不能把它当作已经集成MG24直连。
+
+`startup`镜像上电先等待CAL2校准，普通HAP3界面此时还不能接管。使用独立校准工具连接Tang和MG24，完成测量、四步求解与复测；设备到达DONE并接受RELEASE后，再由桌面HAP3会话连接。默认启动条件为50 mm、测量等级20、参考通道0，需与实际测量位置及电气条件匹配。`restore`镜像只恢复经验证的旧值，不运行新校准；`uncalibrated`镜像没有板内启动校准求解，不能仅靠补入一张表就称它完成了新测量。
+
+以下保留各日期的功能与验证记录；入口冲突时以前述候选入口为准。
+
+## 2026-11-04 手姿与压力序列处理
+
+已实现的数值处理包括：从21关节建立掌部正交坐标系、输出局部关节及几何弯曲特征；以整段压力的加权边界确定固定位置和比例，保留帧间移动；连续相位求解后尝试各通道相邻的64档相位码，只接受目标函数严格下降的修改。默认最多两遍离散精修，输出指标对应最终相位码，并单列连续解、量化基线与独立细网格误差。
+
+压力窗口默认勾选“保持整段动作的位置与大小”，可导出手姿／压力分析和动作相位计划。计划由独立静态帧组成，默认最多24帧；界面均匀选取最多12帧，没有压力或接触的帧注明跳过。导出不发送、不启动，也不声称设备已实现连续压力动作播放。命令行示例：
+
+```powershell
+python -m desktop_app.pressure_sequence --output "analysis.json"
+python -m desktop_app.pressure_sequence --output "phase-plan.json" --compile-frames 12 --z-mm 50
+```
+
+“导入序列”还可选择ContactPose单个抓握的`annotations.json`。它仅提供静态21关节姿态：没有压力热图、MANO网格或可播放动作，压力发送控件不开放。程序接口`load_contactpose(path, side="left", frame_index=0)`可明确左右手及原始帧；双手注释省略`side`时拒绝猜测。坐标保持原始米制物体坐标，移动手按官方`hTo`逆变换恢复；它没有注册到EgoPressure压力垫或本机阵列。
+
+验证覆盖官方ContactPose注释、独立矩阵变换、掌坐标对刚体变换的不变性、固定映射下的接触位移和相位码实际目标函数。两份官方完整注释的9组帧／左右手检查，最大误差为`6.36×10⁻⁹ m`；自动测试保留一组来源明确的真实关节节选。ContactPose来源及许可见[模块说明](hand_datasets.py)；EgoPressure的[许可与来源](assets/egopressure/NOTICE.md)单独保留。
+
+这些是公开数据的离线几何／压力处理与理论声场优化，不是实时手跟踪、临床角度测量或实测触觉增强。手绘掌面示意也仍是独立的参考图。
+
+图形界面、真实样本下载和对照脚本见[手部数据工作流](../docs/HAND_DATA_WORKFLOW.md)。
+
+## 2026-11-03 整合版体验台
+
+以 `feat/mg24-receiver` 的 `822335a` 为基线，保留三维回放、压力单帧求解、静态相位协议和开发者工作台，加入使用者界面与独立声场演示。默认进入图形库；绘图工具使用醒目按钮，尺寸和几何关系在画布两侧分别显示。普通图形点击呈现后才弹出设置，明确确认后完成发送、匹配回读和启动；顶部可直接连接／断开。
+
+三维回放独立控制数据动画，离页暂停；压力单帧保留原算法、冻结选帧、能力校验和发送后单独启动，不覆盖绘图草稿。用户模式固定输出等级，不开放调节控件。新图形沿用基线的 50 mm 聚焦、每秒一圈与不调制实验参数。
+
+声场页面保留理论预测、多点采集、单点波形、凸包内线性插值和同坐标归一化对比。预测、插值、实测电压与数据集接触压力分开标注。HAP3采样解析保留设备实际采样率、量程与原码信息；采样按钮依据固件能力开放。MG24独立工具的接入范围以前述说明为准。未知控制器仍要求核实相位码时序，已识别的 `HAP3_STATIC_1` 使用延迟码。
+
+- `python -m desktop_app`：整合版体验台，启动不连接设备。
+- `python -m desktop_app --demo`：体验台连接模拟设备，不自动呈现。
+- `python -m desktop_app --developer`：保留新版开发者工作台。
+- `python -m desktop_app.tests.user_gui_smoke`：集成回放、压力帧、草图、测绘及连接流程，不连接硬件。
+- `powershell -File desktop_app/build_user_windows.ps1 -Python <python.exe>`：生成 `dist/user/触见体验台.exe` 和便携包；保留旁边的 `_internal` 文件夹。
+
+会话由一个连接读取，后台通过 `session_mirror.py` 写出只读状态和报文镜像，供分析工具查看。操作说明见 [USER_GUIDE.md](USER_GUIDE.md)。以下为开发者工作台及历史功能说明；整合版的普通图形确认流程以前述说明为准。
+
+整合验证：144 项自动化检查通过；打包后的 Windows 程序通过 115 项可见流程检查，退出码 0，覆盖真实数据回放、嵌入式三维渲染、冻结选帧与相位求解、静态发送确认、草稿保留、普通图形恢复、三点测量与插值、同坐标对比及断开连接。所有通信检查使用模拟设备，不代表实板或声学验证。
+
+界面预览：[独立尺寸与几何关系面板](docs/integrated-editor.png)、[三维回放与数据集接触压力](docs/integrated-replay.png)。回放数据的署名及许可见 [EgoPressure 数据说明](assets/egopressure/NOTICE.md)。
+
+2026-10-30 新增“发送当前帧压力…”：从三维回放选中一帧，离线生成、比较原始压力/简化目标/模拟声场，再发送静态相位表并等待回读。可用模拟设备完整体验；发送不自动播放，未进行硬件联调。详见[压力单帧说明](PRESSURE_SINGLE_FRAME.md)。
+
+2026-10-31界面默认调整：普通绘图、压力单帧和相位向量导出的默认输出等级统一为100%。手动填写或导入配置中的显式等级仍按原值使用；这不是所有历史实验的等级。当前正式补偿清单所记录的测量等级为20，应保留原记录。默认调整不自动发送或播放，也不改变板端上电待机行为。
+
+2026-10-31：新建绘图与相位向量导出默认对齐按键实验：40 kHz、64 级相位、聚焦高度 50 mm、每秒一圈、等级 100%、调制 0。检查器的“套用按键实验参数”可更新已有草稿的上述参数，保留形状、尺寸与平面位置；仍需停止、发送确认后单独播放。“聚焦高度”是真实目标平面，不是画面缩放。压力单帧默认不调制，并提高目标声场峰值；详见[强度对齐记录](OUTPUT_STRENGTH_2026-10-31.md)。
+
+2026-10-29 界面升级：默认进入“三维回放”，内置 EgoPressure 真实手部顶点与接触压力样本，支持旋转、缩放、平移、播放与逐帧查看。左侧另保留“掌心绘图 / 播放查看 / 实验与设备”。设备页连接设置和调试模式入口保持独立。详见[三维回放说明](EGOPRESSURE_REPLAY.md)及[页面对应与验证说明](UI_UPGRADE_2026-10-29.md)。当前手部显示为顶点与关节，未包含完整手部表面模型。
+
+桌面上位机提供离线三维回放、草图编辑、图形保存、手掌预览、无硬件Demo、双向串口和BLE适配。绘图和设备播放保留独立入口，开发者模式可查看相位、理论声场、设备参数和通信日志。当前对接Tang的HAP3业务及静态相位能力，实际验证范围以对应日期记录为准；蓝牙和手机路线不列入本次正式组合。
 
 界面示例：[草图编辑](docs/sketch.png)、[掌面与缩小视图](docs/palm-zoom.png)、[手掌预览](docs/sketch-preview.png)、[播放反馈](docs/playback.png)、[基本图案预览](docs/presets.png)。
 
 绘图区、图案预览和播放画面共用同一只手的轮廓与毫米坐标。编辑器以淡线显示，默认放大掌面，手指自然延伸至画布外；缩小视图会逐渐露出更多手指。示意尺寸未经人体数据标定，不代表平均手掌、手部测量或有效触觉范围。实体引导见[交互与放手引导提案](../交互与放手引导提案.md)，腕托、语音和手部跟踪尚未实现。
 
-## 启动
+## 启动与便携包
 
 新增[阵列参数与接收反馈校准](ARRAY_CALIBRATION.md)：支持平面、球冠和任意三维阵元坐标；调试模式下可导入预测/Demo 阵列，真实设备自动回传几何。固定接收器逐路校准入口在“实测数据 → 相位校准”，完成后保持停止。当前为软件验证阶段，球冠文件不代表已设计或验证球冠打印件。
 
-Windows 64 位便携版：双击 `desktop_app/dist/触见图形工作台.exe`，无需安装 Python。给队友分发时使用同目录的 `TouchSee-Windows-x64.zip`，内含程序、使用说明、构建信息与依赖许可。首次启动需要解包运行库，请稍等；程序不需要管理员权限。构建产物保留在本地，不提交到 Git。
+当前Windows 64位便携版：双击`desktop_app/dist/user/触见体验台.exe`，无需安装Python。分发同目录的`TouchSee-User-Windows-x64.zip`，内含程序、使用说明、构建信息与依赖许可。旧`dist/触见图形工作台.exe`是历史工程包路径，不作为当前正式包入口。完整解压并保留旁边的 `_internal` 文件夹，不要只复制 EXE。文件夹便携版无需启动时解包到系统临时目录，不需要管理员权限。构建产物保留在本地，不提交到 Git。
 
 使用 Python 3.10+（含 Tk），在仓库根目录执行：
 
@@ -19,7 +81,7 @@ python -m pip install -r desktop_app/requirements.txt
 python -m desktop_app --demo
 ```
 
-本机桌面快捷方式 `触见调试台.lnk` 指向已打包的 `.exe`，带 `--demo` 参数，自动连接模拟设备但不播放。直接双击 `.exe` 或省略 `--demo` 则先离线编辑。源码仍可使用 `D:\python\python.exe` 运行。
+开发者工作台进入暂停的三维回放；体验台进入图形库。直接双击程序或省略 `--demo` 不连接任何设备。运行源码前请在对应 Python 环境安装更新后的依赖。
 
 ### 构建 Windows 可执行程序
 
@@ -28,19 +90,19 @@ python -m desktop_app --demo
 ```powershell
 python -m venv desktop_app/.runtime/build-venv
 desktop_app/.runtime/build-venv/Scripts/python.exe -m pip install -r desktop_app/requirements-build.txt
-powershell -NoProfile -ExecutionPolicy Bypass -File desktop_app/build_windows.ps1 -Python desktop_app/.runtime/build-venv/Scripts/python.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File desktop_app/build_user_windows.ps1 -Python desktop_app/.runtime/build-venv/Scripts/python.exe
 ```
 
-脚本使用 PyInstaller 生成单文件窗口程序，同时生成便携 ZIP 与 `build-info.json`（记录实际依赖版本及 EXE 的 SHA-256）。只打包 TkAgg 绘图后端；输出目录 `dist/` 和构建缓存 `build/` 均被 Git 忽略。打包版启动错误写入 `%LOCALAPPDATA%\TouchSee\logs\startup-error.log`，不写入临时解包目录。
+脚本使用 PyInstaller 生成文件夹便携程序，同时生成 ZIP 与 `build-info.json`（记录实际依赖版本及 EXE 的 SHA-256）。`dist/user/TouchSee-User/`是完整运行目录；打包脚本同时在`dist/user/`保留可执行文件和依赖。快捷方式须指向此次产物，不能继续使用其他工作树中的旧程序。只打包 TkAgg 图表后端；输出目录 `dist/` 和构建缓存 `build/` 均被 Git 忽略。打包版启动错误尝试写入 `%LOCALAPPDATA%\TouchSee\logs\startup-error.log`。
 
 打包后可执行以下自检，运行可见 Demo 流程并自动关闭，不连接真实串口：
 
 ```powershell
-Start-Process -FilePath 'desktop_app/dist/触见图形工作台.exe' -ArgumentList '--self-test desktop_app/.runtime/frozen-check' -WindowStyle Hidden -Wait
-Get-Content desktop_app/.runtime/frozen-check/gui-smoke.json
+Start-Process -FilePath 'desktop_app/dist/user/触见体验台.exe' -ArgumentList '--user-self-test desktop_app/.runtime/frozen-check' -WindowStyle Hidden -Wait
+Get-Content desktop_app/.runtime/frozen-check/user-gui-smoke.json
 ```
 
-自检覆盖绘图、尺寸与关系、保存导入、发送确认、播放、阵列切换和回传超时。报告中 `passed` 应为 `true`；截图写入指定目录。已在本机从仅含 EXE 的独立目录、移除 Python 环境路径后通过此检查；真实板卡联调仍待硬件。修改源码后需要重新构建，桌面快捷方式才会运行新版。
+自检覆盖绘图、尺寸与关系、保存导入、发送确认、播放、阵列切换和回传超时。报告中 `passed` 应为 `true`；截图写入指定目录。便携版验证使用 EXE 与 `_internal` 构成的独立目录，并从环境中移除开发用 Python 路径。这项自检使用模拟设备；实板验证以对应日期和配置记录为准。修改源码后需要重新构建，桌面快捷方式才会运行新版。
 
 ## 绘制与保存图形
 
@@ -92,7 +154,7 @@ Get-Content desktop_app/.runtime/frozen-check/gui-smoke.json
 
 ## 扫描路线与演示边界
 
-当前按**单焦点沿完整轮廓高速循环扫描**规划硬件。电脑一次提交完整图形，FPGA 应独立完成插值、相位求解和更新；不依赖电脑实时逐点发送。
+当前FPGA按**单焦点沿完整轮廓高速循环扫描**执行。电脑一次提交完整图形，FPGA独立完成插值、相位求解和更新；不依赖电脑实时逐点发送。
 
 Demo 只在取快照时计算当前位置和相位，没有高速硬件时序。运行时每 0.05 秒回传一次，其他状态每 0.5 秒回传一次；这是内存模拟传输，不代表真实串口支持相同数据量。播放画面的亮点使用最新收到的位置，不在电脑自行补算真实设备的运动。它默认慢速播放，不能用动画流畅度或通信成功证明人能辨认图形。实际扫描参数、手部移动影响和辨识率都需要样机实验；多焦点与手部跟踪仍为后续方向。
 
@@ -110,7 +172,7 @@ Demo 只在取快照时计算当前位置和相位，没有高速硬件时序。
 
 相位 CSV 标明 DEMO 或 FPGA 数字回读来源、快照编号、数据年龄和每通道坐标。空间扫描 CSV 的来源与校准由数据提供者确认。Demo 接收波形及其 CSV 均标记为合成数据，不能作为实测结果。
 
-### 接收板调试
+### 接收板调试（历史MCU直接采样入口）
 
 连接后打开调试模式，在“实测数据 → 接收波形”点击“采集一次”或“连续查看（2 次/秒）”。旧固件不支持时采样按钮置灰；断线保留历史波形并标明来源和数据年龄，不继续伪装实时反馈。无需先发送或播放图形就可查看静态电压。
 
@@ -130,7 +192,7 @@ python -m desktop_app.receiver_log '测量记录目录或 captures.jsonl' --vref
 
 生成 `analysis.csv`，可用 Excel、Python 或 MATLAB 比较多次窗口；JSONL 可直接提供给后续分析工具。`last_state_context` 为最近一次数字回读，记录其年龄和配置版本是否一致，不等同于采样瞬间的焦点或接收器位置。记录不包含人工移动接收器的实际坐标，不能自动拼成声场图。
 
-`model.py` 使用各向同性单频点声源叠加，声速假设为 343 m/s，幅值按理想相干和归一化。输出等级仅作线性比例，未模拟器件指向性、反射、驱动电压、调制包络或人体感知，数值不是 Pa、dB SPL 或触觉强度。
+`model.py` 使用各向同性单频点声源叠加，声速假设为 343 m/s，幅值按理想相干和归一化。显示载波输出时的相对分布，不按输出等级线性换算驱动电压；未模拟器件指向性、反射、调制包络或人体感知，数值不是 Pa、dB SPL 或触觉强度。
 
 ## 真实设备与协议
 
@@ -140,7 +202,7 @@ python -m desktop_app.receiver_log '测量记录目录或 captures.jsonl' --vref
 
 选择“BLE 蓝牙”→“扫描设备”→选择你们的模块→“连接”。扫描可取消，设备须完成协议确认后才能发送图形，收到配置确认与状态回传后才能播放。蓝牙断线会隐藏位置并禁用播放，重连后需重新发送图形。
 
-默认 NUS 服务是可替换的开发配置，在“连接设置”中按模块资料修改收发 UUID、写入方式及分包上限。BLE 不使用电脑端波特率；模块与 FPGA 之间若使用 UART，仍需另行匹配两端参数。此适配不保证任意蓝牙模块可直接控制 FPGA；现有设备指令暂用 HAP3 草案。详见 [BLE 对接说明](BLE.md)，含配置、带宽限制、协议待决事项和验证边界。
+默认 NUS 服务是可替换的开发配置，在“连接设置”中按模块资料修改收发 UUID、写入方式及分包上限。BLE 不使用电脑端波特率；模块与 FPGA 之间若使用 UART，仍需另行匹配两端参数。此适配传输HAP3帧，不保证任意蓝牙模块可直接控制FPGA。详见 [BLE 对接说明](BLE.md)，含配置、带宽限制、映射待决事项和验证边界。
 
 ### 串口
 
@@ -157,7 +219,7 @@ python -m unittest discover -s desktop_app/tests -v
 python -m desktop_app.tests.gui_smoke
 ```
 
-测试覆盖重合与取消、旋转及尺寸保持、关系预检、掌面提醒、公共线去重、曲线编译、关闭输出的跳转、协议与文件迁移；GUI 场景覆盖点选／吸附重合、关系置灰、旋转手柄、缩小视图露出手指、提醒不阻止发送、保存导入、手掌预览、发送确认、4×4/8×8 回读和超时。另含 BLE 分包、通知回读、连接取消、异步扫描、确认前播放置灰及掉线恢复测试，全部使用软件夹具。截图需 Pillow，写入被忽略的 `.runtime/`。尚无实体串口或 BLE 板卡联调结果。
+测试覆盖重合与取消、旋转及尺寸保持、关系预检、掌面提醒、公共线去重、曲线编译、关闭输出的跳转、协议与文件迁移；GUI 场景覆盖点选／吸附重合、关系置灰、旋转手柄、缩小视图露出手指、提醒不阻止发送、保存导入、手掌预览、发送确认、4×4/8×8 回读和超时。另含 BLE 分包、通知回读、连接取消、异步扫描、确认前播放置灰及掉线恢复测试，全部使用软件夹具。截图需 Pillow，写入被忽略的 `.runtime/`。此组检查不代表实体通信或声学测试；已进行的Tang静态相位实板核对见[2026-10-30记录](../fpga/BOARD_PRESSURE_VALIDATION_2026-10-30.md)。
 
 代码分工：`sketch_editor.py` 草图交互，`sketch.py` 几何关系与编译，`editor.py` 画布裁剪，`presets.py` 图案预览，`playback.py` 设备反馈，`hand_view.py` 手掌示意，`model.py` 路径与声场参考，`golden.py` 相位黄金向量导出，`app.py` 界面与文件，通信模块见协议说明。
 

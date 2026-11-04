@@ -20,6 +20,16 @@
 // 配置用「影子寄存器 + 一次性替换」：字段流先写进影子，全部检查通过才整体
 // 拷进生效寄存器。这样不会出现「换了一半」的中间状态。
 module hap2_cmd #(
+    parameter integer CHANNELS = 16,
+    parameter integer CAL_LIMIT = 0,
+    parameter integer CLK_HZ = 50_000_000,
+    parameter integer BUTTON_FOCUS_ENABLE = 0,
+    parameter integer BUTTON_FOCUS_MS = 3000,
+    parameter integer BUTTON_FOCUS_Z_UM = 100000,
+    parameter integer BUTTON_FOCUS_LEVEL = 1,
+    parameter integer BUTTON_FOCUS_SHAPE = 0,
+    parameter integer BUTTON_FOCUS_RADIUS_UM = 0,
+    parameter integer BUTTON_FOCUS_REPEAT_MILLIHZ = 500,
     parameter integer ADDR_W = 13,     // 行缓冲 8192 字节，地址 13 位
     // ---- 设备声明的工作空间（握手应答里发给电脑的那组范围，单位微米）----
     // 单独一项字段合法不代表整个图形合法：比如 cx=90000 µm、radius=20000 µm
@@ -50,7 +60,10 @@ module hap2_cmd #(
     input  wire [2:0]      field_enum,
     input  wire [ADDR_W:0] field_off,
     input  wire [ADDR_W:0] field_size,
-    input  wire [18:0]     seen_mask,
+    input wire [19:0] seen_mask,
+    input wire [8*CHANNELS-1:0] phase_table,
+    output reg cfg_static,
+    output reg [8*CHANNELS-1:0] cfg_phase_table,
 
     // ---- 板子实际阵列（握手时声明，用于核对 CONFIG）----
     input  wire [31:0]     array_rows,
@@ -220,6 +233,14 @@ module hap2_cmd #(
     reg [15:0] lat_seq;
     reg       local_cfg;        // 这次待办配置是本地按键发起的（不回串口）
     reg       local_auto_run;   // 本地配置生效后要不要自动开始播放
+    // Optional receiver-test build: bounded, unmodulated center focus.
+    // The deadline includes preparation, so even a stalled compiler cannot
+    // leave an armed automatic start behind. Restore the previous mode on exit.
+    localparam integer BUTTON_CYCLES = (CLK_HZ / 1000) * BUTTON_FOCUS_MS;
+    localparam integer BUTTON_W = (BUTTON_CYCLES < 2) ? 1 : $clog2(BUTTON_CYCLES);
+    reg button_busy;
+    reg [BUTTON_W-1:0] button_count;
+    reg [1:0] button_return_mode;
 
     // ---------------- 影子配置寄存器 ----------------
     reg [31:0]     sh_carrier_hz;
@@ -266,12 +287,24 @@ module hap2_cmd #(
     // ready = 这份配置有没有可用的节拍表（预设图形的轨迹还没做，所以是 0）。
     // rseq / rverb 是这条应答要对上的序号与命令名：立即生效时就是当前帧的，
     // 等编译时是暂存下来的（因为编译要花一毫秒，那时当前帧早过去了）。
+    reg sh_static;
+    reg sh_path_none, sh_scan_none;
+    reg [8*CHANNELS-1:0] sh_phase_table;
+    reg deferred_config_ack;
+    reg [15:0] deferred_seq;
+    reg [3:0] deferred_verb;
+    reg [1:0] deferred_kind;
+    reg [3:0] deferred_code;
+    reg deferred_want_state;
+    wire valid_stop = frame_ok && header_ok && kind == 0 && verb == V_STOP && dec_err == C_NONE;
     task accept_config;
         input ready;
         input [15:0] rseq;
         input [3:0]  rverb;
         input        do_reply;      // 0 = 本地动作，不往串口回话
         begin
+            cfg_static <= local_cfg ? 1'b0 : sh_static;
+            cfg_phase_table <= sh_phase_table;
             cfg_carrier_hz     <= sh_carrier_hz;
             cfg_phase_steps    <= sh_phase_steps;
             cfg_cx_um          <= sh_cx_um;
@@ -296,6 +329,12 @@ module hap2_cmd #(
             // 本地自动播放时直接 START；同时给 STOP 会被走步器的停止优先级吞掉。
             walk_stop          <= !(local_cfg && local_auto_run);
             if (do_reply) begin
+                if (valid_stop) begin
+                    deferred_config_ack <= 1'b1;
+                    deferred_seq <= rseq; deferred_verb <= rverb;
+                    deferred_kind <= 0; deferred_code <= C_NONE;
+                    deferred_want_state <= 1;
+                end
                 reply_valid      <= 1'b1;
                 reply_kind       <= 2'd0;
                 reply_verb       <= rverb;
@@ -348,6 +387,13 @@ module hap2_cmd #(
             // 上一份草图的节拍表仍然是好的（表本身是双缓冲的，编译不会破坏它）。
             walk_stop    <= 1'b1;
             if (do_reply) begin
+                if (valid_stop) begin
+                    deferred_config_ack <= 1'b1;
+                    deferred_seq <= rseq;
+                    deferred_verb <= rverb;
+                    deferred_kind <= 1; deferred_code <= rcode;
+                    deferred_want_state <= 0;
+                end
                 reply_valid  <= 1'b1;
                 reply_kind   <= 2'd1;
                 reply_verb   <= rverb;
@@ -359,6 +405,10 @@ module hap2_cmd #(
             reply_want_state <= 1'b0;
             local_cfg        <= 1'b0;
             local_auto_run   <= 1'b0;
+            if (BUTTON_FOCUS_ENABLE && button_busy) begin
+                button_busy <= 1'b0;
+                mode <= button_return_mode;
+            end
         end
     endtask
 
@@ -393,6 +443,8 @@ module hap2_cmd #(
                     if (mode == M_LOCAL)              dec_err = C_LOCAL_CONTROL;
                     else if (run_state != R_IDLE)     dec_err = C_BUSY;
                     else if (array_bad)               dec_err = C_HARDWARE_MISMATCH;
+                    else if (seen_mask[19] && (sh_shape!=0 || sh_carrier_hz!=40000 || sh_phase_steps!=64 || !sh_path_none || !sh_scan_none)) dec_err = C_BAD_CONFIG;
+                    else if (CAL_LIMIT && (sh_carrier_hz!=40000 || sh_phase_steps!=64)) dec_err = 4'd10;
                     else                              dec_commit = 1'b1;
                 end
 
@@ -441,6 +493,9 @@ module hap2_cmd #(
     // ---------------- 时序逻辑 ----------------
     always @(posedge clk) begin
         if (!rst_n) begin
+            button_busy    <= 1'b0;
+            button_count   <= 0;
+            button_return_mode <= M_REMOTE;
             connected      <= 1'b0;
             array_bad      <= 1'b0;
             mode_value     <= M_REMOTE;
@@ -469,6 +524,10 @@ module hap2_cmd #(
             reply_code     <= C_NONE;
             reply_want_state <= 1'b0;
             config_changed <= 1'b0;
+            cfg_static <= 0; sh_static <= 0; cfg_phase_table <= 0; sh_phase_table <= 0;
+            sh_path_none <= 1; sh_scan_none <= 1;
+            deferred_config_ack <= 0; deferred_seq <= 0; deferred_verb <= 0;
+            deferred_kind <= 0; deferred_code <= 0; deferred_want_state <= 0;
             cfg_carrier_hz     <= 32'd40000;
             cfg_phase_steps    <= 32'd64;
             cfg_cx_um          <= 32'd0;
@@ -512,6 +571,16 @@ module hap2_cmd #(
             walk_start       <= 1'b0;
             walk_stop        <= 1'b0;
 
+            if (deferred_config_ack) begin
+                deferred_config_ack <= 1'b0;
+                reply_valid <= 1'b1;
+                reply_kind <= deferred_kind;
+                reply_verb <= deferred_verb;
+                reply_seq <= deferred_seq;
+                reply_code <= deferred_code;
+                reply_want_state <= deferred_want_state;
+            end
+
             // ---- 1. 收集字段 ----
             if (field_valid) begin
                 if (field_id == F_HW_ROWS  && field_value != array_rows)     array_bad <= 1'b1;
@@ -520,7 +589,7 @@ module hap2_cmd #(
                 if (field_id == F_MAPPING  && field_enum  != 3'd0)           array_bad <= 1'b1;
                 if (field_id == F_VALUE)                                     mode_value <= field_enum[1:0];
 
-                if (verb == V_CONFIG) begin          // CONFIG 的字段先写进影子
+                if (verb == V_CONFIG && !(BUTTON_FOCUS_ENABLE && local_cfg)) begin
                     case (field_id)
                         F_CARRIER_HZ:  sh_carrier_hz     <= field_value;
                         F_PHASE_STEPS: sh_phase_steps    <= field_value;
@@ -534,10 +603,12 @@ module hap2_cmd #(
                         F_SHAPE:       sh_shape          <= field_enum;
                         F_PATH_CLOSED: sh_path_closed    <= field_value;
                         F_PATH_XY: begin
+                            sh_path_none <= field_enum == 0;
                             sh_path_off  <= field_off;   // 记下位置和长度，坐标串之后再解析
                             sh_path_size <= field_size;
                         end
                         F_SCAN_PATHS: begin
+                            sh_scan_none <= field_enum == 0;
                             sh_scan_off  <= field_off;   // 多段草图同样先只记位置和长度
                             sh_scan_size <= field_size;
                         end
@@ -547,10 +618,28 @@ module hap2_cmd #(
                 end
             end
 
+            // Capture before the trajectory compiler runs; later PING frames cannot change it.
+            if (dec_commit && frame_ok && pending == P_IDLE) begin
+                sh_static <= seen_mask[19];
+                sh_phase_table <= phase_table;
+            end
             // ---- 2. 帧结束：出结论 ----
             // 只认电脑发来的 CMD；其它帧型（理论上不会收到）一律不回话
             if ((frame_ok || frame_bad) && header_ok && kind == 2'd0) begin
-                if (pending != P_IDLE) begin
+                if (pending != P_IDLE && verb == V_STOP && dec_err == C_NONE) begin
+                    // STOP also wins while a long drawing is being compiled.
+                    // Compilation may finish, but it must not resume local output.
+                    run_state <= R_IDLE;
+                    reason <= REASON_NONE;
+                    walk_stop <= 1'b1;
+                    local_auto_run <= 1'b0;
+                    reply_valid <= 1'b1;
+                    reply_kind <= 2'd0;
+                    reply_verb <= verb;
+                    reply_seq <= seq;
+                    reply_code <= C_NONE;
+                    reply_want_state <= 1'b1;
+                end else if (pending != P_IDLE) begin
                     // 上一份 CONFIG 还在解析／编译节拍表。电脑正常只会发探活，
                     // 探活照常回；别的命令先回「忙」，这一次编译照旧走完。
                     reply_valid      <= 1'b1;
@@ -619,7 +708,7 @@ module hap2_cmd #(
             // ---- 2.6 本地按键（LOCAL 模式下的面板操作）----
             // 只在「这一拍没有命令帧」且确实是本地模式时动手，免得和远程命令抢同一拍。
             // 本地动作和远程命令的区别只有两处：不回串口、不用握手。
-            if (!frame_ok && (mode == M_LOCAL)) begin
+            if (!BUTTON_FOCUS_ENABLE && !frame_ok && (mode == M_LOCAL)) begin
                 if (loc_stop) begin
                     run_state      <= R_IDLE;
                     reason         <= REASON_NONE;
@@ -717,6 +806,80 @@ module hap2_cmd #(
                 run_state <= R_IDLE;
                 reason    <= REASON_HB;
                 walk_stop <= 1'b1;
+            end
+
+            // Last assignment wins even when a local compiler commits on the
+            // same edge as STOP. No pending auto-play may re-enable output.
+            if (valid_stop) begin
+                run_state <= R_IDLE;
+                reason <= REASON_NONE;
+                walk_stop <= 1'b1;
+                walk_start <= 1'b0;
+                local_auto_run <= 1'b0;
+                reply_valid <= 1'b1;
+                reply_kind <= 2'd0;
+                reply_verb <= verb;
+                reply_seq <= seq;
+                reply_code <= C_NONE;
+                reply_want_state <= 1'b1;
+            end
+
+            if (BUTTON_FOCUS_ENABLE) begin
+                if (button_busy) button_count <= button_count + 1'b1;
+                // Start only from idle, never replace an active serial test.
+                if (loc_play && !loc_next && !loc_stop && !button_busy &&
+                    run_state == R_IDLE && pending == P_IDLE && !frame_ok && !frame_bad) begin
+                    button_busy <= 1'b1;
+                    button_count <= 0;
+                    button_return_mode <= mode;
+                    mode <= M_LOCAL;
+                    local_cfg <= 1'b1;
+                    local_auto_run <= 1'b1;
+                    sh_carrier_hz <= 40000;
+                    sh_phase_steps <= 64;
+                    sh_cx_um <= 0;
+                    sh_cy_um <= 0;
+                    sh_z_um <= BUTTON_FOCUS_Z_UM;
+                    sh_radius_um <= BUTTON_FOCUS_RADIUS_UM;
+                    sh_repeat_millihz <= BUTTON_FOCUS_REPEAT_MILLIHZ;
+                    sh_mod_hz <= 0;
+                    sh_level <= BUTTON_FOCUS_LEVEL;
+                    sh_shape <= BUTTON_FOCUS_SHAPE; // 0 POINT, 1 LINE_X
+                    sh_path_closed <= 1;
+                    sh_path_off <= 0;
+                    sh_path_size <= 0;
+                    sh_scan_off <= 0;
+                    sh_scan_size <= 0;
+                    sh_blank_us <= 0;
+                    pending <= P_SHAPE;
+                    traj_shape_start <= 1'b1;
+                    traj_preset <= 1'b1;
+                    lat_verb <= V_CONFIG;
+                    lat_seq <= 0;
+                end
+                // Last assignments win even on the exact configuration commit
+                // cycle. Let a pending compiler drain, but revoke auto-start.
+                // A valid STOP is acknowledged even during button preparation.
+                if (loc_next || loc_stop ||
+                    (loc_play && (button_busy || run_state != R_IDLE)) ||
+                    (button_busy && button_count == BUTTON_CYCLES-1) ||
+                    (frame_ok && header_ok && kind == 0 && verb == V_STOP && dec_err == C_NONE)) begin
+                    run_state <= R_IDLE;
+                    reason <= REASON_NONE;
+                    walk_stop <= 1'b1;
+                    walk_start <= 1'b0;
+                    local_auto_run <= 1'b0;
+                    button_busy <= 1'b0;
+                    if (button_busy) mode <= button_return_mode;
+                    if (frame_ok && header_ok && kind == 0 && verb == V_STOP && dec_err == C_NONE) begin
+                        reply_valid <= 1'b1;
+                        reply_kind <= 0;
+                        reply_verb <= verb;
+                        reply_seq <= seq;
+                        reply_code <= C_NONE;
+                        reply_want_state <= 1'b1;
+                    end
+                end
             end
         end
     end

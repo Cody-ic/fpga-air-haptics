@@ -9,3 +9,13 @@
 // 例外应针对综合后的首级寄存器，不能对整个输入逻辑笼统放宽约束。
 
 create_clock -name sys_clk -period 20 -waveform {0 10} [get_ports {clk}]
+
+// Bound register-to-pad latency to 10 ns for the source-synchronous shift bus.
+// Data changes a whole 20 ns cycle before/after SRCLK rises; RCLK follows
+// the last SRCLK rising edge by 40 ns. PCB/cable skew still needs measurement.
+set_output_delay -clock sys_clk -max 10 [get_ports {sr_data[*] sr_clk sr_latch}]
+// OE/clear are asynchronous controls, not bits sampled on every shift edge.
+// Budget one system cycle (20 ns) from source clock to pad. Clear is released
+// two cycles before first SRCLK; OE enables two cycles after a fresh latch.
+set_output_delay -clock sys_clk -max 0 [get_ports {sr_oe_n sr_clear_n}]
+set_output_delay -clock sys_clk -min 0 [get_ports {sr_data[*] sr_clk sr_latch sr_oe_n sr_clear_n}]

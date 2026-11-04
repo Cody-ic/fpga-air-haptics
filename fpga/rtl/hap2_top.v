@@ -18,10 +18,23 @@
 // 还需要上板确认的：相位符号、死区取值、驱动板与真实换能器。
 // 板级封装（上电复位、boot 标识、引脚约束）见 rtl/board_top.v 和 fpga/board/。
 module hap2_top #(
+    parameter integer PREVIEW_ONLY = 0,
+    parameter integer CAL_NULL_SCALED_QC = 0,
+    parameter integer BUTTON_FOCUS_ENABLE = 0,
+    parameter integer BUTTON_FOCUS_MS = 3000,
+    parameter integer BUTTON_FOCUS_Z_UM = 100000,
+    parameter integer BUTTON_FOCUS_LEVEL = 1,
+    parameter integer BUTTON_FOCUS_SHAPE = 0,
+    parameter integer BUTTON_FOCUS_RADIUS_UM = 0,
+    parameter integer BUTTON_FOCUS_REPEAT_MILLIHZ = 500,
+    parameter integer        CAL_ENABLE=0, CAL_SOURCE=0,
+    parameter integer        CAL_RESTORE_ENABLE=0,
+    parameter [511:0]        CAL_RESTORE_OFFSETS=512'd0,
+    parameter integer        CAL_Z_UM=100000, CAL_LEVEL=30,
     parameter integer        CLK_HZ       = 50_000_000,
     parameter integer        BAUD         = 115200,
     parameter integer        ADDR_W       = 13,        // 行缓冲 8192 字节
-    parameter integer        MAX_LINE     = 4096,
+    parameter integer        MAX_LINE     = 8192,
     parameter integer        HW_ROWS      = 4,
     parameter integer        HW_COLS      = 4,
     parameter integer        HW_PITCH_UM  = 11000,
@@ -72,8 +85,54 @@ module hap2_top #(
     // ---- 送给驱动电路的 16 路方波 ----
     // 半桥驱动要互补输入时用 array_neg（带死区）；单端驱动只用 array_pos
     output wire [HW_ROWS*HW_COLS-1:0] array_pos,
-    output wire [HW_ROWS*HW_COLS-1:0] array_neg
+    output wire [HW_ROWS*HW_COLS-1:0] array_neg,
+    // Optional display observer; all signals belong to clk. No feedback into control.
+    output wire [31:0] view_z_um, view_carrier_hz, view_phase_steps, view_level,
+    output wire signed [20:0] view_focus_x,view_focus_y,
+    output wire [15:0] view_revision,
+    output wire [1:0] view_run_state,
+    output wire view_active
 );
+
+    // Calibration is an isolated startup endpoint. With CAL_ENABLE=0 this
+    // entire generate branch disappears and the existing protocol is intact.
+    wire business_rst_n, cal_released, normal_tx, cal_tx, cal_output_on;
+    wire [HW_ROWS*HW_COLS-1:0] normal_pos,normal_neg,cal_pos,cal_neg;
+    wire [8*HW_ROWS*HW_COLS-1:0] cal_offsets;
+    wire signed [20:0] cal_view_x,cal_view_y;
+    wire [31:0] cal_view_z;
+    generate
+        if(CAL_RESTORE_ENABLE!=0 && (CAL_RESTORE_ENABLE!=1 || CAL_ENABLE!=1 ||
+           HW_ROWS!=8 || HW_COLS!=8 || HW_PITCH_UM!=10300)) begin : invalid_restore
+            ERROR_RESTORE_REQUIRES_CALIBRATED_R2_8X8 invalid_restore_configuration();
+        end
+        for(genvar restore_ch=0;restore_ch<64;restore_ch=restore_ch+1) begin : check_restore
+            if(CAL_RESTORE_ENABLE==1 && CAL_RESTORE_OFFSETS[8*restore_ch +: 8]>63) begin : invalid_offset
+                ERROR_RESTORED_OFFSET_OUT_OF_RANGE invalid_offset_value();
+            end
+        end
+        if(CAL_ENABLE==1 && CAL_RESTORE_ENABLE==0) begin : startup_calibration
+            hap2_cal_startup #(.CLK_HZ(CLK_HZ),.BAUD(BAUD),.ROWS(HW_ROWS),.COLS(HW_COLS),
+                .PITCH_UM(HW_PITCH_UM),.SOURCE(CAL_SOURCE),.NULL_SCALED_QC(CAL_NULL_SCALED_QC),
+                .Z_UM(CAL_Z_UM),.LEVEL(CAL_LEVEL),.DEAD_CYC(OUT_DEAD_CYC)) u_startup (
+                .clk(clk),.rst_n(rst_n),.rx_line(uart_rx_pin),.boot_id(boot_id),
+                .tx_line(cal_tx),.out_pos(cal_pos),.out_neg(cal_neg),
+                .output_on(cal_output_on),.released(cal_released),.saved_offsets(cal_offsets),
+                .view_x(cal_view_x),.view_y(cal_view_y),.view_z_um(cal_view_z));
+        end else begin : no_calibration
+            assign cal_released=1'b1;
+            assign cal_tx=1'b1;
+            assign cal_pos=0; assign cal_neg=0; assign cal_output_on=0;
+            // Reuse known measurements without pretending a fresh CAL2 round
+            // passed. Normal power-on idle, STOP and watchdog remain active.
+            assign cal_offsets=CAL_RESTORE_ENABLE==1 ? CAL_RESTORE_OFFSETS : 0;
+            assign cal_view_x=0;assign cal_view_y=0;assign cal_view_z=CAL_Z_UM;
+        end
+    endgenerate
+    assign business_rst_n=rst_n && cal_released;
+    assign uart_tx_pin=cal_released ? normal_tx : cal_tx;
+    assign array_pos=PREVIEW_ONLY ? 0 : (cal_released ? normal_pos : cal_pos);
+    assign array_neg=PREVIEW_ONLY ? 0 : (cal_released ? normal_neg : cal_neg);
 
     // ---------------- 接收通路 ----------------
     /* verilator lint_off UNUSEDSIGNAL */
@@ -93,7 +152,9 @@ module hap2_top #(
     wire [31:0]       field_value;
     wire [2:0]        field_type, field_enum;
     wire [ADDR_W:0]   field_off, field_size;
-    wire [18:0]       seen_mask;
+    wire [19:0] seen_mask;
+    wire [8*HW_ROWS*HW_COLS-1:0] rx_phase_table, cfg_phase_table;
+    wire cfg_static;
     wire [15:0]       crc_value, crc_expected;
     wire              rx_valid, rx_error;
     /* verilator lint_on UNUSEDSIGNAL */
@@ -104,13 +165,14 @@ module hap2_top #(
     wire              scan_parse_busy;
 
     hap2_rx #(
+        .CHANNELS(HW_ROWS*HW_COLS),
         .CLK_HZ   (CLK_HZ),
         .BAUD     (BAUD),
         .MAX_LINE (MAX_LINE),
         .ADDR_W   (ADDR_W)
     ) u_rx (
         .clk          (clk),
-        .rst_n        (rst_n),
+        .rst_n        (business_rst_n),
         .uart_rx_pin  (uart_rx_pin),
         .ext_rd_addr  (scan_rd_addr),
         .ext_rd_busy  (scan_parse_busy),
@@ -134,6 +196,7 @@ module hap2_top #(
         .field_enum   (field_enum),
         .field_off    (field_off),
         .field_size   (field_size),
+        .phase_table(rx_phase_table),
         .seen_mask    (seen_mask),
         .crc_value    (crc_value),
         .crc_expected (crc_expected),
@@ -185,6 +248,16 @@ module hap2_top #(
     /* verilator lint_on UNUSEDSIGNAL */
 
     hap2_cmd #(
+        .CHANNELS(HW_ROWS*HW_COLS),
+        .CLK_HZ(CLK_HZ),
+        .BUTTON_FOCUS_ENABLE(BUTTON_FOCUS_ENABLE),
+        .BUTTON_FOCUS_MS(BUTTON_FOCUS_MS),
+        .BUTTON_FOCUS_Z_UM(BUTTON_FOCUS_Z_UM),
+        .BUTTON_FOCUS_LEVEL(BUTTON_FOCUS_LEVEL),
+        .BUTTON_FOCUS_SHAPE(BUTTON_FOCUS_SHAPE),
+        .BUTTON_FOCUS_RADIUS_UM(BUTTON_FOCUS_RADIUS_UM),
+        .BUTTON_FOCUS_REPEAT_MILLIHZ(BUTTON_FOCUS_REPEAT_MILLIHZ),
+        .CAL_LIMIT   (CAL_ENABLE || CAL_RESTORE_ENABLE),
         .ADDR_W      (ADDR_W),
         .WS_X_MIN_UM (WS_X_MIN_UM),
         .WS_X_MAX_UM (WS_X_MAX_UM),
@@ -195,7 +268,7 @@ module hap2_top #(
         .LOC_RADIUS_UM (LOC_RADIUS_UM)
     ) u_cmd (
         .clk              (clk),
-        .rst_n            (rst_n),
+        .rst_n            (business_rst_n),
         .frame_ok         (frame_ok),
         .frame_bad        (frame_bad),
         .header_ok        (header_ok),
@@ -209,6 +282,7 @@ module hap2_top #(
         .field_enum       (field_enum),
         .field_off        (field_off),
         .field_size       (field_size),
+        .phase_table(rx_phase_table), .cfg_static(cfg_static), .cfg_phase_table(cfg_phase_table),
         .seen_mask        (seen_mask),
         .array_rows       ({24'h0, HW_ROWS[7:0]}),
         .array_cols       ({24'h0, HW_COLS[7:0]}),
@@ -281,7 +355,7 @@ module hap2_top #(
         .DEB_MS (KEY_DEB_MS)
     ) u_local (
         .clk        (clk),
-        .rst_n      (rst_n),
+        .rst_n      (business_rst_n),
         .key_next   (key_next),
         .key_play   (key_play),
         .key_stop   (key_stop),
@@ -307,7 +381,7 @@ module hap2_top #(
         .TICK_CYC (TICK_CYC)
     ) u_traj (
         .clk                (clk),
-        .rst_n              (rst_n),
+        .rst_n              (business_rst_n),
         .parse_start        (traj_parse_start),
         .src_off            (traj_src_off),
         .src_len            (traj_src_len),
@@ -361,7 +435,28 @@ module hap2_top #(
 
     // ---------------- 输出使能 ----------------
     // 协议规定三件事同时成立才允许输出：运行中、等级大于 0、正在扫描。
-    assign output_on = (cmd_run == 2'd1) && (cfg_level != 32'd0) && scan_on;
+    // Configuration changes only in IDLE. Register this wide comparison so it
+    // does not sit on the external output-enable path. STOP/PAUSE/scan blanking
+    // remain direct gates below; only admitting a new config is delayed one clk.
+    reg corrected_config;
+    always @(posedge clk) begin
+        if (!business_rst_n) corrected_config <= (CAL_ENABLE==0 && CAL_RESTORE_ENABLE==0);
+        else corrected_config <= (CAL_ENABLE==0 && CAL_RESTORE_ENABLE==0) ||
+                                 (cfg_carrier_hz==40000 && cfg_phase_steps==64);
+    end
+    wire normal_output_on = (cmd_run == 2'd1) && (cfg_level != 32'd0) && scan_on && corrected_config;
+    assign output_on = PREVIEW_ONLY ? 0 : (cal_released ? normal_output_on : cal_output_on);
+    assign view_focus_x = cal_released ? focus_x : cal_view_x;
+    assign view_focus_y = cal_released ? focus_y : cal_view_y;
+    assign view_z_um = cal_released ? cfg_z_um : cal_view_z;
+    assign view_carrier_hz = cal_released ? cfg_carrier_hz : 40000;
+    assign view_phase_steps = cal_released ? cfg_phase_steps : 64;
+    // CAL2 exercises selected emitters, not the ideal full-array target. Show
+    // its real output status but never label it as a computed sound field.
+    assign view_level = !cal_released || cfg_static ? 0 : cfg_level;
+    assign view_revision = cal_released ? cmd_rev : 0;
+    assign view_run_state = cal_released ? cmd_run : (cal_output_on ? 2'd1 : 2'd3);
+    assign view_active = cal_released && normal_output_on && !cfg_static;
 
     // ---------------- 相位计算 ----------------
     // 每拍更新一次：把焦点坐标变成每一路的相位码。载波换了要重算常数。
@@ -384,7 +479,7 @@ module hap2_top #(
         .ROWS (HW_ROWS), .COLS (HW_COLS), .PITCH_UM (HW_PITCH_UM), .PIPE (PH_PIPE)
     ) u_phase (
         .clk                (clk),
-        .rst_n              (rst_n),
+        .rst_n              (business_rst_n),
         .cfg_carrier_hz     (cfg_carrier_hz),
         .cfg_phase_steps    (cfg_phase_steps),
         .cfg_z_um           (cfg_z_um),
@@ -411,29 +506,40 @@ module hap2_top #(
     // ---------------- 输出级 ----------------
     // 用相位表里那张表生成 16 路方波。enable 就是「运行中 + 等级>0 + 正在扫描」，
     // 不满足时 16 路全部拉低——跳转、暂停、停止、上电复位时换能器都不能被驱动。
+    reg [7:0] cal_offset_q, static_phase_q;
+    always @(posedge clk) static_phase_q <= cfg_phase_table[8*ph_rd2_addr +: 8];
+    always @(posedge clk) begin
+        if(!business_rst_n) cal_offset_q<=0;
+        else cal_offset_q<=cal_offsets[8*ph_rd2_addr +: 8];
+    end
+    wire [7:0] nominal_phase = cfg_static ? static_phase_q : ph_rd2_data;
+    wire [7:0] effective_phase = (CAL_ENABLE || CAL_RESTORE_ENABLE) ? (nominal_phase+cal_offset_q)&8'h3f : nominal_phase;
     hap2_out #(
         .ROWS (HW_ROWS), .COLS (HW_COLS), .CLK_HZ (CLK_HZ),
         .ACC_BITS (32), .DEAD_CYC (OUT_DEAD_CYC)
     ) u_out (
         .clk                (clk),
-        .rst_n              (rst_n),
+        .rst_n              (business_rst_n),
         .cfg_carrier_hz     (cfg_carrier_hz),
         .cfg_phase_steps    (cfg_phase_steps),
         .cfg_change         (config_changed),
         .cfg_level          (cfg_level),
         .cfg_mod_hz         (cfg_mod_hz),
-        .enable             (output_on),
-        .tbl_new            (ph_done),
+        .enable             (normal_output_on && !PREVIEW_ONLY),
+        .tbl_new            (cfg_static ? config_changed : ph_done),
         .tbl_addr           (ph_rd2_addr),
-        .tbl_data           (ph_rd2_data),
-        .out_pos            (array_pos),
-        .out_neg            (array_neg)
+        .tbl_data           (effective_phase),
+        .out_pos            (normal_pos),
+        .out_neg            (normal_neg)
     );
 
     // 一帧 STATE 要发几十毫秒，期间焦点一直在动、配置也可能被换掉。协议要求这一帧里
     // 的配置、坐标、相位表来自同一瞬间，所以发送模块一开始拼 STATE，就把它们锁存下来，
     // 相位表再复制一份；复制时把「读哪一半」钉住，这边翻指针也不会读串。
-    reg  [7:0]  snap_ph [0:255];
+    reg sn_static;
+    reg [8*HW_ROWS*HW_COLS-1:0] sn_phase_table;
+    reg [8*HW_ROWS*HW_COLS-1:0] sn_offsets;
+    reg [7:0] snap_ph [0:255];
     reg  [7:0]  snap_idx;
     reg         snap_wait, snap_copy;
     reg  [8:0]  snap_count;
@@ -446,6 +552,7 @@ module hap2_top #(
     reg [2:0]  sn_reason;
     reg [15:0] sn_rev;
     reg        sn_scan;
+    reg        sn_output_on;
     reg [5:0]  sn_stroke;
     reg signed [31:0] sn_fx_um, sn_fy_um;
     reg [31:0] sn_fz_um;
@@ -453,7 +560,8 @@ module hap2_top #(
     assign ph_rd_addr = snap_idx;
 
     always @(posedge clk) begin
-        if (!rst_n) begin
+        if (!business_rst_n) begin
+            sn_static <= 0; sn_phase_table <= 0; sn_offsets <= 0;
             snap_idx  <= 8'd0;
             snap_wait <= 1'b0;
             snap_copy <= 1'b0;
@@ -467,6 +575,7 @@ module hap2_top #(
             sn_closed <= 32'd1;     sn_blank <= 32'd2000;
             sn_shape  <= 3'd3;      sn_mode  <= 2'd1;
             sn_run    <= 2'd0;      sn_reason<= 3'd0;
+            sn_output_on<=1'b0;
             sn_rev    <= 16'd0;     sn_scan  <= 1'b0;
             sn_stroke <= 6'd0;
             sn_fx_um  <= 32'sd0;
@@ -475,6 +584,8 @@ module hap2_top #(
         end else begin
             if (state_capture) begin
                 // 锁存这一瞬间：配置、状态、扫描开关
+                sn_static <= cfg_static; sn_phase_table <= cfg_phase_table;
+                sn_offsets <= (CAL_ENABLE || CAL_RESTORE_ENABLE) ? cal_offsets : 0;
                 sn_carrier <= cfg_carrier_hz; sn_steps <= cfg_phase_steps;
                 sn_cx      <= cfg_cx_um;      sn_cy    <= cfg_cy_um;
                 sn_z       <= cfg_z_um;       sn_radius<= cfg_radius_um;
@@ -483,6 +594,7 @@ module hap2_top #(
                 sn_blank   <= cfg_blank_us;   sn_shape <= cfg_shape;
                 sn_mode    <= cmd_mode;       sn_run   <= cmd_run;
                 sn_reason  <= cmd_reason;     sn_rev   <= cmd_rev;
+                sn_output_on<=normal_output_on && !PREVIEW_ONLY;
                 sn_scan    <= scan_on;        sn_stroke<= stroke_index;
                 // 明确扩为 32 位有符号数，再换单位；和相位表同拍锁存。
                 sn_fx_um <= $signed({{11{ph_pub_fx[20]}}, ph_pub_fx}) >>> 1;
@@ -490,14 +602,14 @@ module hap2_top #(
                 sn_fz_um <= ph_pub_fz_um;
                 // 相位表：钉住现在对外的哪一半，从头复制一遍
                 snap_sel   <= ph_pub_sel;
-                snap_phase_valid <= ph_pub_valid;
+                snap_phase_valid <= cfg_static || ph_pub_valid;
                 snap_idx   <= 8'd0;
                 snap_wait  <= 1'b0;
                 snap_copy  <= 1'b1;
                 snap_count <= HW_ROWS * HW_COLS;
             end else if (snap_copy) begin
                 if (snap_wait) begin
-                    snap_ph[snap_idx] <= snap_phase_valid ? ph_rd_data : 8'd0;
+                    snap_ph[snap_idx] <= !snap_phase_valid ? 8'd0 : (CAL_ENABLE || CAL_RESTORE_ENABLE) ? ((sn_static ? sn_phase_table[8*snap_idx +: 8] : ph_rd_data)+sn_offsets[8*snap_idx +: 8])&8'h3f : (sn_static ? sn_phase_table[8*snap_idx +: 8] : ph_rd_data);
                     snap_wait <= 1'b0;
                     if ({1'b0, snap_idx} + 9'd1 >= snap_count) snap_copy <= 1'b0;
                     else                                       snap_idx  <= snap_idx + 8'd1;
@@ -517,13 +629,40 @@ module hap2_top #(
     reg [7:0] snap_rd_data;
     always @(posedge clk) snap_rd_data <= snap_ph[phase_addr];
 
+    // Copy path text before UART serialization. A CONFIG arriving while an
+    // earlier STATE is being sent must not splice new text into the old revision.
+    reg [7:0] snap_text [0:4095];
+    reg [12:0] text_copy_idx, sn_text_len;
+    reg text_copy, text_wait, sn_text_valid;
+    wire [11:0] tx_text_addr;
+    reg [7:0] tx_text_data;
+    assign txt_addr = text_copy_idx[11:0];
+    always @(posedge clk) begin
+        tx_text_data <= snap_text[tx_text_addr];
+        if (!business_rst_n) begin
+            text_copy_idx <= 0; sn_text_len <= 0;
+            text_copy <= 0; text_wait <= 0; sn_text_valid <= 0;
+        end else if (state_capture) begin
+            text_copy_idx <= 0; text_wait <= 0;
+            sn_text_len <= txt_len; sn_text_valid <= txt_valid;
+            text_copy <= txt_valid && txt_len != 0;
+        end else if (text_copy) begin
+            if (text_wait) begin
+                snap_text[text_copy_idx[11:0]] <= txt_data;
+                text_wait <= 0;
+                if (text_copy_idx+1 >= sn_text_len) text_copy <= 0;
+                else text_copy_idx <= text_copy_idx+1'b1;
+            end else text_wait <= 1;
+        end
+    end
+
     // ---------------- 应答组装与发送 ----------------
     reg        state_push;      // 单拍：主动插一份状态快照
     reg [31:0] state_ms;
 
     // 主动上报：上位机就靠它刷新界面。没握手之前不发，免得对着空气广播。
     always @(posedge clk) begin
-        if (!rst_n) begin
+        if (!business_rst_n) begin
             state_push <= 1'b0;
             state_ms   <= 32'd0;
         end else if (STATE_MS == 0) begin
@@ -541,6 +680,8 @@ module hap2_top #(
     end
 
     hap2_tx #(
+        .CHANNELS(HW_ROWS*HW_COLS), .CAL_PROFILE(CAL_RESTORE_ENABLE ? 2 : CAL_ENABLE ? 1 : 0),
+        .PREVIEW_ONLY(PREVIEW_ONLY), .HB_MS(HB_MS),
         .CLK_HZ (CLK_HZ),
         .BAUD   (BAUD),
         .DIGITS (10),
@@ -553,8 +694,8 @@ module hap2_top #(
         .WS_Z_MAX_UM (WS_Z_MAX_UM)
     ) u_tx (
         .clk              (clk),
-        .rst_n            (rst_n),
-        .tx_line          (uart_tx_pin),
+        .rst_n            (business_rst_n),
+        .tx_line          (normal_tx),
         .busy             (tx_busy),
         .reply_valid      (reply_valid),
         .reply_kind       (reply_kind),
@@ -571,10 +712,11 @@ module hap2_top #(
         .mode             (sn_mode),
         .run_state        (sn_run),
         .reason           (sn_reason),
-        .output_on        (sn_run == 2'd1 && sn_level != 32'd0 && sn_scan),
+        .output_on        (sn_output_on),
         .hw_rows          (HW_ROWS[7:0]),
         .hw_cols          (HW_COLS[7:0]),
         .hw_pitch_um      (HW_PITCH_UM),
+        .cfg_static(sn_static), .static_table(sn_phase_table), .offset_table(sn_offsets),
         .cfg_carrier_hz   (sn_carrier),
         .cfg_phase_steps  (sn_steps),
         .cfg_cx_um        (sn_cx),
@@ -598,10 +740,10 @@ module hap2_top #(
         .stroke_index     (sn_stroke),
         .phase_addr       (phase_addr),
         .phase_data       (snap_rd_data),
-        .txt_addr         (txt_addr),
-        .txt_data         (txt_data),
-        .txt_len          (txt_len),
-        .txt_valid        (txt_valid)
+        .txt_addr         (tx_text_addr),
+        .txt_data         (tx_text_data),
+        .txt_len          (sn_text_len),
+        .txt_valid        (sn_text_valid)
     );
 
     // ---------------- 主机心跳 ----------------
@@ -610,7 +752,7 @@ module hap2_top #(
         .HB_MS  (HB_MS)
     ) u_wd (
         .clk        (clk),
-        .rst_n      (rst_n),
+        .rst_n      (business_rst_n),
         .host_frame (frame_ok),
         .mode       (cmd_mode),
         .run_state  (cmd_run),

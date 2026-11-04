@@ -14,11 +14,11 @@
 module tb_board;
 
     localparam integer CLK_HZ       = 50_000_000;
-    localparam integer BAUD         = 115200;
+    localparam integer BAUD         = 2000000;       // Accelerated UART; production remains 115200.
     localparam integer CLK_NS       = 20;            // 50 MHz
     localparam integer CLKS_PER_BIT = CLK_HZ / BAUD; // 434
     localparam integer POR_MS       = 1;             // 仿真里缩到 1 ms
-    localparam integer ARRAY_N      = 16;            // board_top 默认 4x4
+    localparam integer ARRAY_N      = 64;            // Current R2 board is fixed 8x8.
 
     reg clk;
     initial clk = 1'b0;
@@ -35,9 +35,9 @@ module tb_board;
     board_top #(
         .CLK_HZ      (CLK_HZ),
         .BAUD        (BAUD),
-        .HW_ROWS     (4),          // 和 board_top 默认一致：4x4 = 16 路
-        .HW_COLS     (4),
-        .HW_PITCH_UM (10000),
+        .HW_ROWS     (8),
+        .HW_COLS     (8),
+        .HW_PITCH_UM (10300),
         .POR_MS      (POR_MS),
         .KEY_DEB_MS  (2),          // 仿真里按键消抖也缩短（逻辑相同）
         .STATE_MS    (0)           // 关掉主动上报，好一条一条数报文
@@ -48,9 +48,10 @@ module tb_board;
         .key1_n      (key1_n),
         .uart_rx_pin (uart_line),
         .uart_tx_pin (uart_tx_pin),
-        .array_pos   (array_pos),
         .led         (led)
     );
+    // R2 exposes shift-register pins; inspect the internal 64-channel bus.
+    assign array_pos = dut.array_pos;
 
     // ---------------- 板子发出来的字节 ----------------
     wire [7:0] board_byte;
@@ -236,7 +237,7 @@ module tb_board;
             $display("[板级] 上电复位期间驱动输出不是低电平  **失败**");
             errors = errors + 1;
         end else begin
-            $display("  上电复位：前 0.5 ms 里 16 路输出全部保持低电平");
+            $display("  上电复位：前 0.5 ms 里 64 路输出全部保持低电平");
         end
 
         // ---- 2. 等复位放开，握手一次 ----
@@ -266,7 +267,7 @@ module tb_board;
             $display("[板级] 按复位键之后输出没关掉  **失败**");
             errors = errors + 1;
         end else begin
-            $display("  复位键：按下之后 16 路输出立刻回到低电平");
+            $display("  复位键：按下之后 64 路输出立刻回到低电平");
         end
         key_rst_n = 1'b1;                     // 松开 → POR 再等 1 ms 才放开
         repeat (60000) @(negedge clk);

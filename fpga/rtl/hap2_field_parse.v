@@ -12,6 +12,7 @@
 // 读行缓冲和 hap2_frame_check 一样：rd_data 比 rd_addr 晚一拍，
 // 所以用 idx 记录「当前 rd_data 上是第几个字节」，rd_addr 始终是 idx+1。
 module hap2_field_parse #(
+    parameter integer CHANNELS = 16,
     parameter integer ADDR_W = 13      // 行缓冲 8192 字节，地址 13 位
 ) (
     input  wire              clk,
@@ -37,7 +38,8 @@ module hap2_field_parse #(
     output reg  [2:0]        field_enum,  // 图形名/映射名/控制模式的编号
     output reg  [ADDR_W:0]   field_off,   // 字符串类字段在行缓冲里的起点
     output reg  [ADDR_W:0]   field_size,  // 字符串类字段的长度
-    output reg  [18:0]       seen_mask    // 已经出现过的字段，按编号置位（共 19 个）
+    output reg [8*CHANNELS-1:0] phase_table,
+    output reg  [19:0]       seen_mask    // 已经出现过的字段，按编号置位（共 19 个）
 );
 
     // ---------------- 错误分类 ----------------
@@ -74,7 +76,7 @@ module hap2_field_parse #(
     localparam [4:0] F_BLANK_US    = 5'd18;   // HAP3：段间关输出的跳转时长
 
     // CONFIG 必须带齐的 18 个字段；第 16 位是 MODE 的 value，不属于 CONFIG
-    localparam [18:0] CONFIG_MASK = {3'b110, 16'hFFFF};
+    localparam [19:0] CONFIG_MASK = {3'b110, 16'hFFFF};
 
     // ---------------- 命令编号 ----------------
     localparam [3:0] V_NONE   = 4'hF;
@@ -98,6 +100,8 @@ module hap2_field_parse #(
     localparam [2:0] T_SHAPE   = 3'd1;
     localparam [2:0] T_MAPPING = 3'd2;
     localparam [2:0] T_PATH    = 3'd3;
+    localparam [4:0] F_PHASE_TABLE = 5'd19;
+    localparam [2:0] T_HEX = 3'd5;
     localparam [2:0] T_MODE    = 3'd4;   // LOCAL / REMOTE
 
     // ---------------- 常用字符 ----------------
@@ -208,6 +212,7 @@ module hap2_field_parse #(
         input [4:0] id;
         begin
             case (id)
+                F_PHASE_TABLE: type_of = T_HEX;
                 F_SHAPE:   type_of = T_SHAPE;
                 F_MAPPING: type_of = T_MAPPING;
                 F_PATH_XY: type_of = T_PATH;
@@ -281,7 +286,7 @@ module hap2_field_parse #(
     reg [3:0]      acc_digits;
     reg [ADDR_W:0] val_start;
 
-    wire [18:0] key_hit;
+    wire [19:0] key_hit;
     wire        hit_any;
     wire [4:0]  hit_id;
 
@@ -311,7 +316,7 @@ module hap2_field_parse #(
     endtask
 
     // 键名查表
-    assign key_hit = {
+    assign key_hit[18:0] = {
         (key_buf == K_BLANK_US),
         (key_buf == K_SCAN_PATHS),
         (key_buf == K_VALUE),
@@ -332,6 +337,7 @@ module hap2_field_parse #(
         (key_buf == K_PHASE_STEPS),
         (key_buf == K_CARRIER_HZ)
     };
+    assign key_hit[19] = (key_buf == "phase_table");
     assign hit_any = |key_hit;
     assign hit_id  = key_hit[0]  ? F_CARRIER_HZ
                    : key_hit[1]  ? F_PHASE_STEPS
@@ -352,6 +358,7 @@ module hap2_field_parse #(
                    : key_hit[16] ? F_VALUE
                    : key_hit[17] ? F_SCAN_PATHS
                    : key_hit[18] ? F_BLANK_US
+                   : key_hit[19] ? F_PHASE_TABLE
                    : 5'h1F;
 
     // 键名比较是 19 个 128 位比较器并联，再串 19 级优先选择链（hit_id）。
@@ -395,7 +402,8 @@ module hap2_field_parse #(
             field_enum    <= 3'd0;
             field_off     <= 0;
             field_size    <= 0;
-            seen_mask     <= 19'h00000;
+            seen_mask     <= 20'h00000;
+            phase_table <= 0;
             fail_flag     <= 1'b0;
             magic_cnt     <= 2'd0;
             kind_buf      <= 24'h0;
@@ -430,7 +438,8 @@ module hap2_field_parse #(
                         err_code     <= E_NONE;
                         bad_field    <= 5'h1F;
                         header_ok    <= 1'b0;
-                        seen_mask    <= 19'h00000;
+                        seen_mask    <= 20'h00000;
+                        phase_table <= 0;
                         magic_cnt    <= 2'd0;
                         kind_buf     <= 24'h0;
                         kind_cnt     <= 2'd0;
@@ -620,6 +629,9 @@ module hap2_field_parse #(
 
                         if (cur_known) begin
                             case (type_of(cur_key))
+                                T_HEX: begin
+                                    if (idx-val_start != 2*CHANNELS) fail(E_RANGE, cur_key);
+                                end
                                 T_NUMBER: begin
                                     if (acc_digits == 0) begin
                                         fail(E_NUMBER, cur_key);
@@ -676,6 +688,7 @@ module hap2_field_parse #(
                                     field_valid <= 1'b1;
                                     field_type  <= T_PATH;
                                     field_id    <= cur_key;
+                                    field_enum  <= (idx-val_start == 4 && enum_buf == "NONE") ? 3'd0 : 3'd1;
                                     field_off   <= val_start;
                                     field_size  <= idx - val_start;
                                 end
@@ -687,6 +700,18 @@ module hap2_field_parse #(
                         step;                                        // 未知键的值，跳过
                     end else begin
                         case (type_of(cur_key))
+                            T_HEX: begin
+                                if (idx-val_start >= 2*CHANNELS ||
+                                    (!is_digit(rd_data) && !(rd_data >= "A" && rd_data <= "F")) ||
+                                    (!(idx[0]^val_start[0]) && rd_data > "3"))
+                                    fail(E_RANGE, cur_key);
+                                else begin
+                                    // Channel 0 is the first byte, high nibble first.
+                                    phase_table[8*((idx-val_start)>>1) + ((idx[0]^val_start[0]) ? 0 : 4) +: 4]
+                                        <= is_digit(rd_data) ? rd_data[3:0] : rd_data[3:0]+4'd9;
+                                    step;
+                                end
+                            end
                             T_NUMBER: begin
                                 if ((rd_data == CH_MINUS || rd_data == CH_PLUS)
                                         && acc_digits == 0 && val_start == idx) begin
@@ -707,6 +732,7 @@ module hap2_field_parse #(
                             end
 
                             default: begin                               // T_PATH
+                                enum_buf <= {enum_buf[119:0], rd_data};
                                 step;
                             end
                         endcase

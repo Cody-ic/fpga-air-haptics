@@ -92,6 +92,19 @@ class Decoder:
                     frames.append((decode(raw), raw))
                 except ValueError as error:
                     errors.append(str(error))
+                    # A lost newline/fragment must not consume the next complete
+                    # reply (observed on the board as partial PING + CONFIG ACK).
+                    # Accept only a new header whose entire suffix passes the
+                    # normal version, syntax and CRC checks; never repair bytes.
+                    start = raw.rfind(MAGIC.encode('ascii') + b' ')
+                    if start > 0:
+                        recovered = raw[start:]
+                        try:
+                            frame = decode(recovered)
+                        except ValueError:
+                            pass
+                        else:
+                            frames.append((frame, recovered))
         return frames, errors
 
 
@@ -148,6 +161,13 @@ class Snapshot:
         offsets = tuple(int(v) for v in fields.get('phase_offsets', ','.join(['0']*array.count)).split(','))
         if not 0 < mask < (1 << array.count) or len(offsets) != array.count or any(not 0 <= v < config.phase_steps for v in offsets):
             raise ValueError('通道校准回读无效')
+        static = config.phase_table != "NONE"
+        if fields.get("static_mode", "0") != str(int(static)):
+            raise ValueError("静态输出标志与相位表不一致")
+        if static:
+            nominal = config.static_phases(array)
+            if "phase_offsets" not in fields or phases != tuple((p+o) % 64 for p,o in zip(nominal, offsets)):
+                raise ValueError("静态相位回读与补偿表不一致")
         if min(counters) < 0 or not fields["boot"]:
             raise ValueError("状态计数非法")
         return cls(fields["boot"], *counters, fields["mode"], fields["state"], output,
